@@ -77,6 +77,13 @@ These are load-bearing for the dashboard and easy to get wrong:
   mutation `{"id", "action"}` bodies are listed with no content schema
   (`content?: never` in `g2way.d.ts`), so `src/lib/g2/errors.ts` types the error
   envelope itself (`GatewayError`) and create calls resolve to `undefined`.
+- **`/g2/node` describes one pod, and not every API fully.** It is the live
+  route table of whichever replica answered, so behind a Service each call may
+  come from a different pod. For a _versioned_ API its `live_targets` are the
+  unused base target and `target_health`, `circuit_breaker`,
+  `service_discovery` and `graphql_schema_sync` are null — each version keeps
+  its own, and none of that is surfaced. Its body is hand-typed in
+  `src/lib/g2/node.ts` (see `UPSTREAM.md`).
 
 ## Keeping this file honest
 

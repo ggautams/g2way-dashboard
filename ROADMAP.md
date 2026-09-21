@@ -37,7 +37,7 @@ toolchain to regenerate its types.
       error envelope through untouched
 - [x] Typed gateway client over `contracts/g2way.d.ts` (no hand-written types)
 - [x] App shell: nav, dark mode, command palette, toasts
-- [ ] Gateway page from `/g2/node` + `/g2/version` + `/g2/health`: live route
+- [x] Gateway page from `/g2/node` + `/g2/version` + `/g2/health`: live route
       table, per-target health, circuit-breaker state, service-discovery and
       GraphQL schema-sync status
 - [ ] Degraded-mode banner when the gateway is unreachable (the dashboard must
@@ -266,3 +266,24 @@ target atomic`), verified by breaking the build and confirming the spec
   absence of the secret from the page and `.next/static` were checked with a
   production build. There's no environment switcher in the shell yet, although
   the BFF already honours `X-G2-Environment`. Next: the gateway page.
+
+- M1 Gateway page landed at `/gateway` (nav flag flipped). A
+  Server Component loads `/g2/health`, `/g2/version` and `/g2/node` in parallel
+  through `loadGatewayStatus()` (`src/lib/g2/gateway-status.ts`, `server-only`),
+  which settles each call on its own: one failing endpoint degrades its panel,
+  not the page, and the gateway's message shows verbatim. Health is
+  unauthenticated, so "health passes, node 403" is shown as a refused admin
+  secret. The page has summary cards (health, version, uptime, route count plus
+  unhealthy targets / open circuits / sync errors), the live route table (per-target
+  health dots, breaker state, discovery and GraphQL-sync last success/error), an
+  environment picker (`?env=`) when more than one is configured, and a client
+  `AutoRefresh` that calls `router.refresh()` every 10 s (pausable, idle while
+  the tab is hidden), so the browser still never talks to the gateway. New
+  `warning` colour token; `src/lib/format.ts` for durations and ages.
+  **Surprise:** none of the three endpoints has a response schema upstream —
+  `/g2/node` is a bare `json!` — so, as with the error envelope, the shapes are
+  hand-typed in `src/lib/g2/node.ts` with a runtime parser whose
+  `PayloadShapeError` names the exact field that moved. New `UPSTREAM.md` item
+  asks for `ToSchema` types. Smoke-tested with `next start` against a fake
+  gateway (happy path, then wrong-secret path; secret absent from the HTML); no
+  browser pass. Next: the degraded-mode banner when the gateway is unreachable.

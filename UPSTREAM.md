@@ -48,6 +48,16 @@ commit this project is waiting on.
       the utoipa `responses(...)` annotations in `crates/g2-admin`. _Shapes M3/M4
       save flows; not a blocker._
 
+- [ ] **`/g2/node`, `/g2/version` and `/g2/health` have no response schema.**
+      `/g2/node` is an untyped `serde_json::json!` in
+      `crates/g2-admin/src/dashboard.rs`, and all three `responses(...)` omit
+      `body = …`, so `g2way.d.ts` types them `content?: never`. The Gateway page
+      therefore hand-types them in `src/lib/g2/node.ts` and parses every body at
+      runtime (`PayloadShapeError` names the field that moved). Needs `ToSchema`
+      structs (`NodeInfo`, `NodeRoute`, `SyncStatus`, a `BreakerState` enum) plus
+      `body = …` upstream; then delete the hand-written types and keep the
+      parser only if it still earns its place. _Not a blocker._
+
 - [ ] **`/g2/stats` is process-local** and resets on restart, so with more than
       one replica it is a per-pod sample rather than a cluster total. Cluster-wide
       numbers must come from the analytics feed or Prometheus. Shapes M6; not a

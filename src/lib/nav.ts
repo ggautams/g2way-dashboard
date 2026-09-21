@@ -39,7 +39,7 @@ export const NAV: readonly NavGroup[] = [
         description: 'Routes, target health, circuit breakers',
         keywords: ['node', 'health', 'version', 'routes'],
         milestone: 'M1',
-        ready: false,
+        ready: true,
       },
     ],
   },
