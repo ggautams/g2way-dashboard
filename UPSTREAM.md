@@ -48,3 +48,7 @@ commit this project is waiting on.
 ## 2026-09-10 — g2way (none) → 9f0b811
 
 Initial lock against g2way `9f0b81166d0903f09e265acc8769b33a589e7173`. All 12 watched areas recorded; no drift to report yet.
+
+## 2026-09-10 — g2way 9f0b811 → 66aa49b
+
+Watched areas changed: ****
