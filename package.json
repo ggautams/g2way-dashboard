@@ -11,6 +11,7 @@
     "test": "vitest run",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check .",
+    "check:bundle": "node scripts/check-client-bundle.mjs",
     "check:g2way": "node scripts/check-g2way.mjs",
     "sync:g2way": "node scripts/sync-g2way.mjs"
   },

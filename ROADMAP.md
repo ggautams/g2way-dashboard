@@ -42,7 +42,7 @@ toolchain to regenerate its types.
       GraphQL schema-sync status
 - [x] Degraded-mode banner when the gateway is unreachable (the dashboard must
       still render, and say why it can't reach it)
-- [ ] Test: the admin secret appears nowhere in the client bundle
+- [x] Test: the admin secret appears nowhere in the client bundle
 
 ## M2 — Identity, RBAC & audit
 
@@ -305,3 +305,20 @@ target atomic`), verified by breaking the build and confirming the spec
   request, so no page can be statically prerendered. That's fine today (all pages
   are dynamic already), but revisit if a static page is ever wanted. Next: the
   client-bundle secret test, which finishes M1.
+
+- M1 complete: the client-bundle secret test landed as
+  `scripts/check-client-bundle.mjs` (`npm run check:bundle`, `make bundle-check`,
+  now in `make check` in place of the plain `build` step, since it builds). It
+  builds with random canary secrets for both config forms, then scans every file
+  in `.next/static/` for the canaries, the secret variable names and
+  `X-G2-Authorization`. Then it runs `next start` once per form against a dead
+  port and fetches every page as HTML and as an RSC payload (`RSC: 1`), which
+  catches a secret passed through props that no static scan can see. It never
+  prints a canary, only which variable's canary leaked. Mutation-tested both ways:
+  rendering `resolveEnvironment().secret` from a Server Component fails on every
+  page in both forms, and the header name in a client component fails the static
+  scan. **Surprise:** a first mutation guarded by `typeof window === 'undefined'`
+  passed the scan because the bundler compiles that branch out, which is correct.
+  **Keep up to date:** `PAGES` in the script lists the routes to render. Add each
+  new page there as it lands (dynamic segments need a concrete example). Next:
+  M2, the Drizzle schema and migrations.
