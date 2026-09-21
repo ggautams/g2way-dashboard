@@ -88,6 +88,22 @@ describe('sign-in audit', () => {
     });
   });
 
+  it('records a throttled attempt as denied, noting the password was not checked', async () => {
+    const { database, signIns } = await withOwner();
+    await recordSignIn(database, ORG, 'Ada@Example.com', {
+      ok: false,
+      reason: 'throttled',
+      kind: 'client',
+    });
+    expect((await signIns())[0]).toMatchObject({
+      actorId: null,
+      target: 'ada@example.com',
+      outcome: 'denied',
+      error: 'too many failed sign-in attempts',
+      note: 'throttled per client; the password was not checked',
+    });
+  });
+
   it('logs loudly instead of blocking sign-in when the row cannot be written', async () => {
     const { database, owner } = await withOwner();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});

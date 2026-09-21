@@ -18,17 +18,20 @@ import { getCurrentUser } from './session';
  * client module imports this file (`client-boundary.test.ts`).
  */
 
+/** What each `CredentialsSignin` code from `authorize` (`src/auth.ts`) tells the user. */
+const SIGN_IN_ERRORS: Record<string, string> = {
+  credentials: 'Invalid email or password.',
+  disabled: 'This account is disabled.',
+  throttled: 'Too many failed sign-in attempts. Wait a few minutes and try again.',
+};
+
 async function signInOrExplain(email: string, password: string): Promise<FormState> {
   try {
     // Throws Next's redirect on success, which must propagate.
     await signIn('credentials', { email, password, redirectTo: '/' });
   } catch (error) {
     if (error instanceof CredentialsSignin) {
-      return {
-        error:
-          error.code === 'disabled' ? 'This account is disabled.' : 'Invalid email or password.',
-        email,
-      };
+      return { error: SIGN_IN_ERRORS[error.code] ?? SIGN_IN_ERRORS.credentials, email };
     }
     if (error instanceof AuthError) return { error: error.message, email };
     throw error;

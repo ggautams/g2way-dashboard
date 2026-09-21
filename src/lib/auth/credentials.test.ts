@@ -2,8 +2,9 @@ import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { migrateDatabase, openDatabase, type SqliteDatabase } from '@/lib/db';
 import { createFirstOwner } from '@/lib/db/users';
-import { checkCredentials, resolveSessionUser } from './credentials';
+import { attemptSignIn, checkCredentials, resolveSessionUser } from './credentials';
 import { hashPassword } from './password';
+import { THROTTLE_POLICY } from './throttle';
 
 // Stand-in org: the real one always comes from config (G2_ORG_ID), never a literal.
 const ORG = 'org-under-test';
@@ -93,5 +94,45 @@ describe('resolveSessionUser', () => {
     ).toBeNull();
     database.db.delete(database.schema.users).run();
     expect(await resolveSessionUser(database, ORG, { userId: owner.id, orgId: ORG })).toBeNull();
+  });
+});
+
+describe('attemptSignIn (throttled)', () => {
+  const EMAIL_LIMIT = THROTTLE_POLICY.limits.email;
+  const wrong = { email: 'ada@example.com', password: 'wrong password!', client: '192.0.2.1' };
+
+  it('refuses even the right password once the email has too many failures', async () => {
+    const { database } = await withOwner();
+    for (let i = 0; i < EMAIL_LIMIT; i += 1) {
+      expect(await attemptSignIn(database, ORG, { ...wrong, client: `192.0.2.${i}` })).toEqual({
+        ok: false,
+        reason: 'invalid',
+      });
+    }
+    expect(
+      await attemptSignIn(database, ORG, { ...wrong, password: PASSWORD, client: '198.51.100.9' }),
+    ).toEqual({ ok: false, reason: 'throttled', kind: 'email' });
+  });
+
+  it('clears the email count on a right password, so failures must be consecutive', async () => {
+    const { database, owner } = await withOwner();
+    for (let round = 0; round < 2; round += 1) {
+      for (let i = 0; i < EMAIL_LIMIT - 1; i += 1) await attemptSignIn(database, ORG, wrong);
+      expect(await attemptSignIn(database, ORG, { ...wrong, password: PASSWORD })).toEqual({
+        ok: true,
+        user: owner,
+      });
+    }
+  });
+
+  it('does not count a disabled account (the password was right)', async () => {
+    const { database, disable } = await withOwner();
+    disable();
+    for (let i = 0; i < EMAIL_LIMIT + 1; i += 1) {
+      expect(await attemptSignIn(database, ORG, { ...wrong, password: PASSWORD })).toEqual({
+        ok: false,
+        reason: 'disabled',
+      });
+    }
   });
 });

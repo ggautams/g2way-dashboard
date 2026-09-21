@@ -3,7 +3,8 @@ import 'server-only';
 import NextAuth, { CredentialsSignin } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import { recordSignIn } from '@/lib/auth/audit';
-import { checkCredentials } from '@/lib/auth/credentials';
+import { attemptSignIn } from '@/lib/auth/credentials';
+import { clientAddress } from '@/lib/auth/throttle';
 import { getDatabase } from '@/lib/db';
 import { getOrgId } from '@/lib/g2/environments';
 
@@ -22,6 +23,11 @@ class AccountDisabled extends CredentialsSignin {
   code = 'disabled';
 }
 
+/** Too many recent failures for this email or client; the password was not checked. */
+class SignInThrottled extends CredentialsSignin {
+  code = 'throttled';
+}
+
 /** An admin console: a stolen cookie should not outlive a working day. */
 const SESSION_MAX_AGE_S = 12 * 60 * 60;
 
@@ -29,13 +35,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Credentials({
       credentials: { email: { type: 'email' }, password: { type: 'password' } },
-      async authorize(credentials) {
+      // `request` carries the browser's headers, also when `signIn()` runs in
+      // a server action (Auth.js copies them from `next/headers`).
+      async authorize(credentials, request) {
         const { email, password } = credentials;
         if (typeof email !== 'string' || typeof password !== 'string') return null;
-        const result = await checkCredentials(getDatabase(), getOrgId(), email, password);
+        const client = clientAddress(request.headers);
+        const result = await attemptSignIn(getDatabase(), getOrgId(), { email, password, client });
         await recordSignIn(getDatabase(), getOrgId(), email, result);
         if (!result.ok) {
           if (result.reason === 'disabled') throw new AccountDisabled();
+          if (result.reason === 'throttled') throw new SignInThrottled();
           return null;
         }
         return { id: result.user.id, email: result.user.email, name: result.user.name };

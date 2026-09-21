@@ -15,6 +15,13 @@
       "when": 1790188963900,
       "tag": "0001_audit_outcomes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790192252632,
+      "tag": "0002_login_failures",
+      "breakpoints": true
     }
   ]
 }

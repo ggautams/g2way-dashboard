@@ -50,6 +50,17 @@ export async function recordSignIn(
     });
     return;
   }
+  if (result.reason === 'throttled') {
+    await recordLoudly(handle, orgId, {
+      actor: null,
+      action: 'auth.sign_in',
+      target: attemptedEmail(email),
+      outcome: 'denied',
+      error: 'too many failed sign-in attempts',
+      notes: [`throttled per ${result.kind}; the password was not checked`],
+    });
+    return;
+  }
   await recordLoudly(handle, orgId, {
     actor: null,
     action: 'auth.sign_in',

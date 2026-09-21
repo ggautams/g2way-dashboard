@@ -16,6 +16,13 @@ export type Role = (typeof ROLES)[number];
 export const AUDIT_OUTCOMES = ['pending', 'success', 'failure', 'denied'] as const;
 export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
 
+/**
+ * What a failed sign-in is counted against (sign-in throttling): the address
+ * tried, and the client it came from.
+ */
+export const THROTTLE_KINDS = ['email', 'client'] as const;
+export type ThrottleKind = (typeof THROTTLE_KINDS)[number];
+
 /** Stand-in type for audit before/after snapshots: any JSON value. */
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };

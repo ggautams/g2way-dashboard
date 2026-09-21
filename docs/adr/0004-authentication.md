@@ -81,6 +81,21 @@ through. Roles are stored now but enforced by the next task.
    action's `Origin`. Failed sign-ins say "Invalid email or password"; "This
    account is disabled" is shown only after the password is proven correct.
 
+8. **Failed sign-ins are throttled in the database** (_added 2026-09-23_,
+   `src/lib/auth/throttle.ts`). Each wrong password writes a `login_failures`
+   row against the email tried and against the client address; once either
+   has too many in a sliding 15-minute window (10 per email, 30 per client),
+   attempts are refused before any password work and audited as `denied`. A
+   refused attempt is not counted, so a lockout never extends itself; unknown
+   emails count like real ones; a right password clears only its email's
+   count. The client address is the last `X-Forwarded-For` entry, which
+   Next.js fills from the socket and a trusted proxy appends, so it is
+   forgeable only when the dashboard is exposed directly; the per-email limit
+   is the guard that holds either way. Database rather than memory, so limits
+   survive restarts and hold across replicas. There is no permanent lockout:
+   an attacker who knows an address can keep that account throttled while
+   they keep failing, and the audit log is where an owner sees it.
+
 ## Consequences
 
 - `scripts/check-client-bundle.mjs` has to sign in to scan anything real. It
@@ -90,5 +105,5 @@ through. Roles are stored now but enforced by the next task.
   scanning. `AUTH_SECRET` is a canary alongside the gateway secrets.
 - Losing `AUTH_SECRET` or rotating it signs everyone out. That is the only
   session-revocation lever besides disabling users.
-- Not built yet: login rate limiting or lockout, password change and reset,
-  and auditing of sign-in and bootstrap (the audit task).
+- Not built yet: password change and reset. (Sign-in and bootstrap auditing
+  landed with ADR-0006; sign-in throttling is §8.)

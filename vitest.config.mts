@@ -2,6 +2,11 @@ import { defineConfig } from 'vitest/config';
 import { resolve } from 'node:path';
 
 export default defineConfig({
+  test: {
+    // The first PGlite handle in each worker compiles Postgres' WASM build, which
+    // under a full parallel run can take longer than the 5s default on its own.
+    testTimeout: 20_000,
+  },
   resolve: {
     alias: {
       // tsconfig's `@/*` path, as Next.js resolves it.

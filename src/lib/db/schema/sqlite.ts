@@ -1,5 +1,5 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
-import { AUDIT_OUTCOMES, ROLES, monotonicUuid, type JsonValue } from './shared';
+import { AUDIT_OUTCOMES, ROLES, THROTTLE_KINDS, monotonicUuid, type JsonValue } from './shared';
 
 /**
  * The dashboard schema for SQLite (the default database). Mirrors `pg.ts`
@@ -67,4 +67,24 @@ export const auditLog = sqliteTable(
     createdAt: timestamp('created_at'),
   },
   (t) => [index('audit_log_org_created_idx').on(t.orgId, t.createdAt)],
+);
+
+/**
+ * One row per failed sign-in, per thing it counts against (`kind`: the email
+ * tried, or the client address), for sign-in throttling
+ * (`src/lib/auth/throttle.ts`). Rows older than the throttle window are pruned
+ * as new failures are written; a successful sign-in clears its email's rows.
+ * `key` is never a raw non-address input: people paste passwords into the
+ * email field, so anything that does not look like an email is stored hashed.
+ */
+export const loginFailures = sqliteTable(
+  'login_failures',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    kind: text('kind', { enum: THROTTLE_KINDS }).notNull(),
+    key: text('key').notNull(),
+    createdAt: timestamp('created_at'),
+  },
+  (t) => [index('login_failures_lookup_idx').on(t.orgId, t.kind, t.key, t.createdAt)],
 );

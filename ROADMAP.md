@@ -54,7 +54,7 @@ toolchain to regenerate its types.
 
 Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
-- [ ] Throttle repeated sign-in attempts (per email and per client), audited
+- [x] Throttle repeated sign-in attempts (per email and per client), audited
 - [ ] Password change for the signed-in user; admin/owner password reset for
       others (audited, obeying ADR-0005's who-may-manage-whom rules)
 - [ ] Run `make test-pg` against a live Postgres (never run yet; only PGlite has
@@ -538,3 +538,21 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   matching, meaningful file names. Unknown flags are refused rather than
   silently dropped; `--custom` passes through for hand-written SQL. Taken out of
   order so the sign-in throttling migration (next) gets a real name.
+
+- feat: sign-in throttling (ADR-0004 §8). A wrong password
+  writes a `login_failures` row (migration `0002_login_failures`) against the
+  email and against the client address. At 10 per email or 30 per client in a
+  sliding 15 minutes, `attemptSignIn` (`src/lib/auth/credentials.ts`) refuses
+  before any scrypt work. Auth.js throws `SignInThrottled`, the form says "Too
+  many failed sign-in attempts", and the audit row is `denied`, noting which
+  limit tripped. Refused attempts don't count, so a lockout never extends
+  itself; unknown emails count like real ones; a right password clears only its
+  email. Non-address input in the email field is stored hashed.
+  **Surprise:** Next.js fills `X-Forwarded-For` from the socket only when the
+  request lacks one (`??=`), so the client key is the last entry: exact behind
+  a trusted proxy, forgeable when exposed directly (the email limit holds
+  regardless). This applies to Auth.js's raw `/api/auth/callback/credentials`
+  too, since both paths run `authorize`. Vitest's timeout is now 20s: the
+  first PGlite handle in each worker (WASM compile) was already brushing 5s
+  under a parallel run, and a fourth PGlite suite pushed it over. Next:
+  password change and reset.

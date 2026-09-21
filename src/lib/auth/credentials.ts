@@ -2,13 +2,17 @@ import 'server-only';
 
 import { findUserByEmail, findUserById, type DataHandle, type User } from '@/lib/db/users';
 import { verifyAgainstDummy, verifyPassword } from './password';
+import { checkThrottle, noteFailure, noteSuccess, throttleKeys } from './throttle';
 
 /**
  * The account checks behind sign-in and every authenticated request, kept free
  * of Auth.js so they are tested directly against a real database.
  */
 
-export type SignInResult = { ok: true; user: User } | { ok: false; reason: 'invalid' | 'disabled' };
+export type SignInResult =
+  | { ok: true; user: User }
+  | { ok: false; reason: 'invalid' | 'disabled' }
+  | { ok: false; reason: 'throttled'; kind: 'email' | 'client' };
 
 /**
  * Checks an email and password. `invalid` covers both an unknown email and a
@@ -21,7 +25,7 @@ export async function checkCredentials(
   orgId: string,
   email: string,
   password: string,
-): Promise<SignInResult> {
+): Promise<Exclude<SignInResult, { reason: 'throttled' }>> {
   const user = await findUserByEmail(handle, orgId, email);
   if (user === undefined) {
     await verifyAgainstDummy(password);
@@ -30,6 +34,27 @@ export async function checkCredentials(
   if (!(await verifyPassword(password, user.passwordHash))) return { ok: false, reason: 'invalid' };
   if (user.disabled) return { ok: false, reason: 'disabled' };
   return { ok: true, user };
+}
+
+/**
+ * A sign-in attempt with throttling (`throttle.ts`) around
+ * {@link checkCredentials}: refused before any password work once the email or
+ * the client has too many recent failures; a wrong password counts against
+ * both; a right one clears the email's count. `client` is the caller's address,
+ * or `null` when there is none.
+ */
+export async function attemptSignIn(
+  handle: DataHandle,
+  orgId: string,
+  { email, password, client }: { email: string; password: string; client: string | null },
+): Promise<SignInResult> {
+  const keys = throttleKeys(email, client);
+  const verdict = await checkThrottle(handle, orgId, keys);
+  if (verdict.throttled) return { ok: false, reason: 'throttled', kind: verdict.kind };
+  const result = await checkCredentials(handle, orgId, email, password);
+  if (result.ok) await noteSuccess(handle, orgId, email);
+  else if (result.reason === 'invalid') await noteFailure(handle, orgId, keys);
+  return result;
 }
 
 /**

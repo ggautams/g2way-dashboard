@@ -8,7 +8,7 @@ import {
   timestamp as pgTimestamp,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { AUDIT_OUTCOMES, ROLES, monotonicUuid, type JsonValue } from './shared';
+import { AUDIT_OUTCOMES, ROLES, THROTTLE_KINDS, monotonicUuid, type JsonValue } from './shared';
 
 /**
  * The dashboard schema for Postgres. Mirrors `sqlite.ts` column for column;
@@ -63,4 +63,16 @@ export const auditLog = pgTable(
     createdAt: timestamp('created_at'),
   },
   (t) => [index('audit_log_org_created_idx').on(t.orgId, t.createdAt)],
+);
+
+export const loginFailures = pgTable(
+  'login_failures',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    kind: text('kind', { enum: THROTTLE_KINDS }).notNull(),
+    key: text('key').notNull(),
+    createdAt: timestamp('created_at'),
+  },
+  (t) => [index('login_failures_lookup_idx').on(t.orgId, t.kind, t.key, t.createdAt)],
 );
