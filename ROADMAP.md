@@ -57,7 +57,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Throttle repeated sign-in attempts (per email and per client), audited
 - [x] Password change for the signed-in user; admin/owner password reset for
       others (audited, obeying ADR-0005's who-may-manage-whom rules)
-- [ ] Run `make test-pg` against a live Postgres (never run yet; only PGlite has
+- [x] Run `make test-pg` against a live Postgres (never run yet; only PGlite has
       exercised the pg path, and only real pg races concurrent connections)
 - [ ] Browser pass over `/setup`, `/login`, `/users`, `/audit` and sign-out
       (M1 and M2 were only smoke-tested over HTTP; the extension was never connected)
@@ -159,6 +159,8 @@ the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
 - [ ] Alert rules (error rate, latency, quota exhaustion, circuit open)
 - [ ] Notification channels: webhook, Slack, email
 - [ ] Config backup and restore
+- [ ] Boot the built app on Postgres end to end (`make test-pg` covers the data
+      layer only), ideally as a bundle-check variant
 - [ ] Dockerfile + `deploy/k8s/` applying as a plain directory alongside g2way's.
       The image must ship `drizzle/` (migrations resolve from `cwd`, ADR-0003) and
       set `AUTH_URL` or `AUTH_TRUST_HOST` (an empty `AUTH_URL=` breaks Auth.js)
@@ -591,3 +593,12 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   object property. It confirms each is really an arrow function (`=>` after the
   parameter list), so `const x = (orgId + y)` does not count. It found no new
   hardcoded literals in `src/`.
+
+- verify: first run of `make test-pg`, on Docker's
+  `postgres:17-alpine`. All 7 files under `src/lib/db` passed (96 tests).
+  That includes the three live tests: migration through node-postgres, one
+  owner out of concurrent bootstraps, and two owners demoting each other on
+  separate connections. The advisory-lock path held with nothing to fix. The
+  run covers `src/lib/db` only; the throttle and password suites exercise pg
+  through PGlite. The app itself has still never booted on `DATABASE_URL=postgres://…`.
+  That belongs with the M11 Docker and deploy work. Next: the browser pass.
