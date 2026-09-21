@@ -47,7 +47,7 @@ toolchain to regenerate its types.
 ## M2 — Identity, RBAC & audit
 
 - [x] Drizzle schema + migrations (better-sqlite3 default, Postgres driver swap)
-- [ ] Auth.js login; first-run bootstrap of the initial owner account
+- [x] Auth.js login; first-run bootstrap of the initial owner account
 - [ ] Roles: owner / admin / editor / viewer / portal-dev, enforced server-side
 - [ ] Audit log: actor, action, before/after diff, resulting gateway call
 - [ ] `org_id` carried through every record and request (always `"default"` today)
@@ -348,3 +348,42 @@ target atomic`), verified by breaking the build and confirming the spec
   gate. `npm audit` reports a moderate, dev-only esbuild advisory pulled in by
   drizzle-kit. Next: Auth.js login and first-run owner bootstrap, which will
   write the first data-access module over the union.
+
+- M2 sign-in and first-run bootstrap landed, recorded as
+  ADR-0004. Auth.js `next-auth@5.0.0-beta.32` (pinned; v5 is still `beta` but is
+  the line whose peer range covers Next 16) with one Credentials provider and
+  12 h JWT sessions carrying only user id + org. Passwords use `crypto.scrypt`
+  (N=2^15, r=8, p=1, parameters encoded in the hash, `timingSafeEqual`, dummy
+  verify for unknown emails): `src/lib/auth/password.ts`. The first data-access
+  module over ADR-0003's union is `src/lib/db/users.ts`: it takes a `DataHandle`
+  (Postgres side typed as any `PgDatabase`, so PGlite works in tests) and
+  narrows on `dialect` once per function. `createFirstOwner()` re-checks
+  emptiness under a lock held from the transaction's start (SQLite `BEGIN
+IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
+  submits on both dialects and across two SQLite connections. It also held in
+  the live smoke run, where two simultaneous `/setup` posts produced one owner.
+  Pages moved into route groups: `(app)` (shell + `requireUser()`, which **every
+  page repeats** because layouts don't re-render on client navigation;
+  `(app)/pages.test.ts` enforces it) and `(auth)` (`/login`, `/setup`, no shell,
+  so no gateway probes). The BFF wraps every method in `withUser`, which returns
+  401 `{"error"}` before the allowlist. `getCurrentUser()` re-reads the user on
+  every request (one PK lookup, React-`cache`d), so disabling someone logs them
+  out on their next request. Verified live: page 307 → `/login`, BFF 401, login
+  says "This account is disabled". No `proxy.ts`; ADR-0004 §4 explains why.
+  `getOrgId()` no longer depends on the gateway config being valid, so sign-in
+  still works while it's broken. The shell shows name, email and role, with a
+  sign-out server action. `check:bundle` now seeds an owner in a non-default
+  org, checks the signed-out redirects and the BFF 401, signs in through
+  `/api/auth/callback/credentials` and requires each page to be 200 _with the
+  user's email in it_ before scanning. `AUTH_SECRET` is a new canary
+  (mutation-tested). **Surprises:** Next 16 answers a bare `RSC: 1` request with
+  a 307 to `?_rsc`. The old scan silently followed it; the scan now refuses
+  redirects except that one hop, since following them would have scanned
+  `/login` in place of every page. vitest had no `@/` alias until now.
+  `check:bundle` imports `password.ts` via Node's type stripping, so that file
+  must stay free of `server-only` and of imports. No browser pass (the extension
+  wasn't connected); the smoke test drove `next start` over HTTP, posting the
+  server-action forms the way a no-JS browser would. **Deferred:** login rate
+  limiting, password change/reset, auditing sign-in and bootstrap (audit task),
+  `make test-pg` still never run. Next: roles enforced server-side (the role is
+  already fresh from the DB in `getCurrentUser()`).

@@ -109,7 +109,7 @@ export function envPrefix(id: string): string {
  */
 export function parseEnvironments(env: Env): Registry {
   const problems: string[] = [];
-  const orgId = read(env, 'G2_ORG_ID') ?? FALLBACK_ORG_ID;
+  const orgId = parseOrgId(env);
   const environments: GatewayTarget[] = [];
 
   const list = read(env, 'G2_ENVIRONMENTS');
@@ -170,9 +170,19 @@ export function getRegistry(): Registry {
   return cached;
 }
 
-/** The org every gateway request is made on behalf of (`G2_ORG_ID`). */
+/** `G2_ORG_ID`, or g2way's default org when unset. */
+export function parseOrgId(env: Env): string {
+  return read(env, 'G2_ORG_ID') ?? FALLBACK_ORG_ID;
+}
+
+/**
+ * The org every gateway request and dashboard record is made on behalf of
+ * (`G2_ORG_ID`). Independent of the rest of the registry, so signing in still
+ * works while the gateway configuration is broken — the Overview is where that
+ * gets reported.
+ */
 export function getOrgId(): string {
-  return getRegistry().orgId;
+  return parseOrgId(process.env);
 }
 
 /** The environment to call, or the default one when `id` is omitted. */

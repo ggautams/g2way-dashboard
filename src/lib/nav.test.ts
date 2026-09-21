@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { allSections, isActive } from './nav';
 
-const APP_DIR = join(import.meta.dirname, '..', 'app');
+// Signed-in sections live in the (app) route group.
+const APP_DIR = join(import.meta.dirname, '..', 'app', '(app)');
 
 describe('NAV', () => {
   it('has unique hrefs', () => {

@@ -1,0 +1,71 @@
+'use server';
+
+import { AuthError, CredentialsSignin } from 'next-auth';
+import { redirect } from 'next/navigation';
+import { signIn, signOut } from '@/auth';
+import { getDatabase } from '@/lib/db';
+import { createFirstOwner, hasUsers } from '@/lib/db/users';
+import { getOrgId } from '@/lib/g2/environments';
+import { parseLoginForm, parseSetupForm, type FormState } from './forms';
+import { hashPassword } from './password';
+
+/**
+ * Server actions behind `/login`, `/setup` and the shell's sign-out button.
+ * Next.js checks each action's `Origin` against the host, so these are not
+ * cross-site forgeable. Pages hand them to the client forms as props, so no
+ * client module imports this file (`client-boundary.test.ts`).
+ */
+
+async function signInOrExplain(email: string, password: string): Promise<FormState> {
+  try {
+    // Throws Next's redirect on success, which must propagate.
+    await signIn('credentials', { email, password, redirectTo: '/' });
+  } catch (error) {
+    if (error instanceof CredentialsSignin) {
+      return {
+        error:
+          error.code === 'disabled' ? 'This account is disabled.' : 'Invalid email or password.',
+        email,
+      };
+    }
+    if (error instanceof AuthError) return { error: error.message, email };
+    throw error;
+  }
+  return { error: null };
+}
+
+export async function loginAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  const { email, password } = parseLoginForm(formData);
+  if (email === '' || password === '') {
+    return { error: 'Enter your email and password.', email };
+  }
+  return signInOrExplain(email, password);
+}
+
+/**
+ * First-run bootstrap. The page only renders while the org has no users, but
+ * that check is advisory: `createFirstOwner` re-checks inside its transaction,
+ * so of two racing submits exactly one becomes owner and the other is sent to
+ * `/login`.
+ */
+export async function setupAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  const orgId = getOrgId();
+  const database = getDatabase();
+  if (await hasUsers(database, orgId)) redirect('/login');
+
+  const parsed = parseSetupForm(formData);
+  if (!parsed.ok) return parsed.state;
+  const { email, name, password } = parsed.value;
+
+  const owner = await createFirstOwner(database, orgId, {
+    email,
+    name,
+    passwordHash: await hashPassword(password),
+  });
+  if (owner === null) redirect('/login');
+  return signInOrExplain(owner.email, password);
+}
+
+export async function signOutAction(): Promise<void> {
+  await signOut({ redirectTo: '/login' });
+}

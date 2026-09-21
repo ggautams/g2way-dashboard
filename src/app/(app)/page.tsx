@@ -1,4 +1,5 @@
 import { connection } from 'next/server';
+import { requireUser } from '@/lib/auth/session';
 import {
   RegistryConfigError,
   listEnvironments,
@@ -8,6 +9,7 @@ import {
 export default async function OverviewPage() {
   // The registry reads the runtime environment, never the build's.
   await connection();
+  await requireUser();
 
   let environments: PublicEnvironment[] = [];
   let problems: readonly string[] = [];

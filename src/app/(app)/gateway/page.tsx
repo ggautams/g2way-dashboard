@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { AutoRefresh } from '@/components/gateway/auto-refresh';
 import { RouteTable } from '@/components/gateway/route-table';
+import { requireUser } from '@/lib/auth/session';
 import { formatDuration } from '@/lib/format';
 import {
   RegistryConfigError,
@@ -15,6 +16,7 @@ import { targetsWithHealth, type NodeInfo } from '@/lib/g2/node';
 export const metadata: Metadata = { title: 'Gateway' };
 
 export default async function GatewayPage({ searchParams }: PageProps<'/gateway'>) {
+  await requireUser();
   const { env } = await searchParams;
   const requested = typeof env === 'string' ? env : undefined;
 

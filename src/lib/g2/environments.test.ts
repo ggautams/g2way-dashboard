@@ -6,6 +6,7 @@ import {
   envPrefix,
   listEnvironments,
   parseEnvironments,
+  parseOrgId,
   resolveEnvironment,
 } from './environments';
 
@@ -140,5 +141,18 @@ describe('secret containment', () => {
     } catch (error) {
       expect(String(error)).not.toContain(SECRET);
     }
+  });
+});
+
+describe('parseOrgId', () => {
+  it("defaults to g2way's org and honours G2_ORG_ID", () => {
+    expect(parseOrgId({})).toBe('default');
+    expect(parseOrgId({ G2_ORG_ID: ' acme ' })).toBe('acme');
+  });
+
+  it('does not depend on the gateway configuration being valid', () => {
+    // No G2_ADMIN_SECRET: the registry would throw, the org still resolves.
+    expect(() => parseEnvironments({ G2_ORG_ID: 'acme' })).toThrow(RegistryConfigError);
+    expect(parseOrgId({ G2_ORG_ID: 'acme' })).toBe('acme');
   });
 });

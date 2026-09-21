@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Proves the gateway admin secret never reaches the browser (CLAUDE.md).
+// Proves the gateway admin secret — and Auth.js's AUTH_SECRET — never reach the
+// browser (CLAUDE.md).
 //
 // 1. Builds the dashboard with random canary secrets in the environment, then
 //    scans every file under .next/static/ — everything the browser can
@@ -10,11 +11,18 @@
 //    HTML and as an RSC payload, failing if a canary appears. That catches a
 //    secret passed through props, which no static scan can see.
 //
+//    Pages sit behind sign-in, so a scan of what an anonymous fetch gets would
+//    only ever see redirects. The run therefore walks the real flow: the first
+//    run checks that everything redirects to /setup, then seeds an owner into
+//    the throwaway database; every run then checks the anonymous redirects and
+//    the BFF's 401, signs in through Auth.js's own credentials endpoint, and
+//    requires each page to answer 200 *for that user* before scanning it.
+//
 // The static-import guard is src/lib/client-boundary.test.ts; this is the
 // backstop over the real build output. Needs no gateway: port 1 refuses.
 
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
@@ -24,6 +32,8 @@ const ROOT = resolve(import.meta.dirname, '..');
 const NEXT = join(ROOT, 'node_modules', '.bin', 'next');
 const STATIC = join(ROOT, '.next', 'static');
 const DEAD_GATEWAY = 'http://127.0.0.1:1';
+// A non-default org, so the run also proves sign-in follows G2_ORG_ID.
+const ORG_ID = 'bundle-check-org';
 
 // A throwaway SQLite database, so the startup migrations (src/instrumentation.ts)
 // run for real without touching ./data.
@@ -36,6 +46,18 @@ const secrets = {
   G2_ADMIN_SECRET: canary('single'),
   G2_ENV_DEV_SECRET: canary('dev'),
   G2_ENV_PROD_SECRET: canary('prod'),
+  AUTH_SECRET: canary('auth'),
+};
+
+// Auth.js: the canary secret, and trust the Host header as `next start` requires.
+// G2_ORG_ID rides along because every run strips the caller's G2_* variables.
+const AUTH_ENV = { AUTH_SECRET: secrets.AUTH_SECRET, AUTH_TRUST_HOST: 'true', G2_ORG_ID: ORG_ID };
+
+// The account the scan signs in as. Seeded straight into the throwaway database.
+const OWNER = {
+  email: 'bundle-check@example.com',
+  name: 'Bundle Check',
+  password: randomBytes(18).toString('base64url'),
 };
 
 const singleForm = {
@@ -50,7 +72,10 @@ const namedForm = {
   G2_ENV_PROD_SECRET: secrets.G2_ENV_PROD_SECRET,
 };
 
-/** Pages to render, per config form. Every ready nav section belongs here. */
+/**
+ * Signed-in pages to render, per config form. Every ready nav section belongs
+ * here. `/setup` and `/login` are scanned too, signed out, by the flow below.
+ */
 const PAGES = {
   single: ['/', '/gateway'],
   named: ['/', '/gateway', '/gateway?env=prod'],
@@ -60,6 +85,7 @@ const PAGES = {
 const FORBIDDEN_STATIC = [
   ...Object.values(secrets),
   'G2_ADMIN_SECRET',
+  'AUTH_SECRET',
   /G2_ENV_[A-Z0-9_]*_SECRET/,
   /x-g2-authorization/i,
 ];
@@ -133,35 +159,158 @@ async function waitUntilUp(base, child) {
   throw new Error(`next start did not come up at ${base}`);
 }
 
-async function scanRendered(form, env) {
+/**
+ * Fetches `path` without following redirects — a followed redirect would scan
+ * the login page in place of the one asked for — and fails if any canary is in
+ * the body. The one redirect taken is Next's own cache-busting hop for RSC
+ * requests (`/x` → `/x?_rsc`), which leads to the same page.
+ */
+async function fetchAndScan(base, path, label, init = {}) {
+  let response = await fetch(base + path, { redirect: 'manual', ...init });
+  const location = response.headers.get('location');
+  if (location !== null && new URL(location, base).searchParams.has('_rsc')) {
+    const target = new URL(location, base);
+    if (target.pathname === new URL(path, base).pathname) {
+      response = await fetch(target, { redirect: 'manual', ...init });
+    }
+  }
+  const body = await response.text();
+  for (const value of Object.values(secrets)) {
+    if (body.includes(value)) failures.push(`${label} ${path} contains ${describe(value)}`);
+  }
+  return { response, body };
+}
+
+async function expectRedirect(base, path, to, label) {
+  const { response } = await fetchAndScan(base, path, label);
+  const location = response.headers.get('location') ?? '';
+  if (response.status < 300 || response.status >= 400 || new URL(location, base).pathname !== to) {
+    failures.push(
+      `${label}: ${path} answered ${response.status} ${location}, expected a redirect to ${to}`,
+    );
+  }
+}
+
+/** Seeds the scan's owner into the throwaway database, as /setup would. */
+async function seedOwner() {
+  const { default: Database } = await import('better-sqlite3');
+  // Plain TypeScript with no imports beyond node:crypto; Node strips the types.
+  const { hashPassword } = await import('../src/lib/auth/password.ts');
+  const db = new Database(DB_ENV.DATABASE_URL.slice('file:'.length));
+  try {
+    const now = Date.now();
+    db.prepare(
+      `insert into users (id, org_id, email, name, password_hash, role, disabled, created_at, updated_at)
+       values (?, ?, ?, ?, ?, 'owner', 0, ?, ?)`,
+    ).run(
+      randomUUID(),
+      ORG_ID,
+      OWNER.email,
+      OWNER.name,
+      await hashPassword(OWNER.password),
+      now,
+      now,
+    );
+  } finally {
+    db.close();
+  }
+}
+
+/** Signs in through Auth.js's credentials endpoint; returns the Cookie header to send. */
+async function signIn(base, label) {
+  const jar = new Map();
+  const keep = (response) => {
+    for (const cookie of response.headers.getSetCookie()) {
+      const [pair] = cookie.split(';');
+      const eq = pair.indexOf('=');
+      jar.set(pair.slice(0, eq), pair.slice(eq + 1));
+    }
+  };
+  const header = () => [...jar].map(([name, value]) => `${name}=${value}`).join('; ');
+
+  const csrf = await fetch(`${base}/api/auth/csrf`);
+  keep(csrf);
+  const { csrfToken } = await csrf.json();
+  const callback = await fetch(`${base}/api/auth/callback/credentials`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: header() },
+    body: new URLSearchParams({ csrfToken, email: OWNER.email, password: OWNER.password }),
+  });
+  keep(callback);
+  if (![...jar.keys()].some((name) => name.endsWith('authjs.session-token'))) {
+    throw new Error(
+      `${label}: signing in as the seeded owner set no session cookie (${callback.status})`,
+    );
+  }
+  return header();
+}
+
+async function scanRendered(form, env, { firstRun }) {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const child = spawn(NEXT, ['start', '-p', String(port), '-H', '127.0.0.1'], {
     cwd: ROOT,
     // Only this form's variables: the two forms are mutually exclusive.
-    env: { ...withoutG2(process.env), ...DB_ENV, ...env },
+    env: { ...withoutG2(process.env), ...DB_ENV, ...AUTH_ENV, ...env },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   try {
     await waitUntilUp(base, child);
     let fetched = 0;
+    const anonymous = `${form} (signed out)`;
+
+    if (firstRun) {
+      // No users yet: everything leads to /setup, which renders.
+      await expectRedirect(base, '/', '/setup', anonymous);
+      await expectRedirect(base, '/login', '/setup', anonymous);
+      const setup = await fetchAndScan(base, '/setup', anonymous);
+      if (setup.response.status !== 200)
+        failures.push(`${anonymous}: /setup answered ${setup.response.status}`);
+      fetched += 3;
+      await seedOwner();
+    }
+
+    // Users exist: pages lead to /login, /setup is gone, and the BFF refuses.
+    for (const page of PAGES[form]) await expectRedirect(base, page, '/login', anonymous);
+    await expectRedirect(base, '/setup', '/login', anonymous);
+    const login = await fetchAndScan(base, '/login', anonymous);
+    if (login.response.status !== 200)
+      failures.push(`${anonymous}: /login answered ${login.response.status}`);
+    const refused = await fetchAndScan(base, '/api/g2/version', anonymous);
+    if (refused.response.status !== 401 || !('error' in JSON.parse(refused.body))) {
+      failures.push(
+        `${anonymous}: BFF answered ${refused.response.status}, expected 401 {"error"}`,
+      );
+    }
+    fetched += PAGES[form].length + 3;
+
+    const cookie = await signIn(base, form);
+    const signedIn = `${form} (signed in)`;
     for (const page of PAGES[form]) {
       for (const [kind, headers] of [
         ['HTML', {}],
         ['RSC', { RSC: '1' }],
       ]) {
-        const response = await fetch(base + page, { headers });
-        const body = await response.text();
+        const { response, body } = await fetchAndScan(base, page, `${signedIn}: ${kind}`, {
+          headers: { ...headers, cookie },
+        });
         fetched++;
-        if (!response.ok) failures.push(`${form}: ${kind} ${page} answered ${response.status}`);
-        for (const value of Object.values(secrets)) {
-          if (body.includes(value)) {
-            failures.push(`${form}: ${kind} ${page} contains ${describe(value)}`);
-          }
+        if (response.status !== 200) {
+          failures.push(`${signedIn}: ${kind} ${page} answered ${response.status}`);
+        } else if (!body.includes(OWNER.email)) {
+          failures.push(`${signedIn}: ${kind} ${page} did not render the signed-in shell`);
         }
       }
     }
-    return fetched;
+    // Past the session check the BFF tries the (dead) gateway: 502, not 401.
+    const proxied = await fetchAndScan(base, '/api/g2/version', signedIn, { headers: { cookie } });
+    if (proxied.response.status !== 502) {
+      failures.push(
+        `${signedIn}: BFF answered ${proxied.response.status}, expected 502 from the dead gateway`,
+      );
+    }
+    return fetched + 1;
   } finally {
     child.kill('SIGTERM');
   }
@@ -176,17 +325,18 @@ function withoutG2(env) {
 // prerender pass stays on the single form.
 const buildEnv = { ...namedForm, ...singleForm };
 delete buildEnv.G2_ENVIRONMENTS;
-await run(NEXT, ['build'], { ...withoutG2(process.env), ...DB_ENV, ...buildEnv });
+await run(NEXT, ['build'], { ...withoutG2(process.env), ...DB_ENV, ...AUTH_ENV, ...buildEnv });
 
 const scanned = scanStatic();
 const rendered =
-  (await scanRendered('single', singleForm)) + (await scanRendered('named', namedForm));
+  (await scanRendered('single', singleForm, { firstRun: true })) +
+  (await scanRendered('named', namedForm, { firstRun: false }));
 
 if (failures.length > 0) {
-  console.error('\ncheck:bundle — the admin secret can reach the browser:');
+  console.error('\ncheck:bundle — a secret can reach the browser, or sign-in gating failed:');
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
 console.log(
-  `\ncheck:bundle — ok: ${scanned} static files and ${rendered} rendered responses carry no admin secret`,
+  `\ncheck:bundle — ok: ${scanned} static files and ${rendered} rendered responses carry no admin or auth secret`,
 );

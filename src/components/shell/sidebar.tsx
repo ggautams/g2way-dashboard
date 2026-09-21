@@ -38,8 +38,11 @@ function SearchButton({ compact = false }: { compact?: boolean }) {
   );
 }
 
-/** Desktop sidebar; below `md` the {@link MobileBar} takes over and the palette is the nav. */
-export function Sidebar() {
+/**
+ * Desktop sidebar; below `md` the {@link MobileBar} takes over and the palette is the nav.
+ * `account` is the server-rendered user panel with its sign-out action.
+ */
+export function Sidebar({ account }: { account: React.ReactNode }) {
   const pathname = usePathname();
   return (
     <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-4 border-r border-border bg-surface p-4 md:flex">
@@ -79,17 +82,19 @@ export function Sidebar() {
         ))}
       </nav>
       <ThemeToggle />
+      <div className="border-t border-border pt-3">{account}</div>
     </aside>
   );
 }
 
-export function MobileBar() {
+export function MobileBar({ account }: { account: React.ReactNode }) {
   return (
     <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-surface px-4 py-2 md:hidden">
       <Brand />
       <div className="ml-auto flex items-center gap-2">
         <SearchButton compact />
         <ThemeToggle />
+        {account}
       </div>
     </header>
   );
