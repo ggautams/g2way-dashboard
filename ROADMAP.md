@@ -32,7 +32,7 @@ toolchain to regenerate its types.
 
 - [x] Environment registry: named gateway targets (URL + admin secret), secrets
       read server-side only, `.env.example` documenting every variable
-- [ ] BFF proxy `src/app/api/g2/[...path]/route.ts` — attaches
+- [x] BFF proxy `src/app/api/g2/[...path]/route.ts` — attaches
       `X-G2-Authorization`, forwards method/body/query, passes the gateway's
       error envelope through untouched
 - [ ] Typed gateway client over `contracts/g2way.d.ts` (no hand-written types)
@@ -205,3 +205,21 @@ target atomic`), verified by breaking the build and confirming the spec
   `66aa49b` no longer exists in g2way (its history was rewritten), so old
   `UPSTREAM.md` shas may not resolve upstream. Synced to `61a4975`. Next: the BFF
   proxy `src/app/api/g2/[...path]/route.ts` over `resolveEnvironment()`.
+
+- M1 BFF proxy landed: `src/app/api/g2/[...path]/route.ts` is a
+  thin shell over `src/lib/g2/proxy.ts` (`server-only`, tested with an injected
+  `fetch`). The allowlist is **derived from `contracts/openapi.json`**, not
+  hand-written: unknown paths get 404, a wrong method 405 + `Allow`, all in the
+  gateway's `{"error"}` envelope, and a `sync:g2way` that adds an endpoint opens
+  it here automatically (`/metrics` is outside `/g2/` and stays closed). The
+  environment is picked by the `X-G2-Environment` request header (echoed on the
+  response) so the query string forwards verbatim. Request headers are built
+  fresh — only `Accept`/`Content-Type` pass, so browser cookies never reach the
+  gateway. Gateway responses (status, body, content type) pass through
+  untouched; an unreachable gateway is 502 naming the environment and Node's
+  real `cause` (plain "fetch failed" says nothing); a broken registry is 500
+  with `RegistryConfigError`'s variable-only message. Writes from another origin
+  (`Origin` mismatch or `Sec-Fetch-Site: cross-site`) are refused with 403.
+  **Security note:** until M2 auth lands, anyone who can reach the dashboard
+  holds full gateway admin through this proxy, so run it on a trusted network
+  only. Next: the typed gateway client over `contracts/g2way.d.ts`.
