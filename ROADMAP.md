@@ -52,9 +52,29 @@ toolchain to regenerate its types.
 - [x] Audit log: actor, action, before/after diff, resulting gateway call
 - [x] `org_id` carried through every record and request (always `"default"` today)
 
+Hardening follow-ups found while building M2 (do these before M3's write UIs):
+
+- [ ] Throttle repeated sign-in attempts (per email and per client), audited
+- [ ] Password change for the signed-in user; admin/owner password reset for
+      others (audited, obeying ADR-0005's who-may-manage-whom rules)
+- [ ] Run `make test-pg` against a live Postgres (never run yet; only PGlite has
+      exercised the pg path, and only real pg races concurrent connections)
+- [ ] Browser pass over `/setup`, `/login`, `/users`, `/audit` and sign-out
+      (M1 and M2 were only smoke-tested over HTTP; the extension was never connected)
+- [ ] Bug: on `/users`, an error on one row's form lingers after the other form
+      on the same row succeeds
+- [ ] `org-literal.test.ts` only follows `function`-declared org-taking helpers;
+      extend it to arrow functions
+- [ ] `npm run db:generate` can't pass `--name` through (it runs drizzle-kit
+      twice), so migrations get random names — accept a name argument
+
 ## M3 — API management
 
+- [ ] Environment switcher in the shell (the BFF already honours
+      `X-G2-Environment`; only `/gateway` has a picker today)
 - [ ] API list with search, filter, and active/inactive state
+- [ ] Decide form primitives before the designer: adopt shadcn/ui as ADR-0001
+      says, or record an ADR for the hand-rolled components the shell uses
 - [ ] API designer: structured form over `ApiDefinition`
 - [ ] Raw JSON/YAML editor (Monaco) validated live against the OpenAPI schema,
       kept in sync with the form both ways
@@ -139,7 +159,10 @@ the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
 - [ ] Alert rules (error rate, latency, quota exhaustion, circuit open)
 - [ ] Notification channels: webhook, Slack, email
 - [ ] Config backup and restore
-- [ ] Dockerfile + `deploy/k8s/` applying as a plain directory alongside g2way's
+- [ ] Dockerfile + `deploy/k8s/` applying as a plain directory alongside g2way's.
+      The image must ship `drizzle/` (migrations resolve from `cwd`, ADR-0003) and
+      set `AUTH_URL` or `AUTH_TRUST_HOST` (an empty `AUTH_URL=` breaks Auth.js)
+- [ ] Audit log retention/pruning and export (CSV/JSON)
 
 **Requires from g2way**: the admin port is not exposed on any Service today, so
 an in-cluster dashboard cannot reach it. See `UPSTREAM.md`.
@@ -150,6 +173,9 @@ an in-cluster dashboard cannot reach it. See `UPSTREAM.md`.
 - [ ] Quota and traffic forecasting
 - [ ] Terraform / GitOps export
 - [ ] i18n
+- [ ] Roles scoped per API or per environment (ADR-0005 roles are org-wide)
+- [ ] Tamper-evident audit log (hash chain) and client IP on audit rows
+- [ ] Org-filtered node/stats views once g2way ships multi-org (ADR-0007 §6)
 
 ---
 
@@ -492,3 +518,16 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   origin. `Sec-Fetch-Site` refusals are unchanged. Row ids are now UUIDv7,
   monotonic per process, so same-millisecond audit rows list in insertion order
   (ADR-0006 amended, no migration). Next is still M3's API list.
+
+- Roadmap housekeeping after M2: the follow-ups deferred across
+  the five M2 sessions are now boxes. Security and verification gaps (sign-in
+  throttling, password change/reset, the never-run `make test-pg`, the missing
+  browser pass, a `/users` form bug) sit under M2 so they land before M3's write
+  UIs; the environment switcher and the shadcn/ui decision open M3; audit
+  retention/export and the Docker image's `drizzle/` + `AUTH_URL` requirements go
+  to M11; scoped roles, a tamper-evident audit chain and org-filtered node views
+  go to M12. **Bug fixed on the way:** the pre-commit drift hook failed on any
+  `git commit -a` with "unable to read <oid>": git exports `GIT_INDEX_FILE` to
+  hooks, and `scripts/g2way-lib.mjs` passed it through to `git -C ../g2way`, so
+  upstream git read this repo's index. `run()` now strips git's repo-location
+  variables. Next: sign-in throttling.
