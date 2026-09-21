@@ -73,6 +73,10 @@ These are load-bearing for the dashboard and easy to get wrong:
 - **Response conventions**: mutations return `{"id", "action"}` where action is
   `added`/`modified`/`deleted`; errors are always `{"error": "..."}`; 409 on POST of
   an existing id; 503 `{"error":"storage unavailable"}` when Redis is down.
+- **The OpenAPI document declares neither shape above.** Error responses and the
+  mutation `{"id", "action"}` bodies are listed with no content schema
+  (`content?: never` in `g2way.d.ts`), so `src/lib/g2/errors.ts` types the error
+  envelope itself (`GatewayError`) and create calls resolve to `undefined`.
 
 ## Keeping this file honest
 

@@ -8,6 +8,12 @@ import {
   type GatewayTarget,
   type Registry,
 } from './environments';
+import { ENVIRONMENT_HEADER } from './client';
+import { describeFetchError } from './errors';
+import { withOrgId } from './org-scope';
+import { ADMIN_SECRET_HEADER, GATEWAY_TIMEOUT_MS } from './server-client';
+
+export { ENVIRONMENT_HEADER };
 
 /**
  * The BFF proxy: forwards a browser request to one gateway's admin API, attaching
@@ -17,16 +23,9 @@ import {
  *
  * Only endpoints in the gateway's own OpenAPI document are forwarded; the
  * allowlist is derived from `contracts/openapi.json`, so `npm run sync:g2way`
- * keeps it current.
+ * keeps it current. Org-scoped operations get the configured `org_id` (see
+ * `./org-scope`), overwriting any the browser sent.
  */
-
-/** Request header naming the environment to call; the default one when absent. */
-export const ENVIRONMENT_HEADER = 'x-g2-environment';
-
-/** The gateway's admin auth header. */
-const ADMIN_SECRET_HEADER = 'X-G2-Authorization';
-
-const GATEWAY_TIMEOUT_MS = 10_000;
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -37,6 +36,8 @@ const FORWARDED_REQUEST_HEADERS = ['accept', 'content-type'];
 const FORWARDED_RESPONSE_HEADERS = ['content-type', 'allow'];
 
 type Endpoint = {
+  /** The spec's path template, e.g. `/g2/apis/{id}`. */
+  path: string;
   /** Path segments after `/g2`; `null` is a `{param}` matching any one segment. */
   segments: readonly (string | null)[];
   methods: ReadonlySet<string>;
@@ -51,6 +52,7 @@ export function compileEndpoints(paths: SpecPaths): Endpoint[] {
   return Object.entries(paths)
     .filter(([path]) => path.startsWith('/g2/'))
     .map(([path, operations]) => ({
+      path,
       segments: path
         .slice('/g2/'.length)
         .split('/')
@@ -87,12 +89,6 @@ function isCrossSite(request: Request): boolean {
   if (fetchSite !== null && fetchSite !== 'same-origin' && fetchSite !== 'none') return true;
   const origin = request.headers.get('origin');
   return origin !== null && origin !== new URL(request.url).origin;
-}
-
-/** Why a fetch failed. Node reports every network error as "fetch failed", with the real reason as its `cause`. */
-function describe(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  return error.cause instanceof Error ? `${error.message} (${error.cause.message})` : error.message;
 }
 
 export type ProxyDeps = {
@@ -148,7 +144,14 @@ export async function proxyToGateway(
     if (value !== null) headers.set(name, value);
   }
 
-  const url = `${target.baseUrl}/g2/${segments.map(encodeURIComponent).join('/')}${new URL(request.url).search}`;
+  const url = withOrgId(
+    new URL(
+      `${target.baseUrl}/g2/${segments.map(encodeURIComponent).join('/')}${new URL(request.url).search}`,
+    ),
+    method,
+    endpoint.path,
+    target.orgId,
+  ).toString();
   const body = method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer();
 
   let upstream: Response;
@@ -164,7 +167,7 @@ export async function proxyToGateway(
   } catch (error) {
     return errorResponse(
       502,
-      `gateway unreachable (environment ${target.id}): ${describe(error)}`,
+      `gateway unreachable (environment ${target.id}): ${describeFetchError(error)}`,
       {
         [ENVIRONMENT_HEADER]: target.id,
       },

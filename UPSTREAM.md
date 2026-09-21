@@ -40,6 +40,14 @@ commit this project is waiting on.
       security design — recorded because it is the _reason_ M4 keeps its own key
       metadata table, and that rationale should outlive whoever wrote it.
 
+- [ ] **The OpenAPI document omits the error envelope and mutation bodies.**
+      Every error response, and the `{"id", "action"}` body of POST/PUT/DELETE,
+      is declared without a content schema. The typed client therefore parses
+      `{"error"}` itself (`GatewayError` in `src/lib/g2/errors.ts`) and cannot see
+      the returned `action`. Needs `body = ErrorBody` / a mutation-result schema on
+      the utoipa `responses(...)` annotations in `crates/g2-admin`. _Shapes M3/M4
+      save flows; not a blocker._
+
 - [ ] **`/g2/stats` is process-local** and resets on restart, so with more than
       one replica it is a per-pod sample rather than a cluster total. Cluster-wide
       numbers must come from the analytics feed or Prometheus. Shapes M6; not a

@@ -91,7 +91,28 @@ describe('forwarding', () => {
   it('keeps an encoded slash inside one path segment', async () => {
     const { response, calls } = await proxy('keys/a%2Fb?hashed=true');
     expect(response.status).toBe(200);
-    expect(calls[0].url).toBe('http://gw-dev:9696/g2/keys/a%2Fb?hashed=true');
+    expect(calls[0].url).toBe('http://gw-dev:9696/g2/keys/a%2Fb?hashed=true&org_id=default');
+  });
+
+  it('scopes org-scoped operations to the configured org, whatever the browser sent', async () => {
+    const orgRegistry = parseEnvironments({
+      G2_ADMIN_URL: 'http://gw:9696',
+      G2_ADMIN_SECRET: SECRET,
+      G2_ORG_ID: 'acme',
+    });
+    const gateway = fakeGateway();
+    await proxyToGateway(request('apis?org_id=other'), ['apis'], {
+      fetch: gateway.fetch,
+      registry: orgRegistry,
+    });
+    await proxyToGateway(request('reload', { method: 'POST' }), ['reload'], {
+      fetch: gateway.fetch,
+      registry: orgRegistry,
+    });
+    expect(gateway.calls.map((c) => c.url)).toEqual([
+      'http://gw:9696/g2/apis?org_id=acme',
+      'http://gw:9696/g2/reload',
+    ]);
   });
 
   it('selects the environment from the header and echoes it back', async () => {

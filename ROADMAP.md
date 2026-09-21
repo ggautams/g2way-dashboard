@@ -35,7 +35,7 @@ toolchain to regenerate its types.
 - [x] BFF proxy `src/app/api/g2/[...path]/route.ts` — attaches
       `X-G2-Authorization`, forwards method/body/query, passes the gateway's
       error envelope through untouched
-- [ ] Typed gateway client over `contracts/g2way.d.ts` (no hand-written types)
+- [x] Typed gateway client over `contracts/g2way.d.ts` (no hand-written types)
 - [ ] App shell: nav, dark mode, command palette, toasts
 - [ ] Gateway page from `/g2/node` + `/g2/version` + `/g2/health`: live route
       table, per-target health, circuit-breaker state, service-discovery and
@@ -223,3 +223,21 @@ target atomic`), verified by breaking the build and confirming the spec
   **Security note:** until M2 auth lands, anyone who can reach the dashboard
   holds full gateway admin through this proxy, so run it on a trusted network
   only. Next: the typed gateway client over `contracts/g2way.d.ts`.
+
+- M1 typed gateway client landed, on `openapi-fetch` over the
+  generated `paths`. Two entry points: `bffClient(env?)` (`src/lib/g2/client.ts`,
+  universal, calls `/api/g2/...`) for client components, and `gatewayClient(env?)`
+  (`src/lib/g2/server-client.ts`, `server-only`) for server code, which calls the
+  gateway directly with the target's secret, a 10 s timeout, and throws
+  `GatewayUnreachableError` on network failure. `unwrap()` returns the typed
+  success body or throws `GatewayError` carrying the gateway's `{"error"}` message
+  verbatim. `org_id` is now injected from `G2_ORG_ID` on exactly the operations
+  whose spec declares `?org_id=` (`src/lib/g2/org-scope.ts`, spec-derived like the
+  allowlist) — in the server client **and in the BFF proxy**, which overwrites any
+  `org_id` the browser sends. A test guards that the universal modules import
+  nothing server-only. **Surprise:** the spec declares no content for error
+  responses or the mutation `{"id","action"}` bodies, so those two shapes are
+  typed dashboard-side for now (open item in `UPSTREAM.md`); and openapi-fetch's
+  `Readable<>` makes response types structurally unequal to the raw schema, so
+  type tests use `toExtend`. Next: the app shell (nav, dark mode, command palette,
+  toasts).
