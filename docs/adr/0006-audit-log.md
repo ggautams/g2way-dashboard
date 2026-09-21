@@ -134,8 +134,14 @@ browse.
   form later.
 - If the database is unwritable, gateway writes are refused with 503 while reads
   keep working. That is deliberate.
-- Rows written in the same millisecond have no defined order among themselves.
-  There is no sequence column, because ids are app-generated UUIDs (ADR-0003 §2).
+- ~~Rows written in the same millisecond have no defined order among themselves.~~
+  _Amended 2026-09-23:_ ids are now UUIDv7 from `monotonicUuid()`
+  (`src/lib/db/schema/shared.ts`). They are still app-generated text UUIDs
+  (ADR-0003 §2), so no migration was needed, but they strictly increase within
+  one server process. The list's `ORDER BY created_at DESC, id DESC` is
+  therefore insertion order for one server's rows, even within a millisecond.
+  Rows written in the same millisecond by different replicas still have no
+  defined order. There is no sequence column.
 - M3's config history and rollback can build on the same before/after snapshots,
   but will want its own table: audit rows are redacted, so they cannot restore a
   secret.

@@ -107,12 +107,77 @@ function errorResponse(status: number, message: string, headers?: HeadersInit): 
   return response;
 }
 
-/** True when a mutating request plainly comes from another site (CSRF). */
-function isCrossSite(request: Request): boolean {
+/** How the dashboard works out its own origin, for the CSRF check. */
+export type OriginConfig = {
+  /**
+   * Believe `X-Forwarded-Host` / `X-Forwarded-Proto`: only when a proxy we
+   * control sets them (`AUTH_TRUST_HOST=true`, the same switch Auth.js uses).
+   */
+  trustForwarded: boolean;
+  /** The dashboard's public URL (`AUTH_URL`), whose origin is always accepted. */
+  publicUrl?: string;
+};
+
+/** {@link OriginConfig} from `AUTH_TRUST_HOST` and `AUTH_URL`. */
+export function originConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): OriginConfig {
+  const trust = env.AUTH_TRUST_HOST?.trim().toLowerCase();
+  return {
+    trustForwarded: trust === 'true' || trust === '1',
+    publicUrl: env.AUTH_URL?.trim() || undefined,
+  };
+}
+
+/** The first value of a possibly comma-joined header (proxies append to X-Forwarded-*). */
+function firstValue(value: string | null): string | undefined {
+  const first = value?.split(',')[0]?.trim();
+  return first ? first : undefined;
+}
+
+function originOf(url: string): string | undefined {
+  try {
+    const { origin } = new URL(url);
+    return origin === 'null' ? undefined : origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The origins a same-origin browser request to this dashboard may carry: the
+ * host the browser actually used (the `Host` header, or with `trustForwarded`
+ * the proxy's `X-Forwarded-Host`/`-Proto`), and `AUTH_URL`'s. Not
+ * `request.url`: under `next start -H 127.0.0.1` Next reports that as
+ * `localhost`, which a browser on `127.0.0.1` never sends.
+ */
+export function expectedOrigins(request: Request, config: OriginConfig): string[] {
+  const url = new URL(request.url);
+  let host = request.headers.get('host') ?? url.host;
+  let protocol = url.protocol;
+  if (config.trustForwarded) {
+    host = firstValue(request.headers.get('x-forwarded-host')) ?? host;
+    const forwardedProto = firstValue(request.headers.get('x-forwarded-proto'));
+    if (forwardedProto !== undefined) protocol = `${forwardedProto}:`;
+  }
+  const origins = [originOf(`${protocol}//${host}`)];
+  if (config.publicUrl !== undefined) origins.push(originOf(config.publicUrl));
+  return origins.filter((origin): origin is string => origin !== undefined);
+}
+
+/**
+ * True when a mutating request plainly comes from another site (CSRF): the
+ * browser says so in `Sec-Fetch-Site`, or its `Origin` is not one of
+ * {@link expectedOrigins}. A request with neither header (a non-browser
+ * client) is not a CSRF vector and passes; the session still applies.
+ */
+export function isCrossSite(request: Request, config: OriginConfig = originConfig()): boolean {
   const fetchSite = request.headers.get('sec-fetch-site');
   if (fetchSite !== null && fetchSite !== 'same-origin' && fetchSite !== 'none') return true;
   const origin = request.headers.get('origin');
-  return origin !== null && origin !== new URL(request.url).origin;
+  if (origin === null) return false;
+  const normalised = originOf(origin);
+  return normalised === undefined || !expectedOrigins(request, config).includes(normalised);
 }
 
 export type ProxyDeps = {
@@ -120,6 +185,8 @@ export type ProxyDeps = {
   registry?: Registry;
   /** Where writes are audited; the dashboard database by default. */
   audit?: AuditSink;
+  /** How the CSRF check finds the dashboard's own origin; from the environment by default. */
+  origin?: OriginConfig;
 };
 
 /**
@@ -187,7 +254,7 @@ export async function proxyToGateway(
     );
   }
 
-  if (write !== null && isCrossSite(request)) {
+  if (write !== null && isCrossSite(request, deps.origin ?? originConfig())) {
     return deny('cross-site request refused');
   }
 

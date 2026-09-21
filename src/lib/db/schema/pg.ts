@@ -8,7 +8,7 @@ import {
   timestamp as pgTimestamp,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { AUDIT_OUTCOMES, ROLES, type JsonValue } from './shared';
+import { AUDIT_OUTCOMES, ROLES, monotonicUuid, type JsonValue } from './shared';
 
 /**
  * The dashboard schema for Postgres. Mirrors `sqlite.ts` column for column;
@@ -18,7 +18,7 @@ import { AUDIT_OUTCOMES, ROLES, type JsonValue } from './shared';
 const id = () =>
   text('id')
     .primaryKey()
-    .$defaultFn(() => crypto.randomUUID());
+    .$defaultFn(() => monotonicUuid());
 const timestamp = (name: string) =>
   pgTimestamp(name, { withTimezone: true, mode: 'date' })
     .notNull()

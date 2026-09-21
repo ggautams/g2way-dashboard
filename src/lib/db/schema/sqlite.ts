@@ -1,5 +1,5 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
-import { AUDIT_OUTCOMES, ROLES, type JsonValue } from './shared';
+import { AUDIT_OUTCOMES, ROLES, monotonicUuid, type JsonValue } from './shared';
 
 /**
  * The dashboard schema for SQLite (the default database). Mirrors `pg.ts`
@@ -10,7 +10,7 @@ import { AUDIT_OUTCOMES, ROLES, type JsonValue } from './shared';
 const id = () =>
   text('id')
     .primaryKey()
-    .$defaultFn(() => crypto.randomUUID());
+    .$defaultFn(() => monotonicUuid());
 const timestamp = (name: string) =>
   integer(name, { mode: 'timestamp_ms' })
     .notNull()

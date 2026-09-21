@@ -484,3 +484,11 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   filtered by org, which will matter only when g2way ships multi-org. Next: M3,
   starting with the API list (search, filter, active/inactive state). Fix the
   `127.0.0.1` CSRF bug (separate `fix:` commit) before M3's write UIs.
+- fix: the BFF's cross-site write check now compares `Origin`
+  with the host the browser used (the `Host` header), not `request.url`, which
+  `next start -H 127.0.0.1` reports as `localhost`. It trusts
+  `X-Forwarded-Host`/`-Proto` only with `AUTH_TRUST_HOST=true` (or `1`, stricter
+  than Auth.js, which trusts any value), and it always accepts the `AUTH_URL`
+  origin. `Sec-Fetch-Site` refusals are unchanged. Row ids are now UUIDv7,
+  monotonic per process, so same-millisecond audit rows list in insertion order
+  (ADR-0006 amended, no migration). Next is still M3's API list.

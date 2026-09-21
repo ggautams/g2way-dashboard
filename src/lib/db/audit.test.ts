@@ -5,7 +5,7 @@ import Sqlite from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { migrateDatabase, migrationsFolder, openDatabase } from '.';
 import { completeAudit, getAuditEntry, listAudit, recordAudit, type AuditRecord } from './audit';
 import * as pgSchema from './schema/pg';
@@ -154,6 +154,22 @@ describe.each([
     const second = await listAudit(handle, ORG, {}, { limit: 3, offset: 3 });
     expect(second.entries.map((e) => e.id)).toEqual([ids[0]]);
     expect(second.hasMore).toBe(false);
+  });
+
+  it('orders rows written in the same millisecond by insertion', async () => {
+    const handle = await open();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.UTC(2026, 8, 23, 12, 0, 0, 500));
+      for (const action of ['a.first', 'a.second', 'a.third', 'a.fourth']) {
+        await recordAudit(handle, ORG, entry({ action }));
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    const { entries } = await listAudit(handle, ORG);
+    expect(new Set(entries.map((e) => e.createdAt.getTime())).size).toBe(1);
+    expect(entries.map((e) => e.action)).toEqual(['a.fourth', 'a.third', 'a.second', 'a.first']);
   });
 
   it('keeps orgs apart', async () => {

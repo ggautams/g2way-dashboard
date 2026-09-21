@@ -11,7 +11,14 @@ import {
 } from '@/lib/db/audit';
 import { hashKey, type AuditSink } from './audit-trail';
 import { parseEnvironments } from './environments';
-import { ENVIRONMENT_HEADER, compileEndpoints, proxyToGateway } from './proxy';
+import {
+  ENVIRONMENT_HEADER,
+  compileEndpoints,
+  isCrossSite,
+  originConfig,
+  proxyToGateway,
+  type OriginConfig,
+} from './proxy';
 
 const SECRET = 'test-secret-do-not-leak';
 const STAGING_SECRET = 'staging-secret-do-not-leak';
@@ -340,6 +347,124 @@ describe('cross-site writes', () => {
   it('allows a cross-site GET (reads carry no side effects)', async () => {
     const { response } = await proxy('version', { headers: { origin: 'http://evil.test' } });
     expect(response.status).toBe(200);
+  });
+});
+
+describe('the same-origin check uses the host the browser used', () => {
+  const DIRECT: OriginConfig = { trustForwarded: false };
+  const PROXIED: OriginConfig = { trustForwarded: true };
+
+  /**
+   * A write as Next hands it to the route under `next start -H 127.0.0.1`:
+   * `request.url` says `localhost` whatever the browser used.
+   */
+  function write(headers: Record<string, string>): Request {
+    return new Request('http://localhost:3000/api/g2/reload', { method: 'POST', headers });
+  }
+
+  it('accepts a browser on 127.0.0.1 although request.url says localhost', () => {
+    const request = write({
+      host: '127.0.0.1:3000',
+      origin: 'http://127.0.0.1:3000',
+      'sec-fetch-site': 'same-origin',
+    });
+    expect(isCrossSite(request, DIRECT)).toBe(false);
+  });
+
+  it('accepts a browser on localhost', () => {
+    const request = write({ host: 'localhost:3000', origin: 'http://localhost:3000' });
+    expect(isCrossSite(request, DIRECT)).toBe(false);
+  });
+
+  it('compares origins normalised: case and default ports', () => {
+    expect(
+      isCrossSite(write({ host: 'Dash.Example:80', origin: 'http://dash.example' }), DIRECT),
+    ).toBe(false);
+  });
+
+  it('refuses another port or host than the one the browser used', () => {
+    for (const origin of [
+      'http://127.0.0.1:3001',
+      'http://localhost:3000',
+      'https://127.0.0.1:3000',
+    ]) {
+      expect(isCrossSite(write({ host: '127.0.0.1:3000', origin }), DIRECT), origin).toBe(true);
+    }
+  });
+
+  it('refuses a genuine cross-origin write, and an opaque "null" origin', () => {
+    expect(isCrossSite(write({ host: '127.0.0.1:3000', origin: 'http://evil.test' }), DIRECT)).toBe(
+      true,
+    );
+    expect(isCrossSite(write({ host: '127.0.0.1:3000', origin: 'null' }), DIRECT)).toBe(true);
+  });
+
+  it('still refuses whatever Sec-Fetch-Site calls cross-site or same-site', () => {
+    for (const site of ['cross-site', 'same-site']) {
+      const request = write({
+        host: '127.0.0.1:3000',
+        origin: 'http://127.0.0.1:3000',
+        'sec-fetch-site': site,
+      });
+      expect(isCrossSite(request, DIRECT), site).toBe(true);
+    }
+  });
+
+  it('believes X-Forwarded-Host/-Proto only behind a trusted proxy', () => {
+    const request = write({
+      host: 'dashboard:3000',
+      origin: 'https://dash.example.com',
+      'x-forwarded-host': 'dash.example.com, dashboard:3000',
+      'x-forwarded-proto': 'https,http',
+    });
+    expect(isCrossSite(request, PROXIED)).toBe(false);
+    // Untrusted, the forwarded headers are ignored: only the Host counts.
+    expect(isCrossSite(request, DIRECT)).toBe(true);
+    // And trusting them does not let a spoofed forwarded host vouch for evil.test.
+    const spoofed = write({
+      host: 'dashboard:3000',
+      origin: 'http://evil.test',
+      'x-forwarded-host': 'dash.example.com',
+      'x-forwarded-proto': 'https',
+    });
+    expect(isCrossSite(spoofed, PROXIED)).toBe(true);
+  });
+
+  it('always accepts the AUTH_URL origin', () => {
+    const request = write({ host: 'dashboard:3000', origin: 'https://dash.example.com' });
+    expect(isCrossSite(request, { ...DIRECT, publicUrl: 'https://dash.example.com/app' })).toBe(
+      false,
+    );
+  });
+
+  it('lets a non-browser client without Origin or Sec-Fetch-Site through', () => {
+    expect(isCrossSite(write({ host: '127.0.0.1:3000' }), DIRECT)).toBe(false);
+  });
+
+  it('reads its trust settings from AUTH_TRUST_HOST and AUTH_URL', () => {
+    expect(originConfig({})).toEqual({ trustForwarded: false, publicUrl: undefined });
+    expect(originConfig({ AUTH_TRUST_HOST: 'true', AUTH_URL: 'https://d.example' })).toEqual({
+      trustForwarded: true,
+      publicUrl: 'https://d.example',
+    });
+    expect(originConfig({ AUTH_TRUST_HOST: '1' }).trustForwarded).toBe(true);
+    expect(originConfig({ AUTH_TRUST_HOST: 'false' }).trustForwarded).toBe(false);
+  });
+
+  it('lets the proxy forward a 127.0.0.1 write end to end', async () => {
+    const gateway = fakeGateway();
+    const response = await proxyToGateway(
+      write({
+        host: '127.0.0.1:3000',
+        origin: 'http://127.0.0.1:3000',
+        'sec-fetch-site': 'same-origin',
+      }),
+      ['reload'],
+      actorFor('owner'),
+      { fetch: gateway.fetch, registry, audit: memoryAudit(), origin: DIRECT },
+    );
+    expect(response.status).toBe(200);
+    expect(gateway.calls).toHaveLength(1);
   });
 });
 
