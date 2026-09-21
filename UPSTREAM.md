@@ -51,4 +51,4 @@ Initial lock against g2way `9f0b81166d0903f09e265acc8769b33a589e7173`. All 12 wa
 
 ## 2026-09-10 — g2way 9f0b811 → 66aa49b
 
-Watched areas changed: ****
+Upstream moved, but no watched area changed. Lock advanced; nothing to do here.

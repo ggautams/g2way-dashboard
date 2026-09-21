@@ -130,7 +130,10 @@ if (first) {
     `Initial lock against g2way \`${head}\`. All ${watch.areas.length} watched areas recorded; ` +
     `no drift to report yet.\n`;
 } else {
-  entry += `Watched areas changed: **${areasChanged.join(', ')}**\n`;
+  entry +=
+    areasChanged.length > 0
+      ? `Watched areas changed: **${areasChanged.join(', ')}**\n`
+      : `Upstream moved, but no watched area changed. Lock advanced; nothing to do here.\n`;
   for (const d of changed) {
     entry += `\n### ${d.area.id}\n\n`;
     entry += `- Drives: ${d.area.surfaces.join(', ')}\n`;
@@ -196,21 +199,25 @@ if (run('git', ['-C', repoRoot, 'diff', '--cached', '--name-only']).length === 0
 
 const subject = first
   ? `chore(upstream): lock to g2way ${SHORT(head)} — initial contract sync`
-  : `chore(upstream): sync to g2way ${SHORT(head)} — ${areasChanged.join(', ')}`;
+  : areasChanged.length > 0
+    ? `chore(upstream): sync to g2way ${SHORT(head)} — ${areasChanged.join(', ')}`
+    : `chore(upstream): sync to g2way ${SHORT(head)} — no watched area changed`;
 
 let body = first
   ? `Records the first fingerprint of all ${watch.areas.length} watched g2way areas and\ngenerates contracts/ from g2way ${SHORT(head)}.\n`
-  : `Watched areas changed: ${areasChanged.join(', ')}\n\n` +
-    changed
-      .map((d) => {
-        const commits = commitsSince(g2way.path, lock.head, d.area);
-        return (
-          `${d.area.id} — drives ${d.area.surfaces.join(', ')}\n` +
-          commits.map((c) => `  ${c}`).join('\n')
-        );
-      })
-      .join('\n\n') +
-    '\n';
+  : areasChanged.length === 0
+    ? `g2way moved to ${SHORT(head)} without touching a watched area; the lock is advanced\nso future drift is measured from here.\n`
+    : `Watched areas changed: ${areasChanged.join(', ')}\n\n` +
+      changed
+        .map((d) => {
+          const commits = commitsSince(g2way.path, lock.head, d.area);
+          return (
+            `${d.area.id} — drives ${d.area.surfaces.join(', ')}\n` +
+            commits.map((c) => `  ${c}`).join('\n')
+          );
+        })
+        .join('\n\n') +
+      '\n';
 
 body += `\nSee UPSTREAM.md for the journal entry and any open TODOs.\n\nG2way-Upstream: ${head}\n`;
 
