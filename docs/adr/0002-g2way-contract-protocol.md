@@ -58,7 +58,16 @@ dashboard or client generator reads one URL and gets the whole admin surface."
    checkboxes inside them are the open work items and get ticked as the dashboard
    catches up.
 
-6. **The check fails builds; a missing gateway does not.** `npm run check:g2way`
+6. **The upstream checkout is strictly read-only.** Sync reads the committed
+   spec with `git show HEAD:docs/api/openapi.json`; it never runs a build in
+   g2way. Regenerating in place would dirty a working tree this project does not
+   own, and the upstream target's shell redirect truncates the file before cargo
+   runs — so a broken upstream build would destroy the committed spec. (That is
+   not hypothetical: it happened while testing this mechanism against a
+   deliberately broken commit, and prompted an atomicity fix upstream.) Reading
+   the committed blob also means this repo needs no Rust toolchain.
+
+7. **The check fails builds; a missing gateway does not.** `npm run check:g2way`
    runs in `make check` and the pre-commit hook and exits non-zero on drift. But a
    missing g2way checkout exits zero with a message — this repo must still build
    on a machine or in CI that has no gateway beside it. A _dirty_ upstream tree
@@ -67,10 +76,9 @@ dashboard or client generator reads one URL and gets the whole admin surface."
 
 ## Consequences
 
-- Regenerating contracts requires a g2way checkout with a working Rust toolchain.
-  That cost is paid at sync time by one person, not on every install: the
-  generated artifacts are committed, so a normal `npm install && make check`
-  needs neither.
+- Syncing needs a g2way checkout, but not a Rust toolchain and not a running
+  gateway — only `git show`. Whoever regenerates the spec upstream pays that
+  cost once, when they commit it.
 - This protocol needed one upstream change: the OpenAPI document was only
   renderable inside `g2-admin`. g2way now has `make openapi` writing a committed
   `docs/api/openapi.json`, and diffs it in its own `check` gate so it cannot go

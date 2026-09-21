@@ -21,6 +21,7 @@ import {
   repoRoot,
   resolveG2wayRepo,
   run,
+  tryRun,
 } from './g2way-lib.mjs';
 
 const args = process.argv.slice(2);
@@ -67,11 +68,18 @@ if (!first && changed.length === 0 && lock.head === head) {
 const contracts = resolve(repoRoot, 'contracts');
 mkdirSync(contracts, { recursive: true });
 
-console.log('Regenerating the OpenAPI contract...');
-execFileSync('make', ['-C', g2way.path, 'openapi'], { stdio: 'inherit' });
-const specSrc = resolve(g2way.path, 'docs/api/openapi.json');
-if (!existsSync(specSrc)) refuse(`${specSrc} was not produced by \`make openapi\``);
-cpSync(specSrc, resolve(contracts, 'openapi.json'));
+// Read the spec g2way commits, rather than running `make openapi` there. The
+// upstream repo is strictly read-only to this script: regenerating in place
+// would dirty someone else's working tree, and that target's shell redirect
+// truncates the file before cargo runs, so a broken upstream build would
+// destroy the committed spec. Reading the committed blob also means this repo
+// needs no Rust toolchain.
+console.log('Reading the committed OpenAPI contract...');
+const spec = tryRun('git', ['-C', g2way.path, 'show', 'HEAD:docs/api/openapi.json']);
+if (spec === null) {
+  refuse('g2way HEAD has no docs/api/openapi.json — run `make openapi` there and commit it');
+}
+writeFileSync(resolve(contracts, 'openapi.json'), spec.endsWith('\n') ? spec : `${spec}\n`);
 
 console.log('Generating TypeScript types...');
 const types = execFileSync(
