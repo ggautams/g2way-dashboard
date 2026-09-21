@@ -1,0 +1,92 @@
+{
+  "$comment": "Watched areas of the g2way repo. Each area is a set of upstream paths whose content is hashed (git tree/blob OIDs) and recorded in g2way.lock.json. When an area's OID moves, `npm run check:g2way` fails and names the dashboard surfaces that depend on it. Edit `paths` when g2way grows a file this dashboard reads; edit `surfaces`/`onChange` when the dashboard side moves.",
+  "repo": "../g2way",
+  "areas": [
+    {
+      "id": "admin-api",
+      "paths": ["crates/g2-admin/src", "docs/api/openapi.json"],
+      "surfaces": ["src/app/api/g2/**", "src/lib/g2/**", "contracts/g2way.d.ts"],
+      "onChange": "Re-copy the spec and regenerate types; check the BFF proxy allowlist for new or removed endpoints."
+    },
+    {
+      "id": "api-definition",
+      "paths": ["crates/g2-core/src/api_definition.rs"],
+      "surfaces": ["API designer (M3)"],
+      "onChange": "New or changed ApiDefinition fields need form controls, validation and a migration for stored config history."
+    },
+    {
+      "id": "auth-modes",
+      "paths": [
+        "crates/g2-middleware/src/auth.rs",
+        "crates/g2-middleware/src/jwks.rs",
+        "crates/g2-middleware/src/hmac.rs"
+      ],
+      "surfaces": ["Auth editor (M3/M5)"],
+      "onChange": "A new AuthConfig mode needs its own editor branch and an explain-panel entry."
+    },
+    {
+      "id": "session-policy",
+      "paths": ["crates/g2-core/src/session.rs", "crates/g2-core/src/policy.rs"],
+      "surfaces": ["Keys and policies (M4)"],
+      "onChange": "Rate/quota/access shape changes ripple into the key editor and the 'what does this key allow' resolver."
+    },
+    {
+      "id": "middleware-chain",
+      "paths": ["crates/g2-middleware/src/chain.rs"],
+      "surfaces": ["Visual chain designer (M5)"],
+      "onChange": "The slot order/count is the designer's canonical ordering — re-read the ChainBuilder rustdoc and update it."
+    },
+    {
+      "id": "traffic-middleware",
+      "paths": [
+        "crates/g2-core/src/transform.rs",
+        "crates/g2-core/src/body_transform.rs",
+        "crates/g2-core/src/endpoints.rs",
+        "crates/g2-core/src/security.rs",
+        "crates/g2-core/src/versioning.rs"
+      ],
+      "surfaces": ["Middleware designer (M5)"],
+      "onChange": "New transform or rule kinds need editors; check whether validation rules changed."
+    },
+    {
+      "id": "graphql",
+      "paths": ["crates/g2-core/src/graphql.rs", "crates/g2-core/src/federation.rs"],
+      "surfaces": ["GraphQL studio (M8)"],
+      "onChange": "New execution modes or config blocks need studio support (UDG sources, federation, cache)."
+    },
+    {
+      "id": "plugins",
+      "paths": ["crates/g2-core/src/plugins.rs", "crates/g2-plugin/src"],
+      "surfaces": ["Plugin manager (M9)"],
+      "onChange": "ABI or PluginRef changes affect upload validation and the documented host interface."
+    },
+    {
+      "id": "analytics",
+      "paths": [
+        "crates/g2-core/src/analytics.rs",
+        "crates/g2-telemetry/src/analytics.rs",
+        "crates/g2-middleware/src/stats.rs"
+      ],
+      "surfaces": ["Ingest worker and charts (M6)"],
+      "onChange": "AnalyticsRecord field changes need an ingest migration and rollup updates."
+    },
+    {
+      "id": "storage-keys",
+      "paths": ["crates/g2-storage/src", "crates/g2-core/src/config.rs"],
+      "surfaces": ["Ingest worker, direct Redis access (M6)"],
+      "onChange": "Redis key schema or analytics sink names changed — the ingest worker reads these keys directly."
+    },
+    {
+      "id": "deploy",
+      "paths": ["deploy/k8s", "deploy/docker"],
+      "surfaces": ["Dashboard manifests (M11)"],
+      "onChange": "Ports, Services or env changed — recheck that the dashboard can still reach the admin API in-cluster."
+    },
+    {
+      "id": "docs",
+      "paths": ["docs/adr", "docs/graphql.md", "docs/observability.md", "docs/tls.md", "docs/oidc.md", "docs/hmac.md", "docs/plugins.md", "docs/grpc.md", "docs/websockets.md", "docs/service-discovery.md", "docs/body-transforms.md", "docs/endpoint-rate-limits.md"],
+      "surfaces": ["contracts/g2way-docs/", "explain panels (M5/M8)"],
+      "onChange": "Re-vendor contracts/g2way-docs/; a new ADR may change a decision this dashboard relies on."
+    }
+  ]
+}
