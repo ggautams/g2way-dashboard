@@ -30,7 +30,7 @@ toolchain to regenerate its types.
 
 ## M1 — Connectivity & shell
 
-- [ ] Environment registry: named gateway targets (URL + admin secret), secrets
+- [x] Environment registry: named gateway targets (URL + admin secret), secrets
       read server-side only, `.env.example` documenting every variable
 - [ ] BFF proxy `src/app/api/g2/[...path]/route.ts` — attaches
       `X-G2-Authorization`, forwards method/body/query, passes the gateway's
@@ -189,3 +189,19 @@ an in-cluster dashboard cannot reach it. See `UPSTREAM.md`.
 target atomic`), verified by breaking the build and confirming the spec
   survives. Lesson worth keeping: the upstream checkout is read-only to this
   repo, full stop. Next: M1 — the BFF proxy and the environment registry.
+
+- M1 environment registry landed: `src/lib/g2/environments.ts`
+  (`server-only`) parses either the single-gateway form (`G2_ADMIN_URL` +
+  `G2_ADMIN_SECRET`, the same names g2way reads) or named environments
+  (`G2_ENVIRONMENTS` + `G2_ENV_<ID>_URL/_SECRET/_LABEL`), plus `G2_ORG_ID` and
+  `G2_DEFAULT_ENVIRONMENT`; all documented in `.env.example`. Bad config throws a
+  `RegistryConfigError` listing every problem by variable name, never by value —
+  the degraded-mode banner should catch it and show `problems`. The secret lives
+  in a private field on `GatewayTarget`, so `JSON.stringify`/`inspect`/spread of a
+  target cannot leak it; `listEnvironments()` (id, label, isDefault) is the only
+  shape for client props. `vitest.config.mts` aliases `server-only` to its no-op
+  entry. **Surprise:** the gate was red on arrival — g2way relicensed to MIT,
+  moving the spec's `info.license` — and the lock's previous upstream sha
+  `66aa49b` no longer exists in g2way (its history was rewritten), so old
+  `UPSTREAM.md` shas may not resolve upstream. Synced to `61a4975`. Next: the BFF
+  proxy `src/app/api/g2/[...path]/route.ts` over `resolveEnvironment()`.
