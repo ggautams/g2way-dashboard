@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# g2way-dashboard
 
-## Getting Started
+The control plane UI for [g2way](../g2way) — a free, self-hosted API gateway
+dashboard.
 
-First, run the development server:
+g2way is a complete API gateway with a full admin API and, deliberately, no
+UI, no user model, no audit log and no analytics storage. This project is that
+layer: API and policy design, key management, traffic analytics, a GraphQL
+studio, a developer portal, and the RBAC and audit trail an operator needs.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Status
+
+Early. M0 (scaffolding and the gateway contract layer) is complete; see
+`ROADMAP.md` for what is next and `UPSTREAM.md` for gateway-side work this
+project is waiting on.
+
+## Quick start
+
+```sh
+npm install
+make hooks          # once per clone: installs the upstream drift pre-commit hook
+make dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Point it at a gateway by setting its admin URL and secret (see `.env.example`
+once M1 lands). To run one locally:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```sh
+cd ../g2way
+make run            # proxy on :8080
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Commands
 
-## Learn More
+| Command            | What it does                                                   |
+| ------------------ | -------------------------------------------------------------- |
+| `make check`       | The gate: format, lint, typecheck, test, build, upstream drift |
+| `make dev`         | Run the dashboard locally                                      |
+| `make check-g2way` | Report whether a watched part of g2way has moved               |
+| `make sync-g2way`  | Regenerate `contracts/`, journal the change, commit it         |
+| `make hooks`       | Install the pre-commit drift hook                              |
 
-To learn more about Next.js, take a look at the following resources:
+## How this repo tracks the gateway
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+g2way is the driver. Everything mechanically derivable from it is generated into
+`contracts/` and committed — the OpenAPI document, TypeScript types for the whole
+admin surface, and a verbatim copy of the gateway's docs and ADRs. Watched areas
+of the gateway are fingerprinted by git object ID in `contracts/g2way.lock.json`,
+so `make check` fails when one moves and tells you which dashboard surfaces are
+affected. `make sync-g2way` regenerates everything, records what changed in
+`UPSTREAM.md`, and commits it.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+That means you rarely need to read the gateway's Rust at all: start from
+`contracts/g2way.d.ts` and `docs/g2way-map.md`. `CLAUDE.md` has the full lookup
+order and the session protocol.
 
-## Deploy on Vercel
+## Licence
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MPL-2.0, matching g2way.

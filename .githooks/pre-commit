@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuse a commit while this repo is behind a watched part of g2way.
+# Install with `make hooks`. Bypass with `git commit --no-verify`.
+exec npm run --silent check:g2way

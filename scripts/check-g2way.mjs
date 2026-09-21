@@ -6,8 +6,15 @@
 // Exit codes: 0 = in sync (or nothing to compare against), 1 = drift.
 
 import {
-  SHORT, commitsSince, computeDrift, headSha, isDirty,
-  readLock, readWatch, resolveG2wayRepo, uncoveredCrates,
+  SHORT,
+  commitsSince,
+  computeDrift,
+  headSha,
+  isDirty,
+  readLock,
+  readWatch,
+  resolveG2wayRepo,
+  uncoveredCrates,
 } from './g2way-lib.mjs';
 
 const args = process.argv.slice(2);
@@ -43,11 +50,15 @@ if (isDirty(g2way.path)) {
 }
 
 for (const d of missing) {
-  console.warn(`warning: area '${d.area.id}' lists paths that no longer exist upstream: ${d.missing.join(', ')}`);
+  console.warn(
+    `warning: area '${d.area.id}' lists paths that no longer exist upstream: ${d.missing.join(', ')}`,
+  );
 }
 
 if (unlocked.length > 0) {
-  console.warn(`warning: ${unlocked.length} area(s) not in the lock yet: ${unlocked.map((d) => d.area.id).join(', ')}`);
+  console.warn(
+    `warning: ${unlocked.length} area(s) not in the lock yet: ${unlocked.map((d) => d.area.id).join(', ')}`,
+  );
 }
 
 if (verbose) {
@@ -59,14 +70,18 @@ if (verbose) {
 
 if (changed.length === 0) {
   if (lock.head !== head) {
-    console.log(`g2way moved ${SHORT(lock.head)} → ${SHORT(head)}, but no watched area changed. Nothing to do.`);
+    console.log(
+      `g2way moved ${SHORT(lock.head)} → ${SHORT(head)}, but no watched area changed. Nothing to do.`,
+    );
   } else if (verbose) {
     console.log(`In sync with g2way ${SHORT(head)}.`);
   }
   process.exit(0);
 }
 
-console.error(`\ng2way drift: ${changed.length} watched area(s) changed since ${SHORT(lock.head)} (now ${SHORT(head)}).\n`);
+console.error(
+  `\ng2way drift: ${changed.length} watched area(s) changed since ${SHORT(lock.head)} (now ${SHORT(head)}).\n`,
+);
 for (const d of changed) {
   console.error(`  ${d.area.id}`);
   console.error(`    drives:  ${d.area.surfaces.join(', ')}`);

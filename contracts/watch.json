@@ -84,7 +84,20 @@
     },
     {
       "id": "docs",
-      "paths": ["docs/adr", "docs/graphql.md", "docs/observability.md", "docs/tls.md", "docs/oidc.md", "docs/hmac.md", "docs/plugins.md", "docs/grpc.md", "docs/websockets.md", "docs/service-discovery.md", "docs/body-transforms.md", "docs/endpoint-rate-limits.md"],
+      "paths": [
+        "docs/adr",
+        "docs/graphql.md",
+        "docs/observability.md",
+        "docs/tls.md",
+        "docs/oidc.md",
+        "docs/hmac.md",
+        "docs/plugins.md",
+        "docs/grpc.md",
+        "docs/websockets.md",
+        "docs/service-discovery.md",
+        "docs/body-transforms.md",
+        "docs/endpoint-rate-limits.md"
+      ],
       "surfaces": ["contracts/g2way-docs/", "explain panels (M5/M8)"],
       "onChange": "Re-vendor contracts/g2way-docs/; a new ADR may change a decision this dashboard relies on."
     }

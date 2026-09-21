@@ -80,8 +80,14 @@ export function fingerprintArea(repo, area) {
 export function commitsSince(repo, fromSha, area) {
   if (!fromSha) return [];
   const out = tryRun('git', [
-    '-C', repo, 'log', '--oneline', '--no-decorate',
-    `${fromSha}..HEAD`, '--', ...area.paths,
+    '-C',
+    repo,
+    'log',
+    '--oneline',
+    '--no-decorate',
+    `${fromSha}..HEAD`,
+    '--',
+    ...area.paths,
   ]);
   return out ? out.split('\n').filter(Boolean) : [];
 }

@@ -1,0 +1,9 @@
+# Generated from g2way by `npm run sync:g2way` — formatting them would create
+# spurious diffs on every sync.
+contracts/openapi.json
+contracts/g2way.d.ts
+contracts/g2way-docs/
+contracts/g2way.lock.json
+.next/
+node_modules/
+package-lock.json
