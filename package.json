@@ -14,7 +14,7 @@
     "check:bundle": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-client-bundle.mjs",
     "check:g2way": "node scripts/check-g2way.mjs",
     "sync:g2way": "node scripts/sync-g2way.mjs",
-    "db:generate": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.pg.config.ts",
+    "db:generate": "node scripts/db-generate.mjs",
     "db:migrate": "tsx --conditions=react-server scripts/db-migrate.mts"
   },
   "dependencies": {

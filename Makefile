@@ -41,8 +41,9 @@ start:
 ## ---- dashboard database (ADR-0003) --------------------------------------
 
 ## Write new SQLite and Postgres migrations after editing src/lib/db/schema/.
+## NAME is required and names both files: make db-generate NAME=add_widgets
 db-generate:
-	npm run db:generate
+	npm run db:generate -- --name "$(NAME)"
 
 ## Apply pending migrations to DATABASE_URL's database (the server also does
 ## this on startup).

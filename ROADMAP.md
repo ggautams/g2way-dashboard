@@ -65,7 +65,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       on the same row succeeds
 - [ ] `org-literal.test.ts` only follows `function`-declared org-taking helpers;
       extend it to arrow functions
-- [ ] `npm run db:generate` can't pass `--name` through (it runs drizzle-kit
+- [x] `npm run db:generate` can't pass `--name` through (it runs drizzle-kit
       twice), so migrations get random names — accept a name argument
 
 ## M3 — API management
@@ -531,3 +531,10 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   hooks, and `scripts/g2way-lib.mjs` passed it through to `git -C ../g2way`, so
   upstream git read this repo's index. `run()` now strips git's repo-location
   variables. Next: sign-in throttling.
+
+- chore: `db:generate` is now `scripts/db-generate.mjs`, which
+  runs drizzle-kit once per dialect config with the same required `--name`
+  (`make db-generate NAME=add_widgets`), so the SQLite and Postgres trees get
+  matching, meaningful file names. Unknown flags are refused rather than
+  silently dropped; `--custom` passes through for hand-written SQL. Taken out of
+  order so the sign-in throttling migration (next) gets a real name.
