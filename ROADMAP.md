@@ -61,7 +61,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       exercised the pg path, and only real pg races concurrent connections)
 - [ ] Browser pass over `/setup`, `/login`, `/users`, `/audit` and sign-out
       (M1 and M2 were only smoke-tested over HTTP; the extension was never connected)
-- [ ] Bug: on `/users`, an error on one row's form lingers after the other form
+- [x] Bug: on `/users`, an error on one row's form lingers after the other form
       on the same row succeeds
 - [ ] `org-literal.test.ts` only follows `function`-declared org-taking helpers;
       extend it to arrow functions
@@ -556,3 +556,11 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   first PGlite handle in each worker (WASM compile) was already brushing 5s
   under a parallel run, and a fourth PGlite suite pushed it over. Next:
   password change and reset.
+
+- fix: `/users` row controls now share one `useActionState`,
+  so a row shows its latest submit's result. Before, it combined the role and
+  status forms' errors as `roleState.error ?? statusState.error`, so an error
+  outlived a later success on the other form. The success notice the row never
+  displayed now shows too. With no component renderer, the guard
+  (`user-row-controls.test.ts`) reads the source. Done ahead of password reset,
+  which adds a third form to the same row. Next: password change and reset.
