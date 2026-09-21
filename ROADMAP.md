@@ -50,7 +50,7 @@ toolchain to regenerate its types.
 - [x] Auth.js login; first-run bootstrap of the initial owner account
 - [x] Roles: owner / admin / editor / viewer / portal-dev, enforced server-side
 - [x] Audit log: actor, action, before/after diff, resulting gateway call
-- [ ] `org_id` carried through every record and request (always `"default"` today)
+- [x] `org_id` carried through every record and request (always `"default"` today)
 
 ## M3 — API management
 
@@ -458,3 +458,29 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   connected). **Deferred:** retention/pruning, export, tamper-evidence, client
   IP. Rows written in the same millisecond have no defined order. Next: the last
   M2 box, `org_id` carried through every record and request.
+- M2 org scoping landed, recorded as ADR-0007. **M2 is complete.**
+  The data layer already filtered every query by org. `src/lib/db/tenancy.test.ts`
+  now proves it on SQLite and PGlite: rows seeded in org A are invisible to and
+  unmodifiable from org B (list, get by id or email, update, bootstrap,
+  last-owner rule, sign-in, audit list/get/complete), refusals are audited in
+  the attempting org, and dropping any org filter turns it red. `schema.test.ts`
+  also checks that `org_id` has no default on either dialect.
+  `src/lib/auth/session.test.ts` drives the real `getCurrentUser` with a stubbed
+  Auth.js session: a token for another org, or with no org claim, gets a
+  redirect on pages, "session has ended" from server actions and 401 from the
+  BFF. **Surprise, and the real gap:** g2way files API, policy and key writes
+  under the **body's** `org_id` (`resources.rs`, `keys.rs`), defaulting a
+  missing one to its own `DEFAULT_ORG_ID`, so `?org_id=` never scoped a write.
+  `scopeBody()` (`src/lib/g2/org-scope.ts`, operations derived from the spec)
+  now splices in the configured org when the body has none, byte-preserving.
+  It refuses another org, or `org_id` given twice, with a 403 audited as
+  `denied`, and a non-object body with 400. This applies in the BFF and in the
+  server-side typed client (`OrgScopeError`). `src/lib/org-literal.test.ts`
+  fails on `"default"` used as an org id anywhere in `src/` outside the one
+  config fallback. The node fixture and proxy tests now use stand-in orgs.
+  `docs/g2way-map.md` records the body-org invariant, and `watch.json`'s
+  admin-api `onChange` points at ADR-0007. **Deferred (ADR-0007 §6):**
+  `/g2/node`, `/g2/stats` and reload are pod-wide; the route table is not
+  filtered by org, which will matter only when g2way ships multi-org. Next: M3,
+  starting with the API list (search, filter, active/inactive state). Fix the
+  `127.0.0.1` CSRF bug (separate `fix:` commit) before M3's write UIs.

@@ -6,7 +6,7 @@
       "id": "admin-api",
       "paths": ["crates/g2-admin/src", "docs/api/openapi.json"],
       "surfaces": ["src/app/api/g2/**", "src/lib/g2/**", "contracts/g2way.d.ts"],
-      "onChange": "Re-copy the spec and regenerate types; check the BFF proxy allowlist for new or removed endpoints."
+      "onChange": "Re-copy the spec and regenerate types; check the BFF proxy allowlist for new or removed endpoints, and where each write reads its org (body org_id vs ?org_id=, ADR-0007)."
     },
     {
       "id": "api-definition",

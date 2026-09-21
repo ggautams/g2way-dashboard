@@ -16,8 +16,11 @@ import { ENVIRONMENT_HEADER, compileEndpoints, proxyToGateway } from './proxy';
 const SECRET = 'test-secret-do-not-leak';
 const STAGING_SECRET = 'staging-secret-do-not-leak';
 const ORIGIN = 'http://dashboard.test';
+// Stand-in org: the real one always comes from config (G2_ORG_ID), never a literal.
+const ORG = 'org-under-test';
 
 const registry = parseEnvironments({
+  G2_ORG_ID: ORG,
   G2_ENVIRONMENTS: 'dev,staging',
   G2_ENV_DEV_URL: 'http://gw-dev:9696',
   G2_ENV_DEV_SECRET: SECRET,
@@ -105,8 +108,17 @@ describe('forwarding', () => {
     expect(headers.get('x-g2-authorization')).toBe(SECRET);
     expect(headers.get('content-type')).toBe('application/json');
     expect(headers.get('accept')).toBe('application/json');
-    expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(body);
+    expect(JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer))).toEqual({
+      ...JSON.parse(body),
+      org_id: ORG,
+    });
     await assertNoSecret(response);
+  });
+
+  it('forwards a non-org-scoped body byte for byte', async () => {
+    const body = '{ "any": [1, 2] }';
+    const { calls } = await proxy('graphql/sync', { method: 'POST', body });
+    expect(new TextDecoder().decode(calls[0].init.body as ArrayBuffer)).toBe(body);
   });
 
   it('never forwards the browser cookies or Authorization header', async () => {
@@ -126,7 +138,7 @@ describe('forwarding', () => {
   it('keeps an encoded slash inside one path segment', async () => {
     const { response, calls } = await proxy('keys/a%2Fb?hashed=true');
     expect(response.status).toBe(200);
-    expect(calls[0].url).toBe('http://gw-dev:9696/g2/keys/a%2Fb?hashed=true&org_id=default');
+    expect(calls[0].url).toBe('http://gw-dev:9696/g2/keys/a%2Fb?hashed=true&org_id=org-under-test');
   });
 
   it('scopes org-scoped operations to the configured org, whatever the browser sent', async () => {
@@ -230,6 +242,72 @@ describe('the allowlist', () => {
   it('does not expose /metrics', async () => {
     const { response } = await proxy('metrics');
     expect(response.status).toBe(404);
+  });
+});
+
+describe('body org scoping (ADR-0007)', () => {
+  const decode = (call: Call) => new TextDecoder().decode(call.init.body as ArrayBuffer);
+
+  it('adds the configured org to every API, policy and key write body that names none', async () => {
+    for (const [path, method] of [
+      ['apis', 'POST'],
+      ['apis/a', 'PUT'],
+      ['policies', 'POST'],
+      ['policies/p', 'PUT'],
+      ['keys', 'POST'],
+      ['keys/k', 'PUT'],
+    ] as const) {
+      const { response, calls } = await proxy(path, { method, body: '{"id":"a"}' });
+      expect(response.status, `${method} ${path}`).toBe(200);
+      const write = calls.find((c) => c.init.method === method)!;
+      expect(JSON.parse(decode(write)), `${method} ${path}`).toEqual({ org_id: ORG, id: 'a' });
+    }
+  });
+
+  it('sends a body already naming the configured org unchanged', async () => {
+    const body = `{"id":"a", "org_id":"${ORG}", "n": 12345678901234567890}`;
+    const { calls } = await proxy('apis', { method: 'POST', body });
+    expect(decode(calls[0])).toBe(body);
+  });
+
+  it('refuses a body naming another org as a denied, audited cross-org write', async () => {
+    const { response, calls, audit } = await proxy('policies/gold', {
+      method: 'PUT',
+      body: JSON.stringify({ id: 'gold', org_id: 'someone-else' }),
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: expect.stringMatching(/^forbidden: cross-org write refused: .*"someone-else"/),
+    });
+    expect(calls).toEqual([]);
+    expect(audit).toEqual([
+      expect.objectContaining({
+        action: 'policy.update',
+        outcome: 'denied',
+        error: expect.stringMatching(/cross-org/),
+      }),
+    ]);
+  });
+
+  it('refuses a body naming org_id twice', async () => {
+    const { response, calls } = await proxy('keys', {
+      method: 'POST',
+      body: `{"org_id":"someone-else","org_id":"${ORG}"}`,
+    });
+    expect(response.status).toBe(403);
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses a body that is not a JSON object with 400, unaudited, never sent', async () => {
+    for (const body of ['not json', '[]', '', new Uint8Array([0x7b, 0xff, 0x7d])]) {
+      const { response, calls, audit } = await proxy('apis', { method: 'POST', body });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: expect.stringMatching(/^invalid request body/),
+      });
+      expect(calls).toEqual([]);
+      expect(audit).toEqual([]);
+    }
   });
 });
 
@@ -430,9 +508,9 @@ describe('audited writes (ADR-0006)', () => {
     expect(await response.json()).toEqual({ id: 'httpbin', action: 'modified' });
     // Before and after are read back with the same org scoping as any read.
     expect(gateway.calls).toEqual([
-      'GET /g2/apis/httpbin?org_id=default',
+      'GET /g2/apis/httpbin?org_id=org-under-test',
       'PUT /g2/apis/httpbin',
-      'GET /g2/apis/httpbin?org_id=default',
+      'GET /g2/apis/httpbin?org_id=org-under-test',
     ]);
     const [row] = await rows();
     expect(row).toMatchObject({
@@ -587,7 +665,7 @@ describe('audited writes (ADR-0006)', () => {
     });
     expect(response.status).toBe(503);
     expect((await response.json()).error).toMatch(/^audit log unavailable/);
-    expect(gateway.calls).toEqual(['GET /g2/apis/httpbin?org_id=default']);
+    expect(gateway.calls).toEqual(['GET /g2/apis/httpbin?org_id=org-under-test']);
     expect(gateway.apis.get('httpbin')).toMatchObject({ listen_path: '/old/' });
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();

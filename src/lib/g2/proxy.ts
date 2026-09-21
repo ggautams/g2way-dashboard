@@ -23,7 +23,7 @@ import {
 import { ENVIRONMENT_HEADER } from './client';
 import { GatewayError, describeFetchError } from './errors';
 import { operationPermission } from './operation-permissions';
-import { withOrgId } from './org-scope';
+import { isBodyOrgScoped, scopeBody, withOrgId } from './org-scope';
 import { ADMIN_SECRET_HEADER, GATEWAY_TIMEOUT_MS } from './server-client';
 
 export { ENVIRONMENT_HEADER };
@@ -39,7 +39,9 @@ export { ENVIRONMENT_HEADER };
  * keeps it current. Each forwarded operation also needs the caller's role to
  * hold the permission `./operation-permissions` maps it to; an unmapped one is
  * refused (default deny, ADR-0005). Org-scoped operations get the configured
- * `org_id` (see `./org-scope`), overwriting any the browser sent.
+ * `org_id` (see `./org-scope`, ADR-0007): in the query, overwriting any the
+ * browser sent, and in the body of API, policy and key writes, where a body
+ * naming another org is refused as a cross-org write.
  *
  * Every write (non-GET) that reaches the role check is audited (ADR-0006): a
  * refused one as `denied`; an allowed one gets a `pending` row *before* the
@@ -127,8 +129,9 @@ export type ProxyDeps = {
  * user, read fresh from the database for this request. Responds with the
  * gateway's status and body untouched, or a BFF error in the same `{"error"}`
  * envelope: 404/405 for endpoints the gateway does not document, 400 for a bad
- * path or unknown environment, 403 when the role lacks the operation's
- * permission or for a cross-site write, 500 for broken environment
+ * path, an unknown environment or an org-scoped write whose body is not a JSON
+ * object, 403 when the role lacks the operation's permission, for a cross-site
+ * write, or for a body naming another org, 500 for broken environment
  * configuration, 502 when the gateway cannot be reached, and 503 when a write
  * cannot be audited (it is then not sent).
  */
@@ -213,7 +216,23 @@ export async function proxyToGateway(
     endpoint.path,
     target.orgId,
   ).toString();
-  const body = method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer();
+  let body = method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer();
+  if (body !== undefined && isBodyOrgScoped(method, endpoint.path)) {
+    const envHeader = { [ENVIRONMENT_HEADER]: target.id };
+    let text: string;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(body);
+    } catch {
+      return errorResponse(400, 'invalid request body: not UTF-8 text', envHeader);
+    }
+    const scoped = scopeBody(method, endpoint.path, text, target.orgId);
+    if (!scoped.ok) {
+      return scoped.reason === 'malformed'
+        ? errorResponse(400, scoped.message, envHeader)
+        : deny(scoped.message);
+    }
+    if (scoped.body !== text) body = new TextEncoder().encode(scoped.body).buffer;
+  }
 
   if (write !== null) {
     return auditedWrite({

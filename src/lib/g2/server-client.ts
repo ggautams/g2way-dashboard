@@ -2,7 +2,7 @@ import 'server-only';
 import { createG2Client, type G2Client } from './client';
 import { resolveEnvironment, type Registry } from './environments';
 import { GatewayUnreachableError } from './errors';
-import { withOrgId } from './org-scope';
+import { OrgScopeError, isBodyOrgScoped, scopeBody, withOrgId } from './org-scope';
 
 /**
  * The typed gateway client for server code (Server Components, route handlers,
@@ -48,11 +48,25 @@ export function gatewayClient(environmentId?: string, deps: GatewayClientDeps = 
     },
   });
 
+  // Org scoping (ADR-0007): the configured org in the query of operations that
+  // take one, and in the body of API, policy and key writes. A body naming
+  // another org throws OrgScopeError and is never sent.
   client.use({
-    onRequest({ request, schemaPath }) {
+    async onRequest({ request, schemaPath }) {
       const url = new URL(request.url);
-      const scoped = withOrgId(url, request.method, schemaPath, target.orgId);
-      return scoped === url ? undefined : new Request(scoped, request);
+      const scopedUrl = withOrgId(url, request.method, schemaPath, target.orgId);
+      if (!isBodyOrgScoped(request.method, schemaPath)) {
+        return scopedUrl === url ? undefined : new Request(scopedUrl, request);
+      }
+      const text = await request.clone().text();
+      const scoped = scopeBody(request.method, schemaPath, text, target.orgId);
+      if (!scoped.ok) throw new OrgScopeError(scoped.reason, scoped.message);
+      return new Request(scopedUrl, {
+        method: request.method,
+        headers: request.headers,
+        body: scoped.body,
+        signal: request.signal,
+      });
     },
   });
 

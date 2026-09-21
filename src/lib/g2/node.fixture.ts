@@ -9,7 +9,7 @@ export function nodeBody() {
       {
         api_id: 'orders',
         name: 'Orders',
-        org_id: 'default',
+        org_id: 'org-under-test',
         listen_path: '/orders/',
         target_url: 'http://orders:8080',
         target_list: ['http://orders-a:8080', 'http://orders-b:8080'],
@@ -27,7 +27,7 @@ export function nodeBody() {
       {
         api_id: 'catalog',
         name: 'Catalog',
-        org_id: 'default',
+        org_id: 'org-under-test',
         listen_path: '/graphql/',
         target_url: 'http://catalog:4000',
         target_list: [],

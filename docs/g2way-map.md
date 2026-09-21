@@ -65,6 +65,12 @@ These are load-bearing for the dashboard and easy to get wrong:
   distinguishes them.
 - **`org_id` is on every record and Redis key** but is always `DEFAULT_ORG_ID`
   (`"default"`) today. Carry it everywhere; never hardcode the literal.
+- **Writes take their org from the body, not the query.** `POST`/`PUT` of API
+  definitions, policies and keys file the record under the body's `org_id`
+  (`resources.rs` `create`/`put`, `keys.rs`), and a body without one is
+  serde-defaulted to `DEFAULT_ORG_ID`, whatever `?org_id=` says (`PUT
+/g2/keys/{key}` takes both: the query locates the hash, the body files it).
+  `GET`/`DELETE` take `?org_id=`. The BFF sets both (ADR-0007).
 - **Redis key schema is `g2:{org_id}:{kind}:{id}`.** Analytics records accumulate at
   `g2:{org}:analytics:records` — but only when the gateway runs with
   `--analytics-sink redis_list`.

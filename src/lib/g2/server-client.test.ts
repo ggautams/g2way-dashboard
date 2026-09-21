@@ -3,6 +3,7 @@ import type { components } from '../../../contracts/g2way.d.ts';
 import { unwrap } from './client';
 import { UnknownEnvironmentError, parseEnvironments } from './environments';
 import { GatewayUnreachableError } from './errors';
+import { OrgScopeError } from './org-scope';
 import { gatewayClient } from './server-client';
 
 const SECRET = 'test-secret-do-not-leak';
@@ -57,9 +58,46 @@ describe('gatewayClient', () => {
       'http://gw-dev:9696/g2/reload',
       'http://gw-dev:9696/g2/keys/k?hashed=true&org_id=acme',
     ]);
-    // Re-targeting the request must keep its method and body.
+    // Re-targeting the request must keep its method, and its body gains the org.
     expect(gateway.requests[2].method).toBe('PUT');
-    expect(await gateway.requests[2].text()).toBe('{}');
+    expect(await gateway.requests[2].text()).toBe('{"org_id":"acme"}');
+  });
+
+  it('scopes API, policy and key write bodies to the configured org', async () => {
+    const api: components['schemas']['ApiDefinition'] = {
+      api_id: 'a',
+      name: 'A',
+      listen_path: '/a/',
+      target_url: 'http://a',
+      org_id: 'acme',
+    };
+    const gateway = fakeGateway();
+    const client = gatewayClient(undefined, { registry, fetch: gateway.fetch });
+    await client.POST('/g2/policies', {
+      body: { policy_id: 'gold', name: 'Gold' } as components['schemas']['Policy'],
+    });
+    await client.PUT('/g2/apis/{id}', {
+      params: { path: { id: 'a' } },
+      body: api,
+    });
+    expect(await gateway.requests[0].json()).toEqual({
+      org_id: 'acme',
+      policy_id: 'gold',
+      name: 'Gold',
+    });
+    expect(gateway.requests[0].headers.get('content-type')).toMatch(/json/);
+    expect(await gateway.requests[1].text()).toBe(JSON.stringify(api));
+  });
+
+  it('refuses to send a body naming another org', async () => {
+    const gateway = fakeGateway();
+    const client = gatewayClient(undefined, { registry, fetch: gateway.fetch });
+    const error = await client
+      .POST('/g2/keys', { body: { org_id: 'other' } as components['schemas']['KeySession'] })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(OrgScopeError);
+    expect((error as OrgScopeError).reason).toBe('cross-org');
+    expect(gateway.requests).toEqual([]);
   });
 
   it('reports a network failure as unreachable, naming the environment and cause', async () => {

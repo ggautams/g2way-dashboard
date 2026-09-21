@@ -76,9 +76,13 @@ describe('schema parity (SQLite ⇄ Postgres)', () => {
     expect(pgShape(pg[name])).toEqual(sqliteShape(sqlite[name]));
   });
 
-  it('every table carries a non-null org_id', () => {
-    for (const table of Object.values(sqlite)) {
-      expect(getTableColumns(table)).toHaveProperty('orgId.notNull', true);
+  it('every table carries a non-null org_id with no default (ADR-0003 §3)', () => {
+    for (const table of [...Object.values(sqlite), ...Object.values(pg)]) {
+      const columns = getTableColumns(table);
+      expect(columns).toHaveProperty('orgId.name', 'org_id');
+      expect(columns).toHaveProperty('orgId.notNull', true);
+      // The caller must supply it from config; a default would let a write skip it.
+      expect(columns).toHaveProperty('orgId.hasDefault', false);
     }
   });
 
