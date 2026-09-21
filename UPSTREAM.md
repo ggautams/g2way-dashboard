@@ -52,3 +52,13 @@ Initial lock against g2way `9f0b81166d0903f09e265acc8769b33a589e7173`. All 12 wa
 ## 2026-09-10 — g2way 9f0b811 → 66aa49b
 
 Upstream moved, but no watched area changed. Lock advanced; nothing to do here.
+
+## 2026-09-23 — g2way 66aa49b → 61a4975
+
+Watched areas changed: **admin-api**
+
+### admin-api
+
+- Drives: src/app/api/g2/**, src/lib/g2/**, contracts/g2way.d.ts
+- Action: Re-copy the spec and regenerate types; check the BFF proxy allowlist for new or removed endpoints.
+- [ ] TODO: Re-copy the spec and regenerate types; check the BFF proxy allowlist for new or removed endpoints.
