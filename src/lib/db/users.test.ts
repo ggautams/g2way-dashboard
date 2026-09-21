@@ -6,6 +6,7 @@ import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator';
 import { afterEach, describe, expect, it } from 'vitest';
 import { migrateDatabase, migrationsFolder, openDatabase, type DashboardDatabase } from '.';
+import { getAuditEntry, listAudit, type AuditEntry } from './audit';
 import * as pgSchema from './schema/pg';
 import type { Role } from './schema/shared';
 import {
@@ -264,6 +265,81 @@ describe.each([
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     const owners = (await listUsers(handle, ORG)).filter((u) => u.role === 'owner' && !u.disabled);
     expect(owners).toHaveLength(1);
+  });
+});
+
+// ADR-0006: every user-management write records its audit row in the same
+// transaction, refusals included, and no row ever carries a password hash.
+describe.each([
+  ['SQLite (in memory)', sqliteMemory],
+  ['Postgres (PGlite)', pglite],
+])('user management audit rows on %s', (_name, open) => {
+  const trail = async (handle: DataHandle) =>
+    Promise.all(
+      (await listAudit(handle, ORG)).entries.map(
+        async (e) => (await getAuditEntry(handle, ORG, e.id))!,
+      ),
+    );
+  const byAction = (rows: AuditEntry[], action: string, outcome = 'success') =>
+    rows.find((row) => row.action === action && row.outcome === outcome);
+
+  it('records the bootstrap, creates, role changes and disables with before/after', async () => {
+    const handle = await open();
+    const { owner, create } = await seeded(handle);
+    const viewer = await create('viewer');
+    expect((await updateUser(handle, ORG, owner.id, viewer.id, { role: 'editor' })).ok).toBe(true);
+    expect((await updateUser(handle, ORG, owner.id, viewer.id, { disabled: true })).ok).toBe(true);
+
+    const rows = await trail(handle);
+    expect(byAction(rows, 'auth.bootstrap')).toMatchObject({
+      actorId: owner.id,
+      actorRole: 'owner',
+      target: 'ada@example.com',
+      before: null,
+      after: { email: 'ada@example.com', role: 'owner', disabled: false },
+    });
+    expect(byAction(rows, 'user.create')).toMatchObject({
+      actorEmail: 'ada@example.com',
+      target: 'viewer@example.com',
+      request: { email: 'viewer@example.com', name: 'viewer', role: 'viewer' },
+      before: null,
+      after: { role: 'viewer' },
+    });
+    expect(byAction(rows, 'user.role_change')).toMatchObject({
+      target: 'viewer@example.com',
+      request: { role: 'editor' },
+      before: { role: 'viewer' },
+      after: { role: 'editor' },
+    });
+    expect(byAction(rows, 'user.disable')).toMatchObject({
+      before: { disabled: false },
+      after: { disabled: true },
+    });
+    expect(rows.every((row) => row.orgId === ORG && row.gatewayMethod === null)).toBe(true);
+    expect(JSON.stringify(rows)).not.toMatch(/passwordHash|password_hash|hash-a/);
+  });
+
+  it('records refusals as denied or failed, with the refusal message', async () => {
+    const handle = await open();
+    const { owner, create } = await seeded(handle);
+    const admin = await create('admin');
+    await createUser(handle, ORG, admin.id, { ...bob, role: 'owner' });
+    await createUser(handle, ORG, owner.id, { ...bob, email: 'ADA@example.com', role: 'viewer' });
+    await updateUser(handle, ORG, owner.id, owner.id, { disabled: true });
+
+    const rows = await trail(handle);
+    expect(byAction(rows, 'user.create', 'denied')).toMatchObject({
+      actorEmail: 'admin@example.com',
+      target: 'bob@example.com',
+      request: { role: 'owner' },
+      after: null,
+    });
+    expect(byAction(rows, 'user.create', 'failure')?.error).toContain('already exists');
+    expect(byAction(rows, 'user.disable', 'denied')).toMatchObject({
+      target: 'ada@example.com',
+      before: { role: 'owner', disabled: false },
+      after: null,
+    });
   });
 });
 

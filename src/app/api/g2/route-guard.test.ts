@@ -13,9 +13,12 @@ describe('BFF route', () => {
     }
   });
 
-  // The proxy enforces each operation's permission against this role (ADR-0005).
-  it("hands the proxy the signed-in user's role", () => {
+  // The proxy enforces each operation's permission against this role (ADR-0005)
+  // and audits writes as this user (ADR-0006).
+  it('hands the proxy the signed-in user as the actor', () => {
     const source = readFileSync(join(import.meta.dirname, '[...path]', 'route.ts'), 'utf8');
-    expect(source).toMatch(/proxyToGateway\(request, path, user\.role\)/);
+    expect(source).toMatch(
+      /proxyToGateway\(request, path, \{ id: user\.id, email: user\.email, role: user\.role \}\)/,
+    );
   });
 });

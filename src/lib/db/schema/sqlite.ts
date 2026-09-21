@@ -1,5 +1,5 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
-import { ROLES, type JsonValue } from './shared';
+import { AUDIT_OUTCOMES, ROLES, type JsonValue } from './shared';
 
 /**
  * The dashboard schema for SQLite (the default database). Mirrors `pg.ts`
@@ -34,9 +34,15 @@ export const users = sqliteTable(
 );
 
 /**
- * One row per mutating action. The actor is snapshotted (id and email) rather
- * than foreign-keyed, so the trail survives the user being deleted. `gateway_*`
- * is the resulting gateway call, when there was one.
+ * One row per audited action (ADR-0006). The actor is snapshotted (id, email,
+ * role) rather than foreign-keyed, so the trail survives the user being deleted
+ * or re-roled. `before`/`after` are the redacted state of the target around the
+ * action; `request` is the redacted body that was asked for. `gateway_*` is the
+ * resulting gateway call, when there was one, and `environment` the gateway it
+ * went to. `outcome` is `pending` only between a gateway write being attempted
+ * and its result being recorded: a row left `pending` means that record is
+ * incomplete. `error` carries the refusal or the gateway's own message; `note`
+ * any caveat about the snapshots (e.g. the before-state could not be read).
  */
 export const auditLog = sqliteTable(
   'audit_log',
@@ -45,6 +51,7 @@ export const auditLog = sqliteTable(
     orgId: text('org_id').notNull(),
     actorId: text('actor_id'),
     actorEmail: text('actor_email'),
+    actorRole: text('actor_role', { enum: ROLES }),
     action: text('action').notNull(),
     target: text('target'),
     before: text('before', { mode: 'json' }).$type<JsonValue>(),
@@ -52,6 +59,11 @@ export const auditLog = sqliteTable(
     gatewayMethod: text('gateway_method'),
     gatewayPath: text('gateway_path'),
     gatewayStatus: integer('gateway_status'),
+    environment: text('environment'),
+    request: text('request', { mode: 'json' }).$type<JsonValue>(),
+    outcome: text('outcome', { enum: AUDIT_OUTCOMES }).notNull(),
+    error: text('error'),
+    note: text('note'),
     createdAt: timestamp('created_at'),
   },
   (t) => [index('audit_log_org_created_idx').on(t.orgId, t.createdAt)],

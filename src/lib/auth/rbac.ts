@@ -29,7 +29,7 @@ export const PERMISSIONS = [
   'graphql:sync',
   /** The users page. Who may change whom is decided by {@link userChangeDenial}. */
   'users:manage',
-  /** The audit log (next task). */
+  /** The audit log (ADR-0006). */
   'audit:read',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];

@@ -29,6 +29,7 @@ const audit: typeof sqliteSchema.auditLog.$inferInsert = {
   gatewayMethod: 'PUT',
   gatewayPath: '/g2/apis/petstore',
   gatewayStatus: 200,
+  outcome: 'success',
 };
 
 const open: DashboardDatabase[] = [];

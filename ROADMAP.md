@@ -49,7 +49,7 @@ toolchain to regenerate its types.
 - [x] Drizzle schema + migrations (better-sqlite3 default, Postgres driver swap)
 - [x] Auth.js login; first-run bootstrap of the initial owner account
 - [x] Roles: owner / admin / editor / viewer / portal-dev, enforced server-side
-- [ ] Audit log: actor, action, before/after diff, resulting gateway call
+- [x] Audit log: actor, action, before/after diff, resulting gateway call
 - [ ] `org_id` carried through every record and request (always `"default"` today)
 
 ## M3 — API management
@@ -420,3 +420,41 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   pass (the extension wasn't connected). **Deferred:** account deletion, admin
   password reset, per-API/environment role scoping. Next: the audit log, hooked
   into `src/lib/users/actions.ts` and the BFF's mutating calls.
+
+- M2 audit log landed, recorded as ADR-0006. `src/lib/db/audit.ts`
+  (`recordAudit`, `completeAudit`, filtered and paged `listAudit`, `getAuditEntry`)
+  sits over the union like `users.ts`. It redacts every snapshot on the way in
+  (`src/lib/audit/redact.ts`: values under secret-looking property names, plus
+  `[redacted: changed]` so a rotated secret still shows in the diff). New columns:
+  `actor_role`, `environment`, `request`, `outcome`, `error`, `note`. The
+  `0001_audit_outcomes` migrations are **hand-edited**, because SQLite can't add a
+  NOT NULL column. A test replays both dialects over a pre-existing row. The BFF
+  audits every write that gets past the allowlist. Refusals (role, unmapped,
+  cross-site) are `denied`, best effort. Allowed writes are **write-ahead**: a
+  `pending` row goes in before the gateway call (if that insert fails, the write
+  is refused with 503 and never sent), then `before`/`after` come from GETs of
+  the same item around the call. Creates are re-read by the returned
+  `id`/`key_hash`, and reload/sync store the gateway's answer. A key in the path
+  is recorded by its SHA-256 `key_hash` (g2way's `hash_key`), and `POST /g2/keys`'s
+  raw key never reaches a row (tested across create, update and delete, alongside
+  the HMAC and admin secrets). User create, role change, disable/enable and the
+  bootstrap write their row **inside their own transaction**, refusals included.
+  Sign-in (success, failure, disabled) and sign-out are best effort. A failed
+  sign-in stores the tried address only if it looks like one, and an unknown email
+  records the same row as a wrong password. `/audit` (filter form over GET, 50 per
+  page, UTC) and `/audit/[id]` (structural diff via `src/lib/audit/diff.ts`, no
+  dependency) need `audit:read`. The nav flag is flipped and both pages are in
+  `check:bundle`'s `PAGES`, the detail page via a seeded row; the viewer's 403s
+  are checked too. Smoke-tested with `next start` against a fake gateway: an
+  editor's API update (before/after, JWT secret shown as changed), an admin key
+  create (raw key only in the response), a viewer's denied PUT, a failed sign-in,
+  the page for an admin, the diff, the outcome filter, and a 403 for an editor.
+  **Surprise (pre-existing M1 bug, not fixed here):** under
+  `next start -H 127.0.0.1`, `request.url` reports `localhost`, so the proxy's
+  CSRF check refuses a same-origin write from a browser on `http://127.0.0.1:…`
+  ("cross-site request refused"). The smoke run had to send `Origin: localhost`.
+  The check should compare against the `Host`/`X-Forwarded-Host` the browser
+  used. Fix it before M3 ships write UIs. No browser pass (the extension wasn't
+  connected). **Deferred:** retention/pruning, export, tamper-evidence, client
+  IP. Rows written in the same millisecond have no defined order. Next: the last
+  M2 box, `org_id` carried through every record and request.

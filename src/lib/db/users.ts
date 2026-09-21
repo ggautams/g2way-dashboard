@@ -4,6 +4,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { userChangeDenial } from '@/lib/auth/rbac';
+import { auditValues, type AuditActor } from './audit';
 import type * as pgSchema from './schema/pg';
 import type { Role } from './schema/shared';
 import type * as sqliteSchema from './schema/sqlite';
@@ -148,7 +149,9 @@ export async function createFirstOwner(
           .limit(1)
           .get();
         if (existing !== undefined) return null;
-        return tx.insert(schema.users).values(values).returning().get();
+        const created = tx.insert(schema.users).values(values).returning().get();
+        tx.insert(schema.auditLog).values(bootstrapAudit(orgId, created)).run();
+        return created;
       },
       { behavior: 'immediate' },
     );
@@ -164,6 +167,7 @@ export async function createFirstOwner(
       .limit(1);
     if (existing.length > 0) return null;
     const [created] = await tx.insert(schema.users).values(values).returning();
+    await tx.insert(schema.auditLog).values(bootstrapAudit(orgId, created));
     return created;
   });
 }
@@ -218,7 +222,7 @@ export type UserWriteRefusal =
 
 /**
  * A successful write, with the account before and after it — the snapshot the
- * audit log (next task) records. `before` is `null` for a created account.
+ * audit log records (ADR-0006). `before` is `null` for a created account.
  */
 export type UserWriteResult =
   { ok: true; before: UserSummary | null; after: UserSummary } | UserWriteRefusal;
@@ -274,6 +278,70 @@ const LAST_OWNER: UserWriteRefusal = {
   message: 'this is the last active owner; make someone else an owner first',
 };
 
+// ---- audit rows (ADR-0006) ------------------------------------------------
+// Every user-management write records its audit row inside its own transaction,
+// so a change never commits without its row, and a refusal is recorded too.
+// Summaries never carry the password hash.
+
+function actorOf(user: User | undefined): AuditActor | null {
+  return user === undefined ? null : { id: user.id, email: user.email, role: user.role };
+}
+
+function snapshot(user: UserSummary | User | null | undefined) {
+  if (user == null) return null;
+  const { id, email, name, role, disabled, createdAt } = user;
+  return { id, email, name, role, disabled, createdAt: createdAt.toISOString() };
+}
+
+const REFUSAL_OUTCOME = {
+  denied: 'denied',
+  'last-owner': 'denied',
+  'not-found': 'failure',
+  'email-taken': 'failure',
+} as const satisfies Record<UserWriteRefusal['reason'], 'denied' | 'failure'>;
+
+type WriteAudit = {
+  actorId: string;
+  actor: User | undefined;
+  action: string;
+  target: string;
+  request: { [key: string]: string | boolean };
+  /** The target as it stood, for a refusal (a success carries its own before). */
+  current?: User;
+  result: UserWriteResult;
+};
+
+function writeAudit(orgId: string, audit: WriteAudit) {
+  const { actor, actorId, result } = audit;
+  return auditValues(orgId, {
+    actor: actorOf(actor),
+    action: audit.action,
+    target: audit.target,
+    request: audit.request,
+    before: result.ok ? snapshot(result.before) : snapshot(audit.current),
+    after: result.ok ? snapshot(result.after) : null,
+    outcome: result.ok ? 'success' : REFUSAL_OUTCOME[result.reason],
+    error: result.ok ? null : result.message,
+    notes: actor === undefined ? [`the acting account ${actorId} no longer exists`] : [],
+  });
+}
+
+function bootstrapAudit(orgId: string, owner: User) {
+  return auditValues(orgId, {
+    actor: actorOf(owner),
+    action: 'auth.bootstrap',
+    target: owner.email,
+    after: snapshot(owner),
+    outcome: 'success',
+  });
+}
+
+/** `user.role_change`, `user.disable` or `user.enable`. */
+export function userChangeAction(change: UserChange): string {
+  if ('role' in change) return 'user.role_change';
+  return change.disabled ? 'user.disable' : 'user.enable';
+}
+
 function usersLockKey(orgId: string): string {
   return `g2dash:users:${orgId}`;
 }
@@ -295,6 +363,15 @@ export async function createUser(
     passwordHash: user.passwordHash,
     role: user.role,
   };
+  const createAudit = (actor: User | undefined, result: UserWriteResult) =>
+    writeAudit(orgId, {
+      actorId,
+      actor,
+      action: 'user.create',
+      target: values.email,
+      request: { email: values.email, name: values.name, role: values.role },
+      result,
+    });
   const taken: UserWriteRefusal = {
     ok: false,
     reason: 'email-taken',
@@ -311,16 +388,20 @@ export async function createUser(
           .from(u)
           .where(and(eq(u.orgId, orgId), eq(u.id, actorId)))
           .get();
-        const refusal = decide(actor, null, values.role);
-        if (refusal) return refusal;
-        const existing = tx
-          .select({ id: u.id })
-          .from(u)
-          .where(and(eq(u.orgId, orgId), eq(u.email, values.email)))
-          .get();
-        if (existing !== undefined) return taken;
-        const created = tx.insert(u).values(values).returning().get();
-        return { ok: true, before: null, after: summarise(created) };
+        const result = ((): UserWriteResult => {
+          const refusal = decide(actor, null, values.role);
+          if (refusal) return refusal;
+          const existing = tx
+            .select({ id: u.id })
+            .from(u)
+            .where(and(eq(u.orgId, orgId), eq(u.email, values.email)))
+            .get();
+          if (existing !== undefined) return taken;
+          const created = tx.insert(u).values(values).returning().get();
+          return { ok: true, before: null, after: summarise(created) };
+        })();
+        tx.insert(schema.auditLog).values(createAudit(actor, result)).run();
+        return result;
       },
       { behavior: 'immediate' },
     );
@@ -334,15 +415,19 @@ export async function createUser(
       .select()
       .from(u)
       .where(and(eq(u.orgId, orgId), eq(u.id, actorId)));
-    const refusal = decide(actor, null, values.role);
-    if (refusal) return refusal;
-    const existing = await tx
-      .select({ id: u.id })
-      .from(u)
-      .where(and(eq(u.orgId, orgId), eq(u.email, values.email)));
-    if (existing.length > 0) return taken;
-    const [created] = await tx.insert(u).values(values).returning();
-    return { ok: true, before: null, after: summarise(created) };
+    const result = await (async (): Promise<UserWriteResult> => {
+      const refusal = decide(actor, null, values.role);
+      if (refusal) return refusal;
+      const existing = await tx
+        .select({ id: u.id })
+        .from(u)
+        .where(and(eq(u.orgId, orgId), eq(u.email, values.email)));
+      if (existing.length > 0) return taken;
+      const [created] = await tx.insert(u).values(values).returning();
+      return { ok: true, before: null, after: summarise(created) };
+    })();
+    await tx.insert(schema.auditLog).values(createAudit(actor, result));
+    return result;
   });
 }
 
@@ -363,6 +448,20 @@ export async function updateUser(
   change: UserChange,
 ): Promise<UserWriteResult> {
   const values = 'role' in change ? { role: change.role } : { disabled: change.disabled };
+  const updateAudit = (
+    actor: User | undefined,
+    target: User | undefined,
+    result: UserWriteResult,
+  ) =>
+    writeAudit(orgId, {
+      actorId,
+      actor,
+      action: userChangeAction(change),
+      target: target?.email ?? targetId,
+      request: 'role' in change ? { role: change.role } : { disabled: change.disabled },
+      current: target,
+      result,
+    });
 
   if (handle.dialect === 'sqlite') {
     const { db, schema } = handle;
@@ -377,21 +476,27 @@ export async function updateUser(
             .get();
         const actor = byId(actorId);
         const target = byId(targetId);
-        const refusal = decide(actor, target, 'role' in change ? change.role : undefined);
-        if (refusal) return refusal;
-        const activeOwners = tx
-          .select({ id: u.id })
-          .from(u)
-          .where(and(eq(u.orgId, orgId), eq(u.role, 'owner'), eq(u.disabled, false)))
-          .all().length;
-        if (removesLastActiveOwner(target!, change, activeOwners)) return LAST_OWNER;
-        const updated = tx
-          .update(u)
-          .set(values)
-          .where(and(eq(u.orgId, orgId), eq(u.id, targetId)))
-          .returning()
-          .get();
-        return { ok: true, before: summarise(target!), after: summarise(updated) };
+        const result = ((): UserWriteResult => {
+          const refusal = decide(actor, target, 'role' in change ? change.role : undefined);
+          if (refusal) return refusal;
+          const activeOwners = tx
+            .select({ id: u.id })
+            .from(u)
+            .where(and(eq(u.orgId, orgId), eq(u.role, 'owner'), eq(u.disabled, false)))
+            .all().length;
+          if (removesLastActiveOwner(target!, change, activeOwners)) return LAST_OWNER;
+          const updated = tx
+            .update(u)
+            .set(values)
+            .where(and(eq(u.orgId, orgId), eq(u.id, targetId)))
+            .returning()
+            .get();
+          return { ok: true, before: summarise(target!), after: summarise(updated) };
+        })();
+        tx.insert(schema.auditLog)
+          .values(updateAudit(actor, target, result))
+          .run();
+        return result;
       },
       { behavior: 'immediate' },
     );
@@ -410,20 +515,24 @@ export async function updateUser(
       )[0];
     const actor = await byId(actorId);
     const target = await byId(targetId);
-    const refusal = decide(actor, target, 'role' in change ? change.role : undefined);
-    if (refusal) return refusal;
-    const activeOwners = (
-      await tx
-        .select({ id: u.id })
-        .from(u)
-        .where(and(eq(u.orgId, orgId), eq(u.role, 'owner'), eq(u.disabled, false)))
-    ).length;
-    if (removesLastActiveOwner(target!, change, activeOwners)) return LAST_OWNER;
-    const [updated] = await tx
-      .update(u)
-      .set(values)
-      .where(and(eq(u.orgId, orgId), eq(u.id, targetId)))
-      .returning();
-    return { ok: true, before: summarise(target!), after: summarise(updated) };
+    const result = await (async (): Promise<UserWriteResult> => {
+      const refusal = decide(actor, target, 'role' in change ? change.role : undefined);
+      if (refusal) return refusal;
+      const activeOwners = (
+        await tx
+          .select({ id: u.id })
+          .from(u)
+          .where(and(eq(u.orgId, orgId), eq(u.role, 'owner'), eq(u.disabled, false)))
+      ).length;
+      if (removesLastActiveOwner(target!, change, activeOwners)) return LAST_OWNER;
+      const [updated] = await tx
+        .update(u)
+        .set(values)
+        .where(and(eq(u.orgId, orgId), eq(u.id, targetId)))
+        .returning();
+      return { ok: true, before: summarise(target!), after: summarise(updated) };
+    })();
+    await tx.insert(schema.auditLog).values(updateAudit(actor, target, result));
+    return result;
   });
 }

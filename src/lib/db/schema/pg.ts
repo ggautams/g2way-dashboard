@@ -8,7 +8,7 @@ import {
   timestamp as pgTimestamp,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { ROLES, type JsonValue } from './shared';
+import { AUDIT_OUTCOMES, ROLES, type JsonValue } from './shared';
 
 /**
  * The dashboard schema for Postgres. Mirrors `sqlite.ts` column for column;
@@ -47,6 +47,7 @@ export const auditLog = pgTable(
     orgId: text('org_id').notNull(),
     actorId: text('actor_id'),
     actorEmail: text('actor_email'),
+    actorRole: text('actor_role', { enum: ROLES }),
     action: text('action').notNull(),
     target: text('target'),
     before: jsonb('before').$type<JsonValue>(),
@@ -54,6 +55,11 @@ export const auditLog = pgTable(
     gatewayMethod: text('gateway_method'),
     gatewayPath: text('gateway_path'),
     gatewayStatus: integer('gateway_status'),
+    environment: text('environment'),
+    request: jsonb('request').$type<JsonValue>(),
+    outcome: text('outcome', { enum: AUDIT_OUTCOMES }).notNull(),
+    error: text('error'),
+    note: text('note'),
     createdAt: timestamp('created_at'),
   },
   (t) => [index('audit_log_org_created_idx').on(t.orgId, t.createdAt)],

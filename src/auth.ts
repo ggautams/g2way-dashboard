@@ -2,6 +2,7 @@ import 'server-only';
 
 import NextAuth, { CredentialsSignin } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
+import { recordSignIn } from '@/lib/auth/audit';
 import { checkCredentials } from '@/lib/auth/credentials';
 import { getDatabase } from '@/lib/db';
 import { getOrgId } from '@/lib/g2/environments';
@@ -32,6 +33,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const { email, password } = credentials;
         if (typeof email !== 'string' || typeof password !== 'string') return null;
         const result = await checkCredentials(getDatabase(), getOrgId(), email, password);
+        await recordSignIn(getDatabase(), getOrgId(), email, result);
         if (!result.ok) {
           if (result.reason === 'disabled') throw new AccountDisabled();
           return null;

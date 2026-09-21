@@ -4,10 +4,12 @@ import { AuthError, CredentialsSignin } from 'next-auth';
 import { redirect } from 'next/navigation';
 import { signIn, signOut } from '@/auth';
 import { getDatabase } from '@/lib/db';
+import { recordSignOut } from './audit';
 import { createFirstOwner, hasUsers } from '@/lib/db/users';
 import { getOrgId } from '@/lib/g2/environments';
 import { parseLoginForm, parseSetupForm, type FormState } from './forms';
 import { hashPassword } from './password';
+import { getCurrentUser } from './session';
 
 /**
  * Server actions behind `/login`, `/setup` and the shell's sign-out button.
@@ -43,7 +45,8 @@ export async function loginAction(_previous: FormState, formData: FormData): Pro
 }
 
 /**
- * First-run bootstrap. The page only renders while the org has no users, but
+ * First-run bootstrap (audited as `auth.bootstrap` inside `createFirstOwner`'s
+ * transaction). The page only renders while the org has no users, but
  * that check is advisory: `createFirstOwner` re-checks inside its transaction,
  * so of two racing submits exactly one becomes owner and the other is sent to
  * `/login`.
@@ -67,5 +70,7 @@ export async function setupAction(_previous: FormState, formData: FormData): Pro
 }
 
 export async function signOutAction(): Promise<void> {
+  const user = await getCurrentUser();
+  if (user !== null) await recordSignOut(getDatabase(), getOrgId(), user);
   await signOut({ redirectTo: '/login' });
 }

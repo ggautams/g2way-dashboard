@@ -5,12 +5,13 @@ import { proxyToGateway } from '@/lib/g2/proxy';
 // Runs server-side only; the admin secret is attached here and never leaves the server.
 // Requires a signed-in dashboard user (401 otherwise), checked before anything else,
 // whose role (fresh from the database) holds the operation's permission (403 otherwise).
+// Every write is audited with that user as the actor (ADR-0006).
 
 type Context = RouteContext<'/api/g2/[...path]'>;
 
 const handle = withUser(async (user, request: Request, context: Context) => {
   const { path } = await context.params;
-  return proxyToGateway(request, path, user.role);
+  return proxyToGateway(request, path, { id: user.id, email: user.email, role: user.role });
 });
 
 export const GET = handle;

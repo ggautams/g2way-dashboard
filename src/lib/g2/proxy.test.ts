@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import spec from '../../../contracts/openapi.json';
 import type { Role } from '@/lib/auth/rbac';
+import { migrateDatabase, openDatabase } from '@/lib/db';
+import {
+  completeAudit,
+  getAuditEntry,
+  listAudit,
+  recordAudit,
+  type AuditRecord,
+} from '@/lib/db/audit';
+import { hashKey, type AuditSink } from './audit-trail';
 import { parseEnvironments } from './environments';
 import { ENVIRONMENT_HEADER, compileEndpoints, proxyToGateway } from './proxy';
 
@@ -28,6 +37,24 @@ function fakeGateway(reply: () => Response = () => Response.json({ ok: true })) 
   return { calls, fetch: fetch as typeof globalThis.fetch };
 }
 
+/** An in-memory audit sink: the rows as they stand after each write. */
+function memoryAudit(): AuditSink & { rows: Map<string, AuditRecord> } {
+  const rows = new Map<string, AuditRecord>();
+  return {
+    rows,
+    async record(record) {
+      const id = `row-${rows.size + 1}`;
+      rows.set(id, record);
+      return id;
+    },
+    async complete(id, record) {
+      rows.set(id, record);
+    },
+  };
+}
+
+const actorFor = (role: Role) => ({ id: `user-${role}`, email: `${role}@example.com`, role });
+
 function request(path: string, init: RequestInit = {}): Request {
   return new Request(`${ORIGIN}/api/g2/${path}`, init);
 }
@@ -43,11 +70,13 @@ async function proxy(
   role: Role = 'owner',
 ) {
   const gateway = fakeGateway(reply);
-  const response = await proxyToGateway(request(path, init), segmentsOf(path), role, {
+  const audit = memoryAudit();
+  const response = await proxyToGateway(request(path, init), segmentsOf(path), actorFor(role), {
     fetch: gateway.fetch,
     registry,
+    audit,
   });
-  return { response, calls: gateway.calls };
+  return { response, calls: gateway.calls, audit: [...audit.rows.values()] };
 }
 
 async function assertNoSecret(response: Response) {
@@ -107,12 +136,14 @@ describe('forwarding', () => {
       G2_ORG_ID: 'acme',
     });
     const gateway = fakeGateway();
-    await proxyToGateway(request('apis?org_id=other'), ['apis'], 'owner', {
+    await proxyToGateway(request('apis?org_id=other'), ['apis'], actorFor('owner'), {
       fetch: gateway.fetch,
+      audit: memoryAudit(),
       registry: orgRegistry,
     });
-    await proxyToGateway(request('reload', { method: 'POST' }), ['reload'], 'owner', {
+    await proxyToGateway(request('reload', { method: 'POST' }), ['reload'], actorFor('owner'), {
       fetch: gateway.fetch,
+      audit: memoryAudit(),
       registry: orgRegistry,
     });
     expect(gateway.calls.map((c) => c.url)).toEqual([
@@ -170,8 +201,9 @@ describe('the allowlist', () => {
 
   it('refuses dot segments', async () => {
     const gateway = fakeGateway();
-    const response = await proxyToGateway(request('apis/x'), ['apis', '..'], 'owner', {
+    const response = await proxyToGateway(request('apis/x'), ['apis', '..'], actorFor('owner'), {
       fetch: gateway.fetch,
+      audit: memoryAudit(),
       registry,
     });
     expect(response.status).toBe(400);
@@ -290,5 +322,357 @@ describe('role enforcement', () => {
     expect(
       (await proxy('reload', { method: 'DELETE' }, undefined, 'portal-dev')).response.status,
     ).toBe(405);
+  });
+});
+
+/**
+ * A small stateful gateway: `/g2/apis/{id}` and `/g2/keys/{key}` (GET, PUT,
+ * DELETE), `POST /g2/keys` minting `RAW_KEY`, and `POST /g2/reload`. Enough to
+ * see what the audit trail reads before and after a write.
+ */
+const RAW_KEY = 'raw-key-shown-once-7f3a9c';
+const HMAC_SECRET = 'hmac-shared-secret-do-not-store';
+
+function statefulGateway() {
+  const apis = new Map<string, unknown>([
+    ['httpbin', { api_id: 'httpbin', name: 'httpbin', listen_path: '/old/' }],
+  ]);
+  const keys = new Map<string, unknown>();
+  const calls: string[] = [];
+  const fetch = async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(String(input));
+    const method = init.method ?? 'GET';
+    calls.push(`${method} ${url.pathname}${url.search}`);
+    const text = init.body ? new TextDecoder().decode(init.body as ArrayBuffer) : '';
+    const body = text === '' ? null : JSON.parse(text);
+    const [, , collection, rawId] = url.pathname.split('/');
+    const id = rawId === undefined ? undefined : decodeURIComponent(rawId);
+    if (collection === 'reload') return Response.json({ reloaded: true });
+    const store = collection === 'apis' ? apis : keys;
+    const keyOf = (value: string) =>
+      collection === 'keys' && url.searchParams.get('hashed') !== 'true' ? hashKey(value) : value;
+    if (collection === 'keys' && id === undefined && method === 'POST') {
+      const hash = hashKey(RAW_KEY);
+      keys.set(hash, body);
+      return Response.json({ key: RAW_KEY, key_hash: hash }, { status: 201 });
+    }
+    if (id === undefined) return Response.json({ error: 'unexpected' }, { status: 500 });
+    if (method === 'GET') {
+      const found = store.get(keyOf(id));
+      return found === undefined
+        ? Response.json({ error: `no such item ${id}` }, { status: 404 })
+        : Response.json(found);
+    }
+    if (method === 'PUT') {
+      if (typeof body !== 'object' || body === null || 'bad' in body) {
+        return Response.json({ error: 'listen_path must start with /' }, { status: 400 });
+      }
+      const existed = store.has(keyOf(id));
+      store.set(keyOf(id), body);
+      return Response.json({ id, action: existed ? 'modified' : 'added' });
+    }
+    if (method === 'DELETE') {
+      store.delete(keyOf(id));
+      return Response.json({ id, action: 'deleted' });
+    }
+    return Response.json({ error: 'unexpected' }, { status: 500 });
+  };
+  return { apis, keys, calls, fetch: fetch as typeof globalThis.fetch };
+}
+
+async function sqliteAudit() {
+  const database = openDatabase({ dialect: 'sqlite', path: ':memory:' });
+  await migrateDatabase(database);
+  const sink: AuditSink = {
+    record: (record) => recordAudit(database, AUDIT_ORG, record),
+    complete: (id, record) => completeAudit(database, AUDIT_ORG, id, record),
+  };
+  const rows = async () => {
+    const { entries } = await listAudit(database, AUDIT_ORG);
+    return Promise.all(entries.map(async (e) => (await getAuditEntry(database, AUDIT_ORG, e.id))!));
+  };
+  return { database, sink, rows };
+}
+
+// Stand-in org for the audit database; the real one comes from config.
+const AUDIT_ORG = 'org-under-test';
+
+async function write(
+  gateway: ReturnType<typeof statefulGateway>,
+  sink: AuditSink,
+  path: string,
+  init: RequestInit,
+  role: Role = 'admin',
+) {
+  return proxyToGateway(request(path, init), segmentsOf(path), actorFor(role), {
+    fetch: gateway.fetch,
+    registry,
+    audit: sink,
+  });
+}
+
+describe('audited writes (ADR-0006)', () => {
+  it('records an API update with before, after, request and the gateway call', async () => {
+    const gateway = statefulGateway();
+    const { database, sink, rows } = await sqliteAudit();
+    const next = { api_id: 'httpbin', name: 'httpbin', listen_path: '/new/' };
+    const response = await write(
+      gateway,
+      sink,
+      'apis/httpbin',
+      {
+        method: 'PUT',
+        body: JSON.stringify(next),
+      },
+      'editor',
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ id: 'httpbin', action: 'modified' });
+    // Before and after are read back with the same org scoping as any read.
+    expect(gateway.calls).toEqual([
+      'GET /g2/apis/httpbin?org_id=default',
+      'PUT /g2/apis/httpbin',
+      'GET /g2/apis/httpbin?org_id=default',
+    ]);
+    const [row] = await rows();
+    expect(row).toMatchObject({
+      orgId: AUDIT_ORG,
+      actorId: 'user-editor',
+      actorEmail: 'editor@example.com',
+      actorRole: 'editor',
+      action: 'api.update',
+      target: 'httpbin',
+      before: { api_id: 'httpbin', name: 'httpbin', listen_path: '/old/' },
+      after: next,
+      request: next,
+      gatewayMethod: 'PUT',
+      gatewayPath: '/g2/apis/httpbin',
+      gatewayStatus: 200,
+      environment: 'dev',
+      outcome: 'success',
+      error: null,
+    });
+    await database.close();
+  });
+
+  it('records a delete with the before-state and no after', async () => {
+    const gateway = statefulGateway();
+    const { database, sink, rows } = await sqliteAudit();
+    expect((await write(gateway, sink, 'apis/httpbin', { method: 'DELETE' })).status).toBe(200);
+    const [row] = await rows();
+    expect(row).toMatchObject({ action: 'api.delete', outcome: 'success', after: null });
+    expect(row.before).toMatchObject({ listen_path: '/old/' });
+    await database.close();
+  });
+
+  it('records a gateway refusal with its message verbatim and no after', async () => {
+    const gateway = statefulGateway();
+    const { database, sink, rows } = await sqliteAudit();
+    const response = await write(gateway, sink, 'apis/httpbin', {
+      method: 'PUT',
+      body: JSON.stringify({ bad: true }),
+    });
+    expect(response.status).toBe(400);
+    const [row] = await rows();
+    expect(row).toMatchObject({
+      outcome: 'failure',
+      gatewayStatus: 400,
+      error: 'listen_path must start with /',
+      after: null,
+      request: { bad: true },
+    });
+    await database.close();
+  });
+
+  it('records an unreachable gateway as a failure with no status', async () => {
+    const { database, sink, rows } = await sqliteAudit();
+    const fetch = (async () => {
+      throw new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED') });
+    }) as typeof globalThis.fetch;
+    const response = await proxyToGateway(
+      request('reload', { method: 'POST' }),
+      ['reload'],
+      actorFor('editor'),
+      { fetch, registry, audit: sink },
+    );
+    expect(response.status).toBe(502);
+    const [row] = await rows();
+    expect(row).toMatchObject({
+      action: 'gateway.reload',
+      outcome: 'failure',
+      gatewayStatus: null,
+      error: 'gateway unreachable (environment dev): fetch failed (connect ECONNREFUSED)',
+    });
+    await database.close();
+  });
+
+  it('records a reload with the gateway answer as the after-state', async () => {
+    const gateway = statefulGateway();
+    const { database, sink, rows } = await sqliteAudit();
+    expect((await write(gateway, sink, 'reload', { method: 'POST' }, 'editor')).status).toBe(200);
+    const [row] = await rows();
+    expect(row).toMatchObject({
+      action: 'gateway.reload',
+      target: null,
+      before: null,
+      after: { reloaded: true },
+      gatewayPath: '/g2/reload',
+    });
+    await database.close();
+  });
+
+  it('records a denied write, without calling the gateway', async () => {
+    const gateway = statefulGateway();
+    const { database, sink, rows } = await sqliteAudit();
+    const response = await write(
+      gateway,
+      sink,
+      'apis/httpbin',
+      {
+        method: 'PUT',
+        body: '{}',
+      },
+      'viewer',
+    );
+    expect(response.status).toBe(403);
+    expect(gateway.calls).toEqual([]);
+    const [row] = await rows();
+    expect(row).toMatchObject({
+      actorRole: 'viewer',
+      action: 'api.update',
+      target: 'httpbin',
+      outcome: 'denied',
+      error: 'forbidden: the viewer role lacks the apis:write permission (PUT /g2/apis/{id})',
+      gatewayMethod: null,
+      gatewayStatus: null,
+    });
+    await database.close();
+  });
+
+  it('records a cross-site write as denied', async () => {
+    const gateway = statefulGateway();
+    const { database, sink, rows } = await sqliteAudit();
+    const response = await write(gateway, sink, 'reload', {
+      method: 'POST',
+      headers: { origin: 'https://evil.example' },
+    });
+    expect(response.status).toBe(403);
+    expect((await rows())[0]).toMatchObject({
+      outcome: 'denied',
+      error: 'cross-site request refused',
+    });
+    await database.close();
+  });
+
+  it('does not audit reads', async () => {
+    const gateway = statefulGateway();
+    const { database, sink, rows } = await sqliteAudit();
+    await write(gateway, sink, 'apis/httpbin', {});
+    expect(await rows()).toEqual([]);
+    await database.close();
+  });
+
+  it('fails closed: a write it cannot audit is refused and never sent', async () => {
+    const gateway = statefulGateway();
+    const broken: AuditSink = {
+      record: async () => {
+        throw new Error('disk I/O error');
+      },
+      complete: async () => {},
+    };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const response = await write(gateway, broken, 'apis/httpbin', {
+      method: 'PUT',
+      body: JSON.stringify({ api_id: 'httpbin' }),
+    });
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toMatch(/^audit log unavailable/);
+    expect(gateway.calls).toEqual(['GET /g2/apis/httpbin?org_id=default']);
+    expect(gateway.apis.get('httpbin')).toMatchObject({ listen_path: '/old/' });
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+
+  it('still answers when the row cannot be completed, and says so loudly', async () => {
+    const gateway = statefulGateway();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sink: AuditSink = {
+      record: async () => 'row-1',
+      complete: async () => {
+        throw new Error('database is locked');
+      },
+    };
+    const response = await write(gateway, sink, 'reload', { method: 'POST' });
+    expect(response.status).toBe(200);
+    expect(String(logged.mock.calls[0][0])).toContain('row-1');
+    logged.mockRestore();
+  });
+});
+
+describe('audit redaction (ADR-0006 §4)', () => {
+  it('never stores the raw key, the HMAC secret or the admin secret', async () => {
+    const gateway = statefulGateway();
+    const { database, sink, rows } = await sqliteAudit();
+    const session = { alias: 'billing', hmac: { secret: HMAC_SECRET }, access: {} };
+    const created = await write(gateway, sink, 'keys', {
+      method: 'POST',
+      body: JSON.stringify(session),
+    });
+    expect(created.status).toBe(201);
+    // The creator still gets the raw key, once.
+    expect(await created.json()).toEqual({ key: RAW_KEY, key_hash: hashKey(RAW_KEY) });
+
+    // Then an update and a delete addressed by the raw key.
+    await write(gateway, sink, `keys/${RAW_KEY}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...session, hmac: { secret: `${HMAC_SECRET}-rotated` } }),
+    });
+    await write(gateway, sink, `keys/${RAW_KEY}`, { method: 'DELETE' });
+
+    // Rows in the same millisecond have no defined order; look them up by action.
+    const stored = await rows();
+    expect(stored.map((row) => row.action).sort()).toEqual([
+      'key.create',
+      'key.delete',
+      'key.update',
+    ]);
+    const byAction = (action: string) => stored.find((row) => row.action === action)!;
+    const everything = JSON.stringify(stored);
+    for (const secret of [RAW_KEY, HMAC_SECRET, SECRET, STAGING_SECRET]) {
+      expect(everything).not.toContain(secret);
+    }
+    for (const row of stored) expect(row.target).toBe(hashKey(RAW_KEY));
+
+    const create = byAction('key.create');
+    const update = byAction('key.update');
+    expect(create.after).toMatchObject({ alias: 'billing', hmac: { secret: '[redacted]' } });
+    expect(update.gatewayPath).toBe(`/g2/keys/${hashKey(RAW_KEY)}`);
+    expect(update.note).toContain('SHA-256 hash');
+    // A rotated secret shows as changed, never as its value.
+    expect(update.before).toMatchObject({ hmac: { secret: '[redacted]' } });
+    expect(update.after).toMatchObject({ hmac: { secret: '[redacted: changed]' } });
+    await database.close();
+  });
+
+  it('strips the raw key from the create answer when the key cannot be read back', async () => {
+    const { database, sink, rows } = await sqliteAudit();
+    const fetch = (async (input: string | URL | Request) =>
+      new URL(String(input)).pathname === '/g2/keys'
+        ? Response.json({ key: RAW_KEY, key_hash: 'h1' }, { status: 201 })
+        : Response.json(
+            { error: 'storage unavailable' },
+            { status: 503 },
+          )) as typeof globalThis.fetch;
+    await proxyToGateway(
+      request('keys', { method: 'POST', body: '{}' }),
+      ['keys'],
+      actorFor('admin'),
+      { fetch, registry, audit: sink },
+    );
+    const [row] = await rows();
+    expect(JSON.stringify(row)).not.toContain(RAW_KEY);
+    expect(row).toMatchObject({ target: 'h1', outcome: 'success' });
+    expect(row.note).toContain('after-state unavailable: GET answered 503 storage unavailable');
+    await database.close();
   });
 });

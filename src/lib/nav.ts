@@ -131,7 +131,7 @@ export const NAV: readonly NavGroup[] = [
         description: 'Who changed what',
         keywords: ['history'],
         milestone: 'M2',
-        ready: false,
+        ready: true,
         permission: 'audit:read',
       },
     ],

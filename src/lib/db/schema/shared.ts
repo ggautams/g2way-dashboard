@@ -9,6 +9,13 @@
 export const ROLES = ['owner', 'admin', 'editor', 'viewer', 'portal-dev'] as const;
 export type Role = (typeof ROLES)[number];
 
+/**
+ * How an audited action ended (ADR-0006). `pending` marks a gateway write whose
+ * row was written before the call and not yet completed.
+ */
+export const AUDIT_OUTCOMES = ['pending', 'success', 'failure', 'denied'] as const;
+export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
+
 /** Stand-in type for audit before/after snapshots: any JSON value. */
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };

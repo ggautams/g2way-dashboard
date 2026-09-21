@@ -15,8 +15,8 @@ import { parseCreateUserForm, parseUserChangeForm, type UserFormState } from './
  * whatever page rendered it), then the data layer re-checks everything else —
  * who may change whom, and the last-owner invariant — inside its transaction.
  *
- * Every write returns the account before and after it: that is where the audit
- * log (the next M2 task) records actor, before/after and action.
+ * Every write, and every refusal, is audited by the data layer inside the same
+ * transaction (ADR-0006), with the account before and after it.
  */
 
 async function manager(): Promise<User | UserFormState> {

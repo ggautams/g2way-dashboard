@@ -19,6 +19,7 @@
 //    requires each page to answer 200 *for that user* before scanning it.
 //    It also signs in as a seeded viewer and portal-dev and checks the roles
 //    hold server-side (ADR-0005): 403 on forbidden pages and BFF operations.
+//    A seeded audit entry gives the audit detail page a concrete id.
 //
 // The static-import guard is src/lib/client-boundary.test.ts; this is the
 // backstop over the real build output. Needs no gateway: port 1 refuses.
@@ -82,9 +83,19 @@ const namedForm = {
  * Signed-in pages to render, per config form. Every ready nav section belongs
  * here. `/setup` and `/login` are scanned too, signed out, by the flow below.
  */
+// A seeded audit entry, so the detail page renders a real before/after diff.
+const AUDIT_ENTRY_ID = randomUUID();
 const PAGES = {
-  single: ['/', '/gateway', '/users'],
-  named: ['/', '/gateway', '/gateway?env=prod', '/users'],
+  single: ['/', '/gateway', '/users', '/audit', `/audit/${AUDIT_ENTRY_ID}`],
+  named: [
+    '/',
+    '/gateway',
+    '/gateway?env=prod',
+    '/users',
+    '/audit',
+    '/audit?action=auth.&outcome=success',
+    `/audit/${AUDIT_ENTRY_ID}`,
+  ],
 };
 
 /** Strings no browser-downloadable file may contain. */
@@ -213,6 +224,18 @@ async function seedAccounts() {
       const hash = await hashPassword(user.password);
       insert.run(randomUUID(), ORG_ID, user.email, user.name, hash, user.role, now, now);
     }
+    db.prepare(
+      `insert into audit_log (id, org_id, actor_email, actor_role, action, target, before, after,
+         gateway_method, gateway_path, gateway_status, environment, outcome, created_at)
+       values (?, ?, ?, 'owner', 'api.update', 'httpbin', ?, ?, 'PUT', '/g2/apis/httpbin', 200, 'dev', 'success', ?)`,
+    ).run(
+      AUDIT_ENTRY_ID,
+      ORG_ID,
+      OWNER.email,
+      JSON.stringify({ api_id: 'httpbin', listen_path: '/old/' }),
+      JSON.stringify({ api_id: 'httpbin', listen_path: '/new/' }),
+      now,
+    );
   } finally {
     db.close();
   }
@@ -345,6 +368,8 @@ async function checkRoles(base) {
   const viewer = await signIn(base, 'viewer', VIEWER);
   await expectStatus('viewer', viewer, '/gateway', 200);
   await expectStatus('viewer', viewer, '/users', 403);
+  await expectStatus('viewer', viewer, '/audit', 403);
+  await expectStatus('viewer', viewer, `/audit/${AUDIT_ENTRY_ID}`, 403);
   // A read reaches the (dead) gateway; a write is refused before it.
   await expectStatus('viewer', viewer, '/api/g2/version', 502);
   await expectStatus('viewer', viewer, '/api/g2/reload', 403, { method: 'POST' });
