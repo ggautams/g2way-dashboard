@@ -19,6 +19,8 @@ export const GATEWAY_TIMEOUT_MS = 10_000;
 export type GatewayClientDeps = {
   fetch?: typeof fetch;
   registry?: Registry;
+  /** Overrides {@link GATEWAY_TIMEOUT_MS}, e.g. for quick reachability probes. */
+  timeoutMs?: number;
 };
 
 /**
@@ -38,7 +40,7 @@ export function gatewayClient(environmentId?: string, deps: GatewayClientDeps = 
         return await baseFetch(input, {
           ...init,
           redirect: 'manual',
-          signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+          signal: AbortSignal.timeout(deps.timeoutMs ?? GATEWAY_TIMEOUT_MS),
         });
       } catch (error) {
         throw new GatewayUnreachableError(target.id, error);

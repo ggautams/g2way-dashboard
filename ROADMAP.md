@@ -40,7 +40,7 @@ toolchain to regenerate its types.
 - [x] Gateway page from `/g2/node` + `/g2/version` + `/g2/health`: live route
       table, per-target health, circuit-breaker state, service-discovery and
       GraphQL schema-sync status
-- [ ] Degraded-mode banner when the gateway is unreachable (the dashboard must
+- [x] Degraded-mode banner when the gateway is unreachable (the dashboard must
       still render, and say why it can't reach it)
 - [ ] Test: the admin secret appears nowhere in the client bundle
 
@@ -287,3 +287,21 @@ target atomic`), verified by breaking the build and confirming the spec
   asks for `ToSchema` types. Smoke-tested with `next start` against a fake
   gateway (happy path, then wrong-secret path; secret absent from the HTML); no
   browser pass. Next: the degraded-mode banner when the gateway is unreachable.
+
+- M1 degraded-mode banner landed. `DegradedBanner` (async Server
+  Component in `AppShell`, inside `<Suspense fallback={null}>` so it streams after
+  the page and a dead gateway never blocks a render) shows on every page when a
+  configured environment cannot be managed. `probeEnvironments()`
+  (`src/lib/g2/reachability.ts`, `server-only`) makes one **authenticated**
+  `GET /g2/version` per environment in parallel. `/g2/health` is deliberately not
+  used: it is unauthenticated and would pass with a wrong secret. Results are
+  `unreachable` (Node's real `cause`), `refused` (401/403) or `error`, each with
+  the gateway's message verbatim, or `misconfigured` with the registry's problems.
+  Probes use a 2.5 s timeout (new `timeoutMs` on `GatewayClientDeps`) and a 5 s
+  per-environment promise cache, so concurrent renders share one call. A client
+  `RetryButton` calls `router.refresh()`. Smoke-tested with `next start` against a
+  dead port, a fake good gateway (no banner) and a wrong secret (refused
+  variant); every page still 200s. **Note:** the layout now probes on every
+  request, so no page can be statically prerendered. That's fine today (all pages
+  are dynamic already), but revisit if a static page is ever wanted. Next: the
+  client-bundle secret test, which finishes M1.
