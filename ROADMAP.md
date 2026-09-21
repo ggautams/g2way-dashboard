@@ -175,4 +175,17 @@ an in-cluster dashboard cannot reach it. See `UPSTREAM.md`.
   what a first pass at `openapi_json()` did. And three real upstream blockers are
   already recorded in `UPSTREAM.md`: the admin port is on no Service, the k8s
   analytics sink is `otlp_logs` not `redis_list`, and there is still no
-  cache-flush endpoint. Next: M1 — the BFF proxy and the environment registry.
+  cache-flush endpoint.
+
+  Testing the drift detector end to end (clean → drifted → synced → clean, plus
+  the pre-commit hook, the missing-repo skip and both refusal paths) turned up
+  two real bugs, both now fixed. `sync:g2way` was running `make openapi` inside
+  the gateway repo: that dirties a tree this project does not own, and because
+  that target's `> file` redirect truncates before cargo runs, pointing the test
+  at a deliberately broken upstream commit destroyed g2way's committed spec.
+  Sync now reads the committed blob with `git show` and never writes upstream —
+  so it needs no Rust toolchain either, which was the point of committing the
+  spec. The truncation is fixed upstream too (`fix(build): make the openapi
+target atomic`), verified by breaking the build and confirming the spec
+  survives. Lesson worth keeping: the upstream checkout is read-only to this
+  repo, full stop. Next: M1 — the BFF proxy and the environment registry.
