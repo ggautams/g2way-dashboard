@@ -50,21 +50,39 @@ const files = sourceFiles(SRC)
   .map((path) => ({ file: relative(SRC, path), text: readFileSync(path, 'utf8') }))
   .filter(({ file }) => file !== SELF);
 
-/** Names of functions declared in `src/` with an `orgId` parameter. */
-function orgTakingFunctions(): string[] {
+/** The parameter list opening at `start` (just past its `(`), and where it ends. */
+function paramList(text: string, start: number): { params: string; end: number } {
+  // Up to the matching closing parenthesis: parameters may nest them.
+  let depth = 1;
+  let i = start;
+  while (i < text.length && depth > 0) {
+    if (text[i] === '(') depth += 1;
+    else if (text[i] === ')') depth -= 1;
+    i += 1;
+  }
+  return { params: text.slice(start, i), end: i };
+}
+
+/**
+ * Names of functions declared in `sources` with an `orgId` parameter: `function`
+ * declarations, and arrow functions bound to a `const`/`let`/`var` or an
+ * object property (`name: async (orgId) => ...`). A parenthesised expression
+ * that is not an arrow function (`const x = (a, b)`) is not followed by `=>`.
+ */
+function orgTakingFunctions(sources: { text: string }[] = files): string[] {
   const names = new Set<string>();
-  for (const { text } of files) {
-    for (const match of text.matchAll(/function\s+(\w+)\s*(?:<[^>]*>)?\s*\(/g)) {
-      // The parameter list, up to its closing parenthesis (params may nest them).
-      let depth = 1;
-      let i = match.index + match[0].length;
-      const start = i;
-      while (i < text.length && depth > 0) {
-        if (text[i] === '(') depth += 1;
-        else if (text[i] === ')') depth -= 1;
-        i += 1;
-      }
-      if (/\borgId\b/.test(text.slice(start, i))) names.add(match[1]);
+  const declared = /function\s+(\w+)\s*(?:<[^>]*>)?\s*\(/g;
+  const arrow =
+    /(?:\b(?:const|let|var)\s+(\w+)\s*(?::[^=;]+)?=|(?:^|[{,\s])(\w+)\s*:)\s*(?:async\s*)?(?:<[^>]*>)?\s*\(/gm;
+  for (const { text } of sources) {
+    for (const match of text.matchAll(declared)) {
+      const { params } = paramList(text, match.index + match[0].length);
+      if (/\borgId\b/.test(params)) names.add(match[1]);
+    }
+    for (const match of text.matchAll(arrow)) {
+      const { params, end } = paramList(text, match.index + match[0].length);
+      const isArrow = /^\s*(?::[^;{]*?)?=>/.test(text.slice(end, end + 300));
+      if (isArrow && /\borgId\b/.test(params)) names.add(match[1] ?? match[2]);
     }
   }
   return [...names];
@@ -96,6 +114,21 @@ describe('the "default" org literal', () => {
     for (const name of ['findUserById', 'createFirstOwner', 'recordAudit', 'resolveSessionUser']) {
       expect(functions).toContain(name);
     }
+  });
+
+  it('follows arrow functions too, and not parenthesised expressions', () => {
+    const found = orgTakingFunctions([
+      {
+        text: [
+          'const byOrg = async (handle: DataHandle, orgId: string): Promise<User[]> => [];',
+          'export const scoped = <T,>(orgId: string, value: T) => value;',
+          'const sinks = { record: async (orgId: string, row: Row) => {} };',
+          'const total = (orgId + suffix);',
+          'const noOrg = (id: string) => id;',
+        ].join('\n'),
+      },
+    ]);
+    expect(found.sort()).toEqual(['byOrg', 'record', 'scoped']);
   });
 
   it('appears as an org id only in the config fallback', () => {

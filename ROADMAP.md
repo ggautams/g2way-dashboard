@@ -63,7 +63,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       (M1 and M2 were only smoke-tested over HTTP; the extension was never connected)
 - [x] Bug: on `/users`, an error on one row's form lingers after the other form
       on the same row succeeds
-- [ ] `org-literal.test.ts` only follows `function`-declared org-taking helpers;
+- [x] `org-literal.test.ts` only follows `function`-declared org-taking helpers;
       extend it to arrow functions
 - [x] `npm run db:generate` can't pass `--name` through (it runs drizzle-kit
       twice), so migrations get random names — accept a name argument
@@ -585,3 +585,9 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   - The forced change after a reset and a "sign out other sessions" button went
     to M11.
   - Next: `make test-pg`, then the browser pass.
+
+- test: `org-literal.test.ts` now also collects arrow
+  functions that take an `orgId`, whether bound to a `const`/`let`/`var` or an
+  object property. It confirms each is really an arrow function (`=>` after the
+  parameter list), so `const x = (orgId + y)` does not count. It found no new
+  hardcoded literals in `src/`.
