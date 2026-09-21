@@ -36,7 +36,7 @@ toolchain to regenerate its types.
       `X-G2-Authorization`, forwards method/body/query, passes the gateway's
       error envelope through untouched
 - [x] Typed gateway client over `contracts/g2way.d.ts` (no hand-written types)
-- [ ] App shell: nav, dark mode, command palette, toasts
+- [x] App shell: nav, dark mode, command palette, toasts
 - [ ] Gateway page from `/g2/node` + `/g2/version` + `/g2/health`: live route
       table, per-target health, circuit-breaker state, service-discovery and
       GraphQL schema-sync status
@@ -241,3 +241,28 @@ target atomic`), verified by breaking the build and confirming the spec
   `Readable<>` makes response types structurally unequal to the raw schema, so
   type tests use `toExtend`. Next: the app shell (nav, dark mode, command palette,
   toasts).
+
+- M1 app shell landed, with no new dependencies. `src/lib/nav.ts`
+  is the one registry feeding the sidebar and the command palette; planned
+  sections render disabled with their milestone, and `nav.test.ts` fails if a
+  section's `ready` flag disagrees with whether its `page.tsx` exists — flip it
+  when you build the page (`/gateway` is next). Dark mode is class-based
+  (`@custom-variant dark`), three-way system/light/dark in `localStorage`, applied
+  before paint by `themeInitScript` in the root layout's `<head>` (tested by
+  running it in `node:vm`); the toggle reads storage via `useSyncExternalStore`.
+  The ⌘K/Ctrl+K palette is a native `<dialog>` with combobox/listbox ARIA over
+  `filterCommands` (`src/lib/commands.ts`); below `md` the sidebar is replaced by
+  a top bar and the palette is the nav. Toasts are an external store
+  (`src/lib/toast.ts`): `toast.error(err)` renders a `GatewayError`'s message
+  verbatim, and errors stay until dismissed. Colour tokens (surface, subtle,
+  muted, border, accent, danger, success) live in `globals.css`. The overview page
+  lists configured environments and shows `RegistryConfigError.problems`.
+  **New guard:** `src/lib/client-boundary.test.ts` walks every `'use client'`
+  file's import graph transitively and fails if it reaches a `server-only`
+  module (mutation-tested). **Deviation to note:** ADR-0001 names shadcn/ui; the
+  shell hand-rolls its few components in the same own-the-code spirit instead.
+  Revisit (or record an ADR) when M3 forms need real primitives. **Not done:** no
+  browser pass this session (the extension wasn't connected); SSR output and the
+  absence of the secret from the page and `.next/static` were checked with a
+  production build. There's no environment switcher in the shell yet, although
+  the BFF already honours `X-G2-Environment`. Next: the gateway page.
