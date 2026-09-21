@@ -48,7 +48,7 @@ toolchain to regenerate its types.
 
 - [x] Drizzle schema + migrations (better-sqlite3 default, Postgres driver swap)
 - [x] Auth.js login; first-run bootstrap of the initial owner account
-- [ ] Roles: owner / admin / editor / viewer / portal-dev, enforced server-side
+- [x] Roles: owner / admin / editor / viewer / portal-dev, enforced server-side
 - [ ] Audit log: actor, action, before/after diff, resulting gateway call
 - [ ] `org_id` carried through every record and request (always `"default"` today)
 
@@ -387,3 +387,36 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   limiting, password change/reset, auditing sign-in and bootstrap (audit task),
   `make test-pg` still never run. Next: roles enforced server-side (the role is
   already fresh from the DB in `getCurrentUser()`).
+
+- M2 roles landed, recorded as ADR-0005. `src/lib/auth/rbac.ts`
+  (universal) maps roles to 11 permissions: viewer reads everything on the
+  gateway; editor adds API/policy writes, reload and GraphQL sync; admin adds key
+  writes, `users:manage` and `audit:read`; owner has the same permissions as admin
+  but may manage owners and admins; portal-dev has none. The BFF checks each
+  operation against `src/lib/g2/operation-permissions.ts` (`"METHOD /g2/path"` →
+  permission) after the 404/405 allowlist. Unmapped means 403, and a
+  table-driven test fails for any spec operation without an entry, so the next
+  `sync:g2way` that adds an endpoint forces a decision. Pages use
+  `requirePermission()`, which renders a real 403 through `forbidden()` (needs
+  `experimental.authInterrupts`, now on). The nav, palette and degraded banner
+  hide what the role lacks, and `pages.test.ts` checks each ready section's page
+  enforces its declared permission. `/users` (owner/admin) lists accounts,
+  creates them with an initial password and role, changes roles and
+  disables/enables. Rules: nobody changes their own account; admins act only
+  below admin. `createUser`/`updateUser` take one per-org write lock and re-read
+  actor, target and the active-owner count inside it, so the last active owner
+  can't be removed and two owners demoting each other can't both win (SQLite,
+  PGlite, two SQLite connections). Both return before/after for the audit hook.
+  `check:bundle` now also signs in as a seeded viewer and portal-dev and asserts
+  the 403s. Smoke-tested with `next start`: owner created viewer, editor, admin
+  and portal-dev through the no-JS forms. Viewer: BFF read 502 (dead gateway),
+  writes 403. Editor: reload 502, key create 403. Portal-dev: 403 everywhere.
+  An editor replaying the owner's server-action post got the action's own
+  refusal, and a demotion or disable applied on the next request. **Surprises:**
+  under the no-self-change rule the last-owner invariant can't be reached through
+  the policy alone. It stays as the DB backstop and is unit-tested directly.
+  better-sqlite3 is synchronous, so the SQLite "concurrent" tests serialize in JS
+  anyway; only `make test-pg` (still never run) races real connections. No browser
+  pass (the extension wasn't connected). **Deferred:** account deletion, admin
+  password reset, per-API/environment role scoping. Next: the audit log, hooked
+  into `src/lib/users/actions.ts` and the BFF's mutating calls.

@@ -12,4 +12,10 @@ describe('BFF route', () => {
       expect(method[2], method[1]).toBe('handle');
     }
   });
+
+  // The proxy enforces each operation's permission against this role (ADR-0005).
+  it("hands the proxy the signed-in user's role", () => {
+    const source = readFileSync(join(import.meta.dirname, '[...path]', 'route.ts'), 'utf8');
+    expect(source).toMatch(/proxyToGateway\(request, path, user\.role\)/);
+  });
 });

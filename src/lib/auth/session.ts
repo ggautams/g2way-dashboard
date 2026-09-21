@@ -1,12 +1,13 @@
 import 'server-only';
 
-import { redirect } from 'next/navigation';
+import { forbidden, redirect } from 'next/navigation';
 import { cache } from 'react';
 import { auth } from '@/auth';
 import { getDatabase } from '@/lib/db';
 import { hasUsers, type User } from '@/lib/db/users';
 import { getOrgId } from '@/lib/g2/environments';
 import { resolveSessionUser } from './credentials';
+import { can, type Permission } from './rbac';
 
 /**
  * Who is making this request. The enforcement point for every page (through
@@ -40,6 +41,19 @@ export async function requireUser(): Promise<User> {
   const user = await getCurrentUser();
   if (user) return user;
   redirect((await isBootstrapped()) ? '/login' : '/setup');
+}
+
+/**
+ * {@link requireUser}, and then a 403 (`forbidden()`, rendering
+ * `src/app/forbidden.tsx`) unless the user's role holds `permission`. The role
+ * comes from the database on every request, so a demotion applies at once.
+ * Pages whose nav section declares a permission must call this with it
+ * (`src/app/(app)/pages.test.ts`).
+ */
+export async function requirePermission(permission: Permission): Promise<User> {
+  const user = await requireUser();
+  if (!can(user.role, permission)) forbidden();
+  return user;
 }
 
 /** What the shell may show about the signed-in user. Never the password hash. */

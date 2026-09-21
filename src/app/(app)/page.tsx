@@ -1,4 +1,5 @@
 import { connection } from 'next/server';
+import { can } from '@/lib/auth/rbac';
 import { requireUser } from '@/lib/auth/session';
 import {
   RegistryConfigError,
@@ -9,7 +10,21 @@ import {
 export default async function OverviewPage() {
   // The registry reads the runtime environment, never the build's.
   await connection();
-  await requireUser();
+  const user = await requireUser();
+
+  if (!can(user.role, 'gateway:read')) {
+    return (
+      <div className="flex flex-col gap-6">
+        <header>
+          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
+          <p className="mt-1 text-sm text-muted">
+            Your role ({user.role}) has no access to the gateway admin dashboard. It is meant for
+            the developer portal, which is planned for M10.
+          </p>
+        </header>
+      </div>
+    );
+  }
 
   let environments: PublicEnvironment[] = [];
   let problems: readonly string[] = [];

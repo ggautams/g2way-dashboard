@@ -1,4 +1,5 @@
 import 'server-only';
+import { can, type Role } from '@/lib/auth/rbac';
 import spec from '../../../contracts/openapi.json';
 import {
   RegistryConfigError,
@@ -10,6 +11,7 @@ import {
 } from './environments';
 import { ENVIRONMENT_HEADER } from './client';
 import { describeFetchError } from './errors';
+import { operationPermission } from './operation-permissions';
 import { withOrgId } from './org-scope';
 import { ADMIN_SECRET_HEADER, GATEWAY_TIMEOUT_MS } from './server-client';
 
@@ -23,8 +25,10 @@ export { ENVIRONMENT_HEADER };
  *
  * Only endpoints in the gateway's own OpenAPI document are forwarded; the
  * allowlist is derived from `contracts/openapi.json`, so `npm run sync:g2way`
- * keeps it current. Org-scoped operations get the configured `org_id` (see
- * `./org-scope`), overwriting any the browser sent.
+ * keeps it current. Each forwarded operation also needs the caller's role to
+ * hold the permission `./operation-permissions` maps it to; an unmapped one is
+ * refused (default deny, ADR-0005). Org-scoped operations get the configured
+ * `org_id` (see `./org-scope`), overwriting any the browser sent.
  */
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -99,15 +103,18 @@ export type ProxyDeps = {
 /**
  * Forwards `request` to `/g2/<segments>` on the selected gateway.
  *
- * `segments` are the decoded catch-all route params. Responds with the gateway's
- * status and body untouched, or a BFF error in the same `{"error"}` envelope:
- * 404/405 for endpoints the gateway does not document, 400 for a bad path or
- * unknown environment, 403 for a cross-site write, 500 for broken environment
+ * `segments` are the decoded catch-all route params; `role` is the signed-in
+ * user's, read fresh from the database for this request. Responds with the
+ * gateway's status and body untouched, or a BFF error in the same `{"error"}`
+ * envelope: 404/405 for endpoints the gateway does not document, 400 for a bad
+ * path or unknown environment, 403 when the role lacks the operation's
+ * permission or for a cross-site write, 500 for broken environment
  * configuration and 502 when the gateway cannot be reached.
  */
 export async function proxyToGateway(
   request: Request,
   segments: readonly string[],
+  role: Role,
   deps: ProxyDeps = {},
 ): Promise<Response> {
   const path = `/g2/${segments.join('/')}`;
@@ -122,6 +129,20 @@ export async function proxyToGateway(
     return errorResponse(405, `${method} is not supported on ${path}`, {
       allow: [...endpoint.methods].join(', '),
     });
+  }
+
+  const permission = operationPermission(method, endpoint.path);
+  if (permission === undefined) {
+    return errorResponse(
+      403,
+      `forbidden: ${method} ${endpoint.path} has no dashboard permission mapped, so it is refused`,
+    );
+  }
+  if (!can(role, permission)) {
+    return errorResponse(
+      403,
+      `forbidden: the ${role} role lacks the ${permission} permission (${method} ${endpoint.path})`,
+    );
   }
 
   if (MUTATING_METHODS.has(method) && isCrossSite(request)) {

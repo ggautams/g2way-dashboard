@@ -17,6 +17,8 @@
 //    the throwaway database; every run then checks the anonymous redirects and
 //    the BFF's 401, signs in through Auth.js's own credentials endpoint, and
 //    requires each page to answer 200 *for that user* before scanning it.
+//    It also signs in as a seeded viewer and portal-dev and checks the roles
+//    hold server-side (ADR-0005): 403 on forbidden pages and BFF operations.
 //
 // The static-import guard is src/lib/client-boundary.test.ts; this is the
 // backstop over the real build output. Needs no gateway: port 1 refuses.
@@ -53,12 +55,16 @@ const secrets = {
 // G2_ORG_ID rides along because every run strips the caller's G2_* variables.
 const AUTH_ENV = { AUTH_SECRET: secrets.AUTH_SECRET, AUTH_TRUST_HOST: 'true', G2_ORG_ID: ORG_ID };
 
-// The account the scan signs in as. Seeded straight into the throwaway database.
-const OWNER = {
-  email: 'bundle-check@example.com',
-  name: 'Bundle Check',
+// The accounts the scan signs in as. Seeded straight into the throwaway database.
+const account = (role, email) => ({
+  role,
+  email,
+  name: `Bundle Check ${role}`,
   password: randomBytes(18).toString('base64url'),
-};
+});
+const OWNER = account('owner', 'bundle-check@example.com');
+const VIEWER = account('viewer', 'bundle-viewer@example.com');
+const PORTAL_DEV = account('portal-dev', 'bundle-portal@example.com');
 
 const singleForm = {
   G2_ADMIN_URL: DEAD_GATEWAY,
@@ -77,8 +83,8 @@ const namedForm = {
  * here. `/setup` and `/login` are scanned too, signed out, by the flow below.
  */
 const PAGES = {
-  single: ['/', '/gateway'],
-  named: ['/', '/gateway', '/gateway?env=prod'],
+  single: ['/', '/gateway', '/users'],
+  named: ['/', '/gateway', '/gateway?env=prod', '/users'],
 };
 
 /** Strings no browser-downloadable file may contain. */
@@ -191,33 +197,29 @@ async function expectRedirect(base, path, to, label) {
   }
 }
 
-/** Seeds the scan's owner into the throwaway database, as /setup would. */
-async function seedOwner() {
+/** Seeds the scan's accounts into the throwaway database: the owner as /setup would. */
+async function seedAccounts() {
   const { default: Database } = await import('better-sqlite3');
   // Plain TypeScript with no imports beyond node:crypto; Node strips the types.
   const { hashPassword } = await import('../src/lib/auth/password.ts');
   const db = new Database(DB_ENV.DATABASE_URL.slice('file:'.length));
   try {
     const now = Date.now();
-    db.prepare(
+    const insert = db.prepare(
       `insert into users (id, org_id, email, name, password_hash, role, disabled, created_at, updated_at)
-       values (?, ?, ?, ?, ?, 'owner', 0, ?, ?)`,
-    ).run(
-      randomUUID(),
-      ORG_ID,
-      OWNER.email,
-      OWNER.name,
-      await hashPassword(OWNER.password),
-      now,
-      now,
+       values (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
     );
+    for (const user of [OWNER, VIEWER, PORTAL_DEV]) {
+      const hash = await hashPassword(user.password);
+      insert.run(randomUUID(), ORG_ID, user.email, user.name, hash, user.role, now, now);
+    }
   } finally {
     db.close();
   }
 }
 
 /** Signs in through Auth.js's credentials endpoint; returns the Cookie header to send. */
-async function signIn(base, label) {
+async function signIn(base, label, user = OWNER) {
   const jar = new Map();
   const keep = (response) => {
     for (const cookie of response.headers.getSetCookie()) {
@@ -235,12 +237,12 @@ async function signIn(base, label) {
     method: 'POST',
     redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: header() },
-    body: new URLSearchParams({ csrfToken, email: OWNER.email, password: OWNER.password }),
+    body: new URLSearchParams({ csrfToken, email: user.email, password: user.password }),
   });
   keep(callback);
   if (![...jar.keys()].some((name) => name.endsWith('authjs.session-token'))) {
     throw new Error(
-      `${label}: signing in as the seeded owner set no session cookie (${callback.status})`,
+      `${label}: signing in as the seeded ${user.role} set no session cookie (${callback.status})`,
     );
   }
   return header();
@@ -268,7 +270,7 @@ async function scanRendered(form, env, { firstRun }) {
       if (setup.response.status !== 200)
         failures.push(`${anonymous}: /setup answered ${setup.response.status}`);
       fetched += 3;
-      await seedOwner();
+      await seedAccounts();
     }
 
     // Users exist: pages lead to /login, /setup is gone, and the BFF refuses.
@@ -310,10 +312,48 @@ async function scanRendered(form, env, { firstRun }) {
         `${signedIn}: BFF answered ${proxied.response.status}, expected 502 from the dead gateway`,
       );
     }
-    return fetched + 1;
+    fetched++;
+    if (firstRun) fetched += await checkRoles(base);
+    return fetched;
   } finally {
     child.kill('SIGTERM');
   }
+}
+
+/**
+ * Roles hold server-side (ADR-0005): a viewer reads but cannot write or open
+ * /users, and a portal-dev gets nothing from the gateway at all. Every answer
+ * is scanned like any other. Returns how many responses it fetched.
+ */
+async function checkRoles(base) {
+  let fetched = 0;
+  const expectStatus = async (who, cookie, path, status, init = {}) => {
+    const { response, body } = await fetchAndScan(base, path, who, {
+      ...init,
+      headers: { ...init.headers, cookie },
+    });
+    fetched++;
+    if (response.status !== status) {
+      failures.push(
+        `${who}: ${init.method ?? 'GET'} ${path} answered ${response.status}, expected ${status}`,
+      );
+    } else if (path.startsWith('/api/') && status === 403 && !('error' in JSON.parse(body))) {
+      failures.push(`${who}: ${path} 403 was not in the {"error"} envelope`);
+    }
+  };
+
+  const viewer = await signIn(base, 'viewer', VIEWER);
+  await expectStatus('viewer', viewer, '/gateway', 200);
+  await expectStatus('viewer', viewer, '/users', 403);
+  // A read reaches the (dead) gateway; a write is refused before it.
+  await expectStatus('viewer', viewer, '/api/g2/version', 502);
+  await expectStatus('viewer', viewer, '/api/g2/reload', 403, { method: 'POST' });
+
+  const portal = await signIn(base, 'portal-dev', PORTAL_DEV);
+  await expectStatus('portal-dev', portal, '/', 200);
+  await expectStatus('portal-dev', portal, '/gateway', 403);
+  await expectStatus('portal-dev', portal, '/api/g2/version', 403);
+  return fetched;
 }
 
 function withoutG2(env) {

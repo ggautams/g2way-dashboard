@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import spec from '../../../contracts/openapi.json';
+import type { Role } from '@/lib/auth/rbac';
 import { parseEnvironments } from './environments';
 import { ENVIRONMENT_HEADER, compileEndpoints, proxyToGateway } from './proxy';
 
@@ -35,9 +36,14 @@ function segmentsOf(path: string): string[] {
   return path.split('?')[0].split('/').map(decodeURIComponent);
 }
 
-async function proxy(path: string, init: RequestInit = {}, reply?: () => Response) {
+async function proxy(
+  path: string,
+  init: RequestInit = {},
+  reply?: () => Response,
+  role: Role = 'owner',
+) {
   const gateway = fakeGateway(reply);
-  const response = await proxyToGateway(request(path, init), segmentsOf(path), {
+  const response = await proxyToGateway(request(path, init), segmentsOf(path), role, {
     fetch: gateway.fetch,
     registry,
   });
@@ -101,11 +107,11 @@ describe('forwarding', () => {
       G2_ORG_ID: 'acme',
     });
     const gateway = fakeGateway();
-    await proxyToGateway(request('apis?org_id=other'), ['apis'], {
+    await proxyToGateway(request('apis?org_id=other'), ['apis'], 'owner', {
       fetch: gateway.fetch,
       registry: orgRegistry,
     });
-    await proxyToGateway(request('reload', { method: 'POST' }), ['reload'], {
+    await proxyToGateway(request('reload', { method: 'POST' }), ['reload'], 'owner', {
       fetch: gateway.fetch,
       registry: orgRegistry,
     });
@@ -164,7 +170,7 @@ describe('the allowlist', () => {
 
   it('refuses dot segments', async () => {
     const gateway = fakeGateway();
-    const response = await proxyToGateway(request('apis/x'), ['apis', '..'], {
+    const response = await proxyToGateway(request('apis/x'), ['apis', '..'], 'owner', {
       fetch: gateway.fetch,
       registry,
     });
@@ -245,5 +251,44 @@ describe('failures', () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'unknown gateway environment: prod' });
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('role enforcement', () => {
+  it('lets a viewer read and refuses its writes in the error envelope, without calling the gateway', async () => {
+    const read = await proxy('apis', {}, undefined, 'viewer');
+    expect(read.response.status).toBe(200);
+    expect(read.calls).toHaveLength(1);
+
+    const write = await proxy('apis', { method: 'POST', body: '{}' }, undefined, 'viewer');
+    expect(write.response.status).toBe(403);
+    expect(await write.response.json()).toEqual({
+      error: 'forbidden: the viewer role lacks the apis:write permission (POST /g2/apis)',
+    });
+    expect(write.calls).toHaveLength(0);
+  });
+
+  it('lets an editor reload but not mint keys', async () => {
+    expect((await proxy('reload', { method: 'POST' }, undefined, 'editor')).response.status).toBe(
+      200,
+    );
+    const keys = await proxy('keys', { method: 'POST', body: '{}' }, undefined, 'editor');
+    expect(keys.response.status).toBe(403);
+    expect(keys.calls).toHaveLength(0);
+  });
+
+  it('refuses a portal-dev everything, reads included', async () => {
+    for (const path of ['version', 'health', 'apis', 'keys']) {
+      const { response, calls } = await proxy(path, {}, undefined, 'portal-dev');
+      expect(response.status, path).toBe(403);
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  it('answers 404 and 405 before the role check', async () => {
+    expect((await proxy('secrets', {}, undefined, 'portal-dev')).response.status).toBe(404);
+    expect(
+      (await proxy('reload', { method: 'DELETE' }, undefined, 'portal-dev')).response.status,
+    ).toBe(405);
   });
 });

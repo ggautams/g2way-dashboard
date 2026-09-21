@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { NAV, isActive } from '@/lib/nav';
+import type { Permission } from '@/lib/auth/rbac';
+import { isActive, navFor } from '@/lib/nav';
 import { openCommandPalette } from './command-palette';
 import { SearchIcon } from './icons';
 import { ThemeToggle } from './theme-toggle';
@@ -40,16 +41,24 @@ function SearchButton({ compact = false }: { compact?: boolean }) {
 
 /**
  * Desktop sidebar; below `md` the {@link MobileBar} takes over and the palette is the nav.
- * `account` is the server-rendered user panel with its sign-out action.
+ * `account` is the server-rendered user panel with its sign-out action;
+ * `permissions` are the signed-in role's, and hide what it cannot use (cosmetic:
+ * pages and the BFF enforce them server-side).
  */
-export function Sidebar({ account }: { account: React.ReactNode }) {
+export function Sidebar({
+  account,
+  permissions,
+}: {
+  account: React.ReactNode;
+  permissions: readonly Permission[];
+}) {
   const pathname = usePathname();
   return (
     <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-4 border-r border-border bg-surface p-4 md:flex">
       <Brand />
       <SearchButton />
       <nav aria-label="Main" className="flex flex-1 flex-col gap-4 overflow-y-auto">
-        {NAV.map((group) => (
+        {navFor(permissions).map((group) => (
           <div key={group.label}>
             <p className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-muted">
               {group.label}

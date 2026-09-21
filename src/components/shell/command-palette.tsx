@@ -3,7 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { filterCommands, type Command } from '@/lib/commands';
-import { allSections } from '@/lib/nav';
+import type { Permission } from '@/lib/auth/rbac';
+import { allSections, sectionAllowed } from '@/lib/nav';
 import { THEME_PREFERENCES } from '@/lib/theme';
 import { SearchIcon } from './icons';
 import { setThemePreference } from './use-theme';
@@ -15,12 +16,12 @@ export function openCommandPalette(): void {
   window.dispatchEvent(new Event(OPEN_EVENT));
 }
 
-function useCommands(): Command[] {
+function useCommands(permissions: readonly Permission[]): Command[] {
   const router = useRouter();
   return useMemo(
     () => [
       ...allSections()
-        .filter((section) => section.ready)
+        .filter((section) => section.ready && sectionAllowed(section, permissions))
         .map((section) => ({
           id: `nav:${section.href}`,
           label: section.label,
@@ -37,18 +38,21 @@ function useCommands(): Command[] {
         run: () => setThemePreference(preference),
       })),
     ],
-    [router],
+    [router, permissions],
   );
 }
 
-/** ⌘K / Ctrl+K command palette over the navigation registry and shell actions. */
-export function CommandPalette() {
+/**
+ * ⌘K / Ctrl+K command palette over the navigation registry and shell actions,
+ * offering only the sections `permissions` allow (cosmetic, like the sidebar).
+ */
+export function CommandPalette({ permissions }: { permissions: readonly Permission[] }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
-  const commands = useCommands();
+  const commands = useCommands(permissions);
   const results = filterCommands(commands, query);
   const activeIndex = Math.min(active, results.length - 1);
   const optionId = (index: number) => `${listId}-${index}`;

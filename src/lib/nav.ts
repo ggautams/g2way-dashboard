@@ -4,7 +4,13 @@
  * sections stay visible (disabled, tagged with their milestone) so the shell
  * shows where the product is going, and the command palette only offers ready
  * ones. `nav.test.ts` fails if a ready section has no page.
+ *
+ * A section's `permission` hides it from roles that lack it. That is cosmetic:
+ * the page enforces it with `requirePermission()` (`(app)/pages.test.ts` checks
+ * the two agree), and the BFF enforces each gateway operation on its own.
  */
+
+import type { Permission } from '@/lib/auth/rbac';
 
 export type NavSection = {
   /** Route path. Also the page directory under `src/app/`. */
@@ -17,6 +23,8 @@ export type NavSection = {
   /** The `ROADMAP.md` milestone that builds it. */
   milestone: string;
   ready: boolean;
+  /** Needed to see the section; its page must `requirePermission()` it. Unset: every role. */
+  permission?: Permission;
 };
 
 export type NavGroup = { label: string; sections: readonly NavSection[] };
@@ -40,6 +48,7 @@ export const NAV: readonly NavGroup[] = [
         keywords: ['node', 'health', 'version', 'routes'],
         milestone: 'M1',
         ready: true,
+        permission: 'gateway:read',
       },
     ],
   },
@@ -53,6 +62,7 @@ export const NAV: readonly NavGroup[] = [
         keywords: ['definitions', 'designer'],
         milestone: 'M3',
         ready: false,
+        permission: 'apis:read',
       },
       {
         href: '/policies',
@@ -60,6 +70,7 @@ export const NAV: readonly NavGroup[] = [
         description: 'Access policies',
         milestone: 'M4',
         ready: false,
+        permission: 'policies:read',
       },
       {
         href: '/keys',
@@ -68,6 +79,7 @@ export const NAV: readonly NavGroup[] = [
         keywords: ['tokens', 'credentials'],
         milestone: 'M4',
         ready: false,
+        permission: 'keys:read',
       },
       {
         href: '/graphql',
@@ -75,6 +87,7 @@ export const NAV: readonly NavGroup[] = [
         description: 'Schemas, sync and federation',
         milestone: 'M8',
         ready: false,
+        permission: 'apis:read',
       },
       {
         href: '/plugins',
@@ -82,6 +95,7 @@ export const NAV: readonly NavGroup[] = [
         description: 'WASM plugins',
         milestone: 'M9',
         ready: false,
+        permission: 'apis:read',
       },
     ],
   },
@@ -95,6 +109,7 @@ export const NAV: readonly NavGroup[] = [
         keywords: ['metrics', 'traffic'],
         milestone: 'M6',
         ready: false,
+        permission: 'gateway:read',
       },
     ],
   },
@@ -107,7 +122,8 @@ export const NAV: readonly NavGroup[] = [
         description: 'Dashboard accounts and RBAC',
         keywords: ['rbac', 'accounts'],
         milestone: 'M2',
-        ready: false,
+        ready: true,
+        permission: 'users:manage',
       },
       {
         href: '/audit',
@@ -116,6 +132,7 @@ export const NAV: readonly NavGroup[] = [
         keywords: ['history'],
         milestone: 'M2',
         ready: false,
+        permission: 'audit:read',
       },
     ],
   },
@@ -129,4 +146,17 @@ export function allSections(): NavSection[] {
 export function isActive(href: string, pathname: string): boolean {
   if (href === '/') return pathname === '/';
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** Whether a role with `permissions` may see `section`. */
+export function sectionAllowed(section: NavSection, permissions: readonly Permission[]): boolean {
+  return section.permission === undefined || permissions.includes(section.permission);
+}
+
+/** The registry as a role with `permissions` sees it: forbidden sections and empty groups dropped. */
+export function navFor(permissions: readonly Permission[]): NavGroup[] {
+  return NAV.map((group) => ({
+    label: group.label,
+    sections: group.sections.filter((section) => sectionAllowed(section, permissions)),
+  })).filter((group) => group.sections.length > 0);
 }

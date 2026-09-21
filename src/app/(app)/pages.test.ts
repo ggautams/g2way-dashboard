@@ -1,9 +1,11 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { allSections } from '@/lib/nav';
 
 /**
- * Every signed-in page must call `requireUser()` itself (ADR-0004). The (app)
+ * Every signed-in page must call `requireUser()` — or `requirePermission()`,
+ * which calls it — itself (ADR-0004). The (app)
  * layout checks too, but layouts are not re-rendered on client navigations, so
  * a page without its own check would keep rendering for a user disabled
  * mid-session. Route handlers under this group would need `withUser`.
@@ -27,11 +29,22 @@ describe('(app) pages', () => {
   });
 
   it.each(found.map((path) => [relative(GROUP, path), path]))(
-    '%s calls requireUser()',
+    '%s calls requireUser() or requirePermission()',
     (_, path) => {
-      expect(readFileSync(path, 'utf8')).toMatch(/await requireUser\(\)/);
+      expect(readFileSync(path, 'utf8')).toMatch(/await require(User\(\)|Permission\(')/);
     },
   );
+
+  // The nav hides a section from roles without its permission; that is cosmetic,
+  // so the page itself must refuse them (ADR-0005).
+  it.each(
+    allSections()
+      .filter((section) => section.ready && section.permission !== undefined)
+      .map((section) => [section.href, section.permission] as const),
+  )('%s enforces its nav permission %s', (href, permission) => {
+    const source = readFileSync(join(GROUP, href, 'page.tsx'), 'utf8');
+    expect(source).toContain(`await requirePermission('${permission}')`);
+  });
 
   it('has no route handlers (they would bypass the page check)', () => {
     const walk = (dir: string): string[] =>
