@@ -15,9 +15,29 @@ export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const WATCH_PATH = resolve(repoRoot, 'contracts/watch.json');
 export const LOCK_PATH = resolve(repoRoot, 'contracts/g2way.lock.json');
 
+// Git exports these to hooks (`git commit -a` sets GIT_INDEX_FILE, for one).
+// Inherited, they point `git -C ../g2way` at this repo's index or object
+// store, which fails with "unable to read <oid>" or, worse, answers about
+// the wrong repo. Every call here names its repo with `-C`, so drop them.
+const GIT_LOCATION_VARS = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR',
+  'GIT_PREFIX',
+];
+
+export function cleanGitEnv(env = process.env) {
+  const clean = { ...env };
+  for (const name of GIT_LOCATION_VARS) delete clean[name];
+  return clean;
+}
+
 /** Runs a command, returning trimmed stdout. Throws on a non-zero exit. */
 export function run(cmd, args, opts = {}) {
-  return execFileSync(cmd, args, { encoding: 'utf8', ...opts }).trim();
+  return execFileSync(cmd, args, { encoding: 'utf8', env: cleanGitEnv(), ...opts }).trim();
 }
 
 /** Runs a command, returning null instead of throwing. */
