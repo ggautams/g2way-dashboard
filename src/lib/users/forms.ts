@@ -5,7 +5,7 @@
  */
 
 import { isRole, type Role } from '@/lib/auth/rbac';
-import { parseSetupForm, type FormState } from '@/lib/auth/forms';
+import { parseSetupForm, passwordProblem, type FormState } from '@/lib/auth/forms';
 
 /** A form's result: an error to show, or a notice after success. */
 export type UserFormState = FormState & { notice?: string };
@@ -48,4 +48,15 @@ export function parseUserChangeForm(formData: FormData): UserChangeInput | { err
     return { userId, change: { disabled: disabled === 'true' } };
   }
   return { error: 'Nothing to change.' };
+}
+
+/** The per-row reset form: `userId` and the new password twice. */
+export function parsePasswordResetForm(
+  formData: FormData,
+): { userId: string; password: string } | { error: string } {
+  const userId = field(formData, 'userId');
+  if (userId === '') return { error: 'No user given.' };
+  const password = field(formData, 'password');
+  const problem = passwordProblem(password, field(formData, 'confirm'));
+  return problem === null ? { userId, password } : { error: problem };
 }

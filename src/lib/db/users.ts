@@ -227,8 +227,11 @@ export type UserWriteRefusal =
 export type UserWriteResult =
   { ok: true; before: UserSummary | null; after: UserSummary } | UserWriteRefusal;
 
-/** A change to an existing account: a new role, or enabling/disabling it. */
-export type UserChange = { role: Role } | { disabled: boolean };
+/**
+ * A change to an existing account: a new role, enabling/disabling it, or a
+ * password reset (the new hash; the account's older sessions end, ADR-0004 §9).
+ */
+export type UserChange = { role: Role } | { disabled: boolean } | { passwordHash: string };
 
 type Actor = { id: string; role: Role; disabled: boolean };
 
@@ -247,7 +250,7 @@ export function removesLastActiveOwner(
   change: UserChange,
   activeOwners: number,
 ): boolean {
-  if (target.role !== 'owner' || target.disabled) return false;
+  if (target.role !== 'owner' || target.disabled || 'passwordHash' in change) return false;
   const staysActiveOwner = 'role' in change ? change.role === 'owner' : !change.disabled;
   return !staysActiveOwner && activeOwners <= 1;
 }
@@ -336,10 +339,25 @@ function bootstrapAudit(orgId: string, owner: User) {
   });
 }
 
-/** `user.role_change`, `user.disable` or `user.enable`. */
+/** `user.role_change`, `user.disable`, `user.enable` or `user.password_reset`. */
 export function userChangeAction(change: UserChange): string {
   if ('role' in change) return 'user.role_change';
+  if ('passwordHash' in change) return 'user.password_reset';
   return change.disabled ? 'user.disable' : 'user.enable';
+}
+
+/** The columns a change writes. A new password also stamps when it changed. */
+function changeValues(change: UserChange) {
+  if ('role' in change) return { role: change.role };
+  if ('disabled' in change) return { disabled: change.disabled };
+  return { passwordHash: change.passwordHash, passwordChangedAt: new Date() };
+}
+
+/** What the audit row says was asked for: never a password or its hash. */
+function changeRequest(change: UserChange): { [key: string]: string | boolean } {
+  if ('role' in change) return { role: change.role };
+  if ('disabled' in change) return { disabled: change.disabled };
+  return { set: 'a new password' };
 }
 
 function usersLockKey(orgId: string): string {
@@ -447,7 +465,7 @@ export async function updateUser(
   targetId: string,
   change: UserChange,
 ): Promise<UserWriteResult> {
-  const values = 'role' in change ? { role: change.role } : { disabled: change.disabled };
+  const values = changeValues(change);
   const updateAudit = (
     actor: User | undefined,
     target: User | undefined,
@@ -458,7 +476,7 @@ export async function updateUser(
       actor,
       action: userChangeAction(change),
       target: target?.email ?? targetId,
-      request: 'role' in change ? { role: change.role } : { disabled: change.disabled },
+      request: changeRequest(change),
       current: target,
       result,
     });
@@ -533,6 +551,86 @@ export async function updateUser(
       return { ok: true, before: summarise(target!), after: summarise(updated) };
     })();
     await tx.insert(schema.auditLog).values(updateAudit(actor, target, result));
+    return result;
+  });
+}
+
+/**
+ * Sets the signed-in user's own password. The caller has already verified the
+ * current one (`changePasswordAction`); this re-reads the account under the
+ * users write lock so a user disabled a moment ago cannot, and audits
+ * `user.password_change` in the same transaction. Stamps
+ * `password_changed_at`, ending the account's other sessions (ADR-0004 §9).
+ */
+export async function changeOwnPassword(
+  handle: DataHandle,
+  orgId: string,
+  userId: string,
+  passwordHash: string,
+): Promise<UserWriteResult> {
+  const values = { passwordHash, passwordChangedAt: new Date() };
+  const decideOwn = (user: User | undefined): UserWriteRefusal | null =>
+    user === undefined || user.disabled
+      ? { ok: false, reason: 'denied', message: 'your account is no longer active' }
+      : null;
+  const ownAudit = (user: User | undefined, result: UserWriteResult) =>
+    writeAudit(orgId, {
+      actorId: userId,
+      actor: user,
+      action: 'user.password_change',
+      target: user?.email ?? userId,
+      request: { set: 'a new password' },
+      current: user,
+      result,
+    });
+
+  if (handle.dialect === 'sqlite') {
+    const { db, schema } = handle;
+    const u = schema.users;
+    return db.transaction(
+      (tx): UserWriteResult => {
+        const user = tx
+          .select()
+          .from(u)
+          .where(and(eq(u.orgId, orgId), eq(u.id, userId)))
+          .get();
+        const result = ((): UserWriteResult => {
+          const refusal = decideOwn(user);
+          if (refusal) return refusal;
+          const updated = tx
+            .update(u)
+            .set(values)
+            .where(and(eq(u.orgId, orgId), eq(u.id, userId)))
+            .returning()
+            .get();
+          return { ok: true, before: summarise(user!), after: summarise(updated) };
+        })();
+        tx.insert(schema.auditLog).values(ownAudit(user, result)).run();
+        return result;
+      },
+      { behavior: 'immediate' },
+    );
+  }
+
+  const { db, schema } = handle;
+  const u = schema.users;
+  return db.transaction(async (tx): Promise<UserWriteResult> => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${usersLockKey(orgId)}))`);
+    const [user] = await tx
+      .select()
+      .from(u)
+      .where(and(eq(u.orgId, orgId), eq(u.id, userId)));
+    const result = await (async (): Promise<UserWriteResult> => {
+      const refusal = decideOwn(user);
+      if (refusal) return refusal;
+      const [updated] = await tx
+        .update(u)
+        .set(values)
+        .where(and(eq(u.orgId, orgId), eq(u.id, userId)))
+        .returning();
+      return { ok: true, before: summarise(user!), after: summarise(updated) };
+    })();
+    await tx.insert(schema.auditLog).values(ownAudit(user, result));
     return result;
   });
 }

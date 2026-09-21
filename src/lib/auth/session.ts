@@ -23,6 +23,7 @@ export const getCurrentUser = cache(async (): Promise<User | null> => {
   return resolveSessionUser(getDatabase(), getOrgId(), {
     userId: session.user?.id,
     orgId: session.orgId,
+    signedInAt: session.signedInAt,
   });
 });
 

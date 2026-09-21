@@ -10,6 +10,7 @@ import { getAuditEntry, listAudit, type AuditEntry } from './audit';
 import * as pgSchema from './schema/pg';
 import type { Role } from './schema/shared';
 import {
+  changeOwnPassword,
   createFirstOwner,
   createUser,
   findUserByEmail,
@@ -340,6 +341,85 @@ describe.each([
       before: { role: 'owner', disabled: false },
       after: null,
     });
+  });
+});
+
+// ADR-0004 §9: password resets obey ADR-0005's who-may-manage-whom rules, stamp
+// password_changed_at, and are audited without any trace of the hash.
+describe.each([
+  ['SQLite (in memory)', sqliteMemory],
+  ['Postgres (PGlite)', pglite],
+])('passwords on %s', (_name, open) => {
+  const auditRows = async (handle: DataHandle, action: string) =>
+    Promise.all(
+      (await listAudit(handle, ORG, { action })).entries.map(
+        async (e) => (await getAuditEntry(handle, ORG, e.id))!,
+      ),
+    );
+
+  it('lets a manager reset an account they may manage, stamping when', async () => {
+    const handle = await open();
+    const { owner, create } = await seeded(handle);
+    const editor = await create('editor');
+    const before = Date.now();
+    const result = await updateUser(handle, ORG, owner.id, editor.id, {
+      passwordHash: 'hash-new-secret',
+    });
+    expect(refusal(result)).toBe('ok');
+    const stored = (await findUserById(handle, ORG, editor.id))!;
+    expect(stored.passwordHash).toBe('hash-new-secret');
+    expect(stored.passwordChangedAt!.getTime()).toBeGreaterThanOrEqual(before);
+
+    const [row] = await auditRows(handle, 'user.password_reset');
+    expect(row).toMatchObject({
+      actorId: owner.id,
+      target: 'editor@example.com',
+      request: { set: 'a new password' },
+      outcome: 'success',
+    });
+    expect(JSON.stringify(row)).not.toMatch(/hash-new-secret|passwordHash|password_hash/);
+  });
+
+  it('refuses resetting your own account, or one above what you may assign', async () => {
+    const handle = await open();
+    const { owner, create } = await seeded(handle);
+    const admin = await create('admin');
+    const other = await create('admin', 'other-admin@example.com');
+    const change = { passwordHash: 'hash-x' };
+    expect(refusal(await updateUser(handle, ORG, owner.id, owner.id, change))).toBe('denied');
+    expect(refusal(await updateUser(handle, ORG, admin.id, owner.id, change))).toBe('denied');
+    expect(refusal(await updateUser(handle, ORG, admin.id, other.id, change))).toBe('denied');
+    expect((await findUserById(handle, ORG, owner.id))!.passwordChangedAt).toBeNull();
+    expect(await auditRows(handle, 'user.password_reset')).toHaveLength(3);
+  });
+
+  it('a password reset never counts as removing an owner', () => {
+    expect(
+      removesLastActiveOwner({ role: 'owner', disabled: false }, { passwordHash: 'h' }, 1),
+    ).toBe(false);
+  });
+
+  it('changes your own password, audited as you, and refuses a disabled account', async () => {
+    const handle = await open();
+    const { owner, create } = await seeded(handle);
+    expect(refusal(await changeOwnPassword(handle, ORG, owner.id, 'hash-mine'))).toBe('ok');
+    expect((await findUserById(handle, ORG, owner.id))!).toMatchObject({
+      passwordHash: 'hash-mine',
+      passwordChangedAt: expect.any(Date),
+    });
+    const viewer = await create('viewer');
+    await updateUser(handle, ORG, owner.id, viewer.id, { disabled: true });
+    expect(refusal(await changeOwnPassword(handle, ORG, viewer.id, 'hash-v'))).toBe('denied');
+    expect(refusal(await changeOwnPassword(handle, ORG, 'no-such-user', 'hash-v'))).toBe('denied');
+
+    const rows = await auditRows(handle, 'user.password_change');
+    expect(rows.map((row) => [row.actorEmail, row.outcome])).toEqual(
+      expect.arrayContaining([
+        ['ada@example.com', 'success'],
+        ['viewer@example.com', 'denied'],
+      ]),
+    );
+    expect(JSON.stringify(rows)).not.toMatch(/hash-mine|hash-v|passwordHash/);
   });
 });
 

@@ -12,6 +12,7 @@ const user: User = {
   email: 'ada@example.com',
   name: 'Ada',
   passwordHash: 'x',
+  passwordChangedAt: null,
   role: 'owner',
   disabled: false,
   createdAt: new Date(),

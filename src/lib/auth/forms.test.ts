@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { MIN_PASSWORD_LENGTH, parseLoginForm, parseSetupForm } from './forms';
+import {
+  MIN_PASSWORD_LENGTH,
+  parseLoginForm,
+  parsePasswordChangeForm,
+  parseSetupForm,
+  passwordProblem,
+} from './forms';
 
 const form = (fields: Record<string, string>) => {
   const data = new FormData();
@@ -48,5 +54,39 @@ describe('parseLoginForm', () => {
       password: ' pw ',
     });
     expect(parseLoginForm(new FormData())).toEqual({ email: '', password: '' });
+  });
+});
+
+describe('passwordProblem', () => {
+  const ok = 'x'.repeat(MIN_PASSWORD_LENGTH);
+  it('wants the minimum length in characters, and a matching confirmation', () => {
+    expect(passwordProblem(ok, ok)).toBeNull();
+    expect(
+      passwordProblem('é'.repeat(MIN_PASSWORD_LENGTH), 'é'.repeat(MIN_PASSWORD_LENGTH)),
+    ).toBeNull();
+    expect(passwordProblem(ok.slice(1), ok.slice(1))).toMatch(/at least/);
+    expect(passwordProblem(ok, `${ok}!`)).toMatch(/do not match/);
+  });
+});
+
+describe('parsePasswordChangeForm', () => {
+  const next = 'y'.repeat(MIN_PASSWORD_LENGTH);
+  it('needs the current password and a valid new one', () => {
+    expect(
+      parsePasswordChangeForm(form({ current: 'old', password: next, confirm: next })),
+    ).toEqual({
+      ok: true,
+      value: { current: 'old', password: next },
+    });
+    expect(parsePasswordChangeForm(form({ password: next, confirm: next }))).toMatchObject({
+      ok: false,
+      state: { error: 'Enter your current password.' },
+    });
+    expect(
+      parsePasswordChangeForm(form({ current: 'old', password: next, confirm: '' })),
+    ).toMatchObject({
+      ok: false,
+      state: { error: 'The passwords do not match.' },
+    });
   });
 });

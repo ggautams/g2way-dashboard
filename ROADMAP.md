@@ -55,7 +55,7 @@ toolchain to regenerate its types.
 Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 - [x] Throttle repeated sign-in attempts (per email and per client), audited
-- [ ] Password change for the signed-in user; admin/owner password reset for
+- [x] Password change for the signed-in user; admin/owner password reset for
       others (audited, obeying ADR-0005's who-may-manage-whom rules)
 - [ ] Run `make test-pg` against a live Postgres (never run yet; only PGlite has
       exercised the pg path, and only real pg races concurrent connections)
@@ -163,6 +163,8 @@ the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
       The image must ship `drizzle/` (migrations resolve from `cwd`, ADR-0003) and
       set `AUTH_URL` or `AUTH_TRUST_HOST` (an empty `AUTH_URL=` breaks Auth.js)
 - [ ] Audit log retention/pruning and export (CSV/JSON)
+- [ ] Force a password change at next sign-in after an admin reset, and a
+      "sign out my other sessions" button (ADR-0004 §9 has the mechanism)
 
 **Requires from g2way**: the admin port is not exposed on any Service today, so
 an in-cluster dashboard cannot reach it. See `UPSTREAM.md`.
@@ -564,3 +566,22 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   displayed now shows too. With no component renderer, the guard
   (`user-row-controls.test.ts`) reads the source. Done ahead of password reset,
   which adds a third form to the same row. Next: password change and reset.
+
+- feat: password change and reset (ADR-0004 §9).
+  - `/account`, linked from the account menu, changes your own password. The
+    current password is checked under the sign-in per-email throttle, and a
+    wrong one is audited as a denied `user.password_change`.
+  - `/users` rows gain a "Reset password" disclosure. It goes through
+    `updateUser` as a `{ passwordHash }` change, so ADR-0005's rules apply
+    unchanged, never to your own account. It is audited as
+    `user.password_reset`.
+  - Both stamp `users.password_changed_at` (migration
+    `0003_password_changed_at`). A new never-refreshed `signedInAt` JWT claim
+    lets `resolveSessionUser` end every session that signed in before it. After
+    a self-change the action signs the user back in with the new password.
+  - **Surprise:** the audit redactor masks any key matching `passw`, so the
+    request field reads `{ set: 'a new password' }`.
+  - `/account` joins the bundle scan's page list.
+  - The forced change after a reset and a "sign out other sessions" button went
+    to M11.
+  - Next: `make test-pg`, then the browser pass.

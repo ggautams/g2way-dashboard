@@ -136,3 +136,24 @@ describe('attemptSignIn (throttled)', () => {
     }
   });
 });
+
+describe('resolveSessionUser after a password change (ADR-0004 §9)', () => {
+  it('ends sessions signed in before the change, and keeps later ones', async () => {
+    const { database, owner } = await withOwner();
+    const session = { userId: owner.id, orgId: ORG, signedInAt: Date.now() - 60_000 };
+    expect(await resolveSessionUser(database, ORG, session)).not.toBeNull();
+
+    const changedAt = new Date();
+    database.db
+      .update(database.schema.users)
+      .set({ passwordChangedAt: changedAt })
+      .where(eq(database.schema.users.id, owner.id))
+      .run();
+    expect(await resolveSessionUser(database, ORG, session)).toBeNull();
+    // A token from before `signedInAt` existed counts as older than any change.
+    expect(await resolveSessionUser(database, ORG, { userId: owner.id, orgId: ORG })).toBeNull();
+    expect(
+      await resolveSessionUser(database, ORG, { ...session, signedInAt: changedAt.getTime() }),
+    ).not.toBeNull();
+  });
+});

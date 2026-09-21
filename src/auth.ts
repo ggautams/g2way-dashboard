@@ -56,13 +56,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   pages: { signIn: '/login', error: '/login' },
   callbacks: {
     jwt({ token, user }) {
-      // `user` is present only on sign-in: stamp the org the account belongs to.
-      if (user) token.orgId = getOrgId();
+      // `user` is present only on sign-in: stamp the org the account belongs to,
+      // and when, so a later password change can end this session (ADR-0004 §9).
+      // Never refreshed afterwards, unlike the token's own `iat`.
+      if (user) {
+        token.orgId = getOrgId();
+        token.signedInAt = Date.now();
+      }
       return token;
     },
     session({ session, token }) {
       session.user.id = token.sub ?? '';
       session.orgId = typeof token.orgId === 'string' ? token.orgId : null;
+      session.signedInAt = typeof token.signedInAt === 'number' ? token.signedInAt : null;
       return session;
     },
   },
@@ -72,6 +78,8 @@ declare module 'next-auth' {
   interface Session {
     /** The org the session was issued for; a mismatch with config signs the user out. */
     orgId: string | null;
+    /** When this session signed in (ms); older than a password change means ended. */
+    signedInAt: number | null;
   }
 }
 

@@ -32,6 +32,7 @@ export const users = pgTable(
     email: text('email').notNull(),
     name: text('name').notNull(),
     passwordHash: text('password_hash').notNull(),
+    passwordChangedAt: pgTimestamp('password_changed_at', { withTimezone: true, mode: 'date' }),
     role: text('role', { enum: ROLES }).notNull(),
     disabled: boolean('disabled').notNull().default(false),
     createdAt: timestamp('created_at'),

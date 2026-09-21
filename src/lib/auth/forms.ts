@@ -22,6 +22,15 @@ function field(formData: FormData, name: string): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** What is wrong with a new password and its confirmation, or `null` if nothing. */
+export function passwordProblem(password: string, confirm: string): string | null {
+  if ([...password].length < MIN_PASSWORD_LENGTH) {
+    return `The password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+  }
+  if (password !== confirm) return 'The passwords do not match.';
+  return null;
+}
+
 export type SetupInput = { email: string; name: string; password: string };
 
 export function parseSetupForm(
@@ -35,13 +44,25 @@ export function parseSetupForm(
 
   if (!/^[^\s@]+@[^\s@]+$/.test(email)) return fail('Enter a valid email address.');
   if (name === '') return fail('Enter a name.');
-  if ([...password].length < MIN_PASSWORD_LENGTH) {
-    return fail(`The password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
-  }
-  if (password !== confirm) return fail('The passwords do not match.');
+  const problem = passwordProblem(password, confirm);
+  if (problem !== null) return fail(problem);
   return { ok: true, value: { email, name, password } };
 }
 
 export function parseLoginForm(formData: FormData): { email: string; password: string } {
   return { email: field(formData, 'email').trim(), password: field(formData, 'password') };
+}
+
+export type PasswordChangeInput = { current: string; password: string };
+
+/** `/account`'s form: the current password, and the new one twice. */
+export function parsePasswordChangeForm(
+  formData: FormData,
+): { ok: true; value: PasswordChangeInput } | { ok: false; state: FormState } {
+  const current = field(formData, 'current');
+  const password = field(formData, 'password');
+  if (current === '') return { ok: false, state: { error: 'Enter your current password.' } };
+  const problem = passwordProblem(password, field(formData, 'confirm'));
+  if (problem !== null) return { ok: false, state: { error: problem } };
+  return { ok: true, value: { current, password } };
 }

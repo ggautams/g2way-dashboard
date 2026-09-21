@@ -22,6 +22,13 @@
       "when": 1790192252977,
       "tag": "0002_login_failures",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790192734035,
+      "tag": "0003_password_changed_at",
+      "breakpoints": true
     }
   ]
 }

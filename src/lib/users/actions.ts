@@ -7,7 +7,12 @@ import { getCurrentUser } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
 import { createUser, updateUser, type User, type UserWriteRefusal } from '@/lib/db/users';
 import { getOrgId } from '@/lib/g2/environments';
-import { parseCreateUserForm, parseUserChangeForm, type UserFormState } from './forms';
+import {
+  parseCreateUserForm,
+  parsePasswordResetForm,
+  parseUserChangeForm,
+  type UserFormState,
+} from './forms';
 
 /**
  * Server actions behind the users page. Each one re-checks the caller's
@@ -83,5 +88,31 @@ export async function updateUserAction(
       'role' in parsed.change
         ? `${after.email} is now ${after.role}.`
         : `${after.email} is ${after.disabled ? 'disabled' : 'enabled'}.`,
+  };
+}
+
+/**
+ * Sets another account's password. Who may reset whom is exactly who may change
+ * whom (ADR-0005): never your own account (that is `/account`, which asks for
+ * the current password), and only accounts whose role you could assign. The
+ * account's existing sessions end (ADR-0004 §9).
+ */
+export async function resetPasswordAction(
+  _previous: UserFormState,
+  formData: FormData,
+): Promise<UserFormState> {
+  const actor = await manager();
+  if (isState(actor)) return actor;
+  const parsed = parsePasswordResetForm(formData);
+  if ('error' in parsed) return { error: parsed.error };
+
+  const result = await updateUser(getDatabase(), getOrgId(), actor.id, parsed.userId, {
+    passwordHash: await hashPassword(parsed.password),
+  });
+  if (!result.ok) return refused(result);
+  revalidatePath('/users');
+  return {
+    error: null,
+    notice: `Password reset for ${result.after.email}; their existing sessions have ended.`,
   };
 }

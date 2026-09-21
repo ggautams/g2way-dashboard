@@ -5,10 +5,12 @@ import { redirect } from 'next/navigation';
 import { signIn, signOut } from '@/auth';
 import { getDatabase } from '@/lib/db';
 import { recordSignOut } from './audit';
-import { createFirstOwner, hasUsers } from '@/lib/db/users';
+import { recordAudit } from '@/lib/db/audit';
+import { changeOwnPassword, createFirstOwner, hasUsers } from '@/lib/db/users';
 import { getOrgId } from '@/lib/g2/environments';
-import { parseLoginForm, parseSetupForm, type FormState } from './forms';
-import { hashPassword } from './password';
+import { parseLoginForm, parsePasswordChangeForm, parseSetupForm, type FormState } from './forms';
+import { hashPassword, verifyPassword } from './password';
+import { checkThrottle, noteFailure, noteSuccess, throttleKeys } from './throttle';
 import { getCurrentUser } from './session';
 
 /**
@@ -25,10 +27,14 @@ const SIGN_IN_ERRORS: Record<string, string> = {
   throttled: 'Too many failed sign-in attempts. Wait a few minutes and try again.',
 };
 
-async function signInOrExplain(email: string, password: string): Promise<FormState> {
+async function signInOrExplain(
+  email: string,
+  password: string,
+  redirectTo = '/',
+): Promise<FormState> {
   try {
     // Throws Next's redirect on success, which must propagate.
-    await signIn('credentials', { email, password, redirectTo: '/' });
+    await signIn('credentials', { email, password, redirectTo });
   } catch (error) {
     if (error instanceof CredentialsSignin) {
       return { error: SIGN_IN_ERRORS[error.code] ?? SIGN_IN_ERRORS.credentials, email };
@@ -76,4 +82,47 @@ export async function signOutAction(): Promise<void> {
   const user = await getCurrentUser();
   if (user !== null) await recordSignOut(getDatabase(), getOrgId(), user);
   await signOut({ redirectTo: '/login' });
+}
+
+/**
+ * `/account`: the signed-in user changes their own password. The current
+ * password is checked first, under the same per-email throttle as sign-in (a
+ * borrowed session must not become a way to guess the password), and a wrong
+ * one is audited as a denied `user.password_change`. The change itself stamps
+ * `password_changed_at`, which ends every session of the account signed in
+ * before it (ADR-0004 §9), this one included; so the user is signed straight
+ * back in with the new password, which also proves it works.
+ */
+export async function changePasswordAction(
+  _previous: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const user = await getCurrentUser();
+  if (user === null) return { error: 'Your session has ended. Sign in again.' };
+  const parsed = parsePasswordChangeForm(formData);
+  if (!parsed.ok) return parsed.state;
+  const { current, password } = parsed.value;
+  const orgId = getOrgId();
+  const database = getDatabase();
+
+  const keys = throttleKeys(user.email, null);
+  if ((await checkThrottle(database, orgId, keys)).throttled) {
+    return { error: 'Too many wrong passwords. Wait a few minutes and try again.' };
+  }
+  if (!(await verifyPassword(current, user.passwordHash))) {
+    await noteFailure(database, orgId, keys);
+    await recordAudit(database, orgId, {
+      actor: { id: user.id, email: user.email, role: user.role },
+      action: 'user.password_change',
+      target: user.email,
+      outcome: 'denied',
+      error: 'the current password is wrong',
+    });
+    return { error: 'The current password is wrong.' };
+  }
+  await noteSuccess(database, orgId, user.email);
+
+  const result = await changeOwnPassword(database, orgId, user.id, await hashPassword(password));
+  if (!result.ok) return { error: 'Your session has ended. Sign in again.' };
+  return signInOrExplain(user.email, password, '/account?changed=1');
 }

@@ -86,7 +86,7 @@ const namedForm = {
 // A seeded audit entry, so the detail page renders a real before/after diff.
 const AUDIT_ENTRY_ID = randomUUID();
 const PAGES = {
-  single: ['/', '/gateway', '/users', '/audit', `/audit/${AUDIT_ENTRY_ID}`],
+  single: ['/', '/gateway', '/users', '/audit', `/audit/${AUDIT_ENTRY_ID}`, '/account'],
   named: [
     '/',
     '/gateway',
@@ -95,6 +95,7 @@ const PAGES = {
     '/audit',
     '/audit?action=auth.&outcome=success',
     `/audit/${AUDIT_ENTRY_ID}`,
+    '/account',
   ],
 };
 

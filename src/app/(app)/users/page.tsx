@@ -7,7 +7,7 @@ import { requirePermission } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
 import { listUsers } from '@/lib/db/users';
 import { getOrgId } from '@/lib/g2/environments';
-import { createUserAction, updateUserAction } from '@/lib/users/actions';
+import { createUserAction, resetPasswordAction, updateUserAction } from '@/lib/users/actions';
 
 export const metadata: Metadata = { title: 'Users & roles' };
 
@@ -34,8 +34,8 @@ export default async function UsersPage() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Users &amp; roles</h1>
         <p className="mt-1 text-sm text-muted">
-          Dashboard accounts. Role changes and disabling take effect on the user&apos;s next
-          request.
+          Dashboard accounts. Role changes, disabling and password resets take effect on the
+          user&apos;s next request; a reset also ends their existing sessions.
         </p>
       </header>
 
@@ -84,6 +84,8 @@ export default async function UsersPage() {
                           disabled={user.disabled}
                           roles={assignable}
                           action={updateUserAction}
+                          resetAction={resetPasswordAction}
+                          minPasswordLength={MIN_PASSWORD_LENGTH}
                         />
                       ) : (
                         <span className="text-xs text-muted" title={denial}>

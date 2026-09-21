@@ -16,7 +16,11 @@ const timestamp = (name: string) =>
     .notNull()
     .$defaultFn(() => new Date());
 
-/** Dashboard accounts. `email` is unique per org and stored lower-cased by the caller. */
+/**
+ * Dashboard accounts. `email` is unique per org and stored lower-cased by the
+ * caller. `password_changed_at` is set by a password change or reset; sessions
+ * signed in before it are no longer honoured (ADR-0004 §9).
+ */
 export const users = sqliteTable(
   'users',
   {
@@ -25,6 +29,7 @@ export const users = sqliteTable(
     email: text('email').notNull(),
     name: text('name').notNull(),
     passwordHash: text('password_hash').notNull(),
+    passwordChangedAt: integer('password_changed_at', { mode: 'timestamp_ms' }),
     role: text('role', { enum: ROLES }).notNull(),
     disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false),
     createdAt: timestamp('created_at'),

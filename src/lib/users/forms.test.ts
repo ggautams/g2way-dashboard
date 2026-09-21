@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseCreateUserForm, parseUserChangeForm } from './forms';
+import { MIN_PASSWORD_LENGTH } from '@/lib/auth/forms';
+import { parseCreateUserForm, parsePasswordResetForm, parseUserChangeForm } from './forms';
 
 function form(fields: Record<string, string>): FormData {
   const data = new FormData();
@@ -57,6 +58,24 @@ describe('parseUserChangeForm', () => {
     });
     expect(parseUserChangeForm(form({ userId: 'u', disabled: 'yes' }))).toEqual({
       error: 'Nothing to change.',
+    });
+  });
+});
+
+describe('parsePasswordResetForm', () => {
+  const pw = 'z'.repeat(MIN_PASSWORD_LENGTH);
+  it('takes a user and a confirmed password under the setup rules', () => {
+    expect(parsePasswordResetForm(form({ userId: 'u1', password: pw, confirm: pw }))).toEqual({
+      userId: 'u1',
+      password: pw,
+    });
+    expect(parsePasswordResetForm(form({ password: pw, confirm: pw }))).toEqual({
+      error: 'No user given.',
+    });
+    expect(
+      parsePasswordResetForm(form({ userId: 'u1', password: 'short', confirm: 'short' })),
+    ).toEqual({
+      error: `The password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
     });
   });
 });

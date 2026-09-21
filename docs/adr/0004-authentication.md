@@ -96,6 +96,19 @@ through. Roles are stored now but enforced by the next task.
    an attacker who knows an address can keep that account throttled while
    they keep failing, and the audit log is where an owner sees it.
 
+9. **A password change ends the account's older sessions** (_added
+   2026-09-23_). JWTs cannot be revoked one by one, so at sign-in the token
+   gets a `signedInAt` claim (milliseconds, never refreshed, unlike `iat`),
+   and `resolveSessionUser` refuses a session whose `signedInAt` is older than
+   the account's `password_changed_at`. A token with no `signedInAt` counts as
+   older. A user changes their own password on `/account` with the current one.
+   That check shares the sign-in per-email throttle, so a borrowed session
+   cannot be used to guess it. The user is then signed straight back in.
+   Owners and admins reset other accounts from `/users` under exactly
+   ADR-0005's who-may-change-whom rules, never their own. Both are audited
+   (`user.password_change`, `user.password_reset`) with no password or hash in
+   the row.
+
 ## Consequences
 
 - `scripts/check-client-bundle.mjs` has to sign in to scan anything real. It
@@ -103,7 +116,7 @@ through. Roles are stored now but enforced by the next task.
   throwaway database, signs in through Auth.js's credentials endpoint, and
   requires every page in `PAGES` to answer 200 with the user's shell before
   scanning. `AUTH_SECRET` is a canary alongside the gateway secrets.
-- Losing `AUTH_SECRET` or rotating it signs everyone out. That is the only
-  session-revocation lever besides disabling users.
-- Not built yet: password change and reset. (Sign-in and bootstrap auditing
-  landed with ADR-0006; sign-in throttling is §8.)
+- Losing `AUTH_SECRET` or rotating it signs everyone out.
+- Revoking sessions: rotating `AUTH_SECRET` (everyone), disabling a user, or
+  changing or resetting their password (§9). There is still no "sign out my
+  other sessions" button, and no forced change after an admin reset.

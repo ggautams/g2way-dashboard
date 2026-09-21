@@ -60,15 +60,24 @@ export async function attemptSignIn(
 /**
  * The account behind a session, re-read from the database on every request
  * (ADR-0004): a user disabled or deleted mid-session loses access on their next
- * request, not when their token expires. `null` means "treat as signed out".
+ * request, not when their token expires. So does a session signed in before the
+ * account's password last changed (§9): `signedInAt` is stamped into the token
+ * at sign-in, and a token without one predates the stamp. `null` means "treat
+ * as signed out".
  */
 export async function resolveSessionUser(
   handle: DataHandle,
   orgId: string,
-  session: { userId?: string | null; orgId?: string | null } | null,
+  session: { userId?: string | null; orgId?: string | null; signedInAt?: number | null } | null,
 ): Promise<User | null> {
   if (!session?.userId || session.orgId !== orgId) return null;
   const user = await findUserById(handle, orgId, session.userId);
   if (user === undefined || user.disabled) return null;
+  if (
+    user.passwordChangedAt !== null &&
+    (session.signedInAt ?? 0) < user.passwordChangedAt.getTime()
+  ) {
+    return null;
+  }
   return user;
 }
