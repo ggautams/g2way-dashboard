@@ -2,7 +2,7 @@
 # must pass. Mirrors the g2way repo's Makefile deliberately — same muscle memory.
 
 .PHONY: check fmt fmt-check lint typecheck test build bundle-check dev start \
-        sync-g2way check-g2way hooks clean
+        db-generate db-migrate test-pg sync-g2way check-g2way hooks clean
 
 ## Quality gate: run before every commit. Must stay green.
 ## `bundle-check` runs the production build itself, so `build` is not repeated.
@@ -37,6 +37,30 @@ dev:
 
 start:
 	npm start
+
+## ---- dashboard database (ADR-0003) --------------------------------------
+
+## Write new SQLite and Postgres migrations after editing src/lib/db/schema/.
+db-generate:
+	npm run db:generate
+
+## Apply pending migrations to DATABASE_URL's database (the server also does
+## this on startup).
+db-migrate:
+	npm run db:migrate
+
+## Run the database tests against a throwaway Postgres in Docker, including the
+## live node-postgres test that plain `make test` skips.
+PG_TEST_CONTAINER := g2way-dashboard-test-pg
+PG_TEST_PORT ?= 55432
+test-pg:
+	@docker rm -f $(PG_TEST_CONTAINER) >/dev/null 2>&1 || true
+	docker run -d --rm --name $(PG_TEST_CONTAINER) -e POSTGRES_PASSWORD=test \
+		-p 127.0.0.1:$(PG_TEST_PORT):5432 postgres:17-alpine >/dev/null
+	@until docker exec $(PG_TEST_CONTAINER) pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; do sleep 1; done
+	@TEST_POSTGRES_URL=postgres://postgres:test@127.0.0.1:$(PG_TEST_PORT)/postgres \
+		npx vitest run src/lib/db; status=$$?; \
+		docker rm -f $(PG_TEST_CONTAINER) >/dev/null; exit $$status
 
 ## ---- g2way linkage ------------------------------------------------------
 

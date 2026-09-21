@@ -13,25 +13,35 @@
     "fmt:check": "prettier --check .",
     "check:bundle": "node scripts/check-client-bundle.mjs",
     "check:g2way": "node scripts/check-g2way.mjs",
-    "sync:g2way": "node scripts/sync-g2way.mjs"
+    "sync:g2way": "node scripts/sync-g2way.mjs",
+    "db:generate": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.pg.config.ts",
+    "db:migrate": "tsx --conditions=react-server scripts/db-migrate.mts"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.3",
     "next": "16.3.4",
     "openapi-fetch": "^0.17.0",
+    "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@tailwindcss/postcss": "^4",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.20.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.9.6",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^5.0.0"
   }

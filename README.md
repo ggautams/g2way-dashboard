@@ -36,6 +36,9 @@ make run            # proxy on :8080
 | ------------------ | -------------------------------------------------------------- |
 | `make check`       | The gate: format, lint, typecheck, test, build, upstream drift |
 | `make dev`         | Run the dashboard locally                                      |
+| `make db-generate` | Write SQLite and Postgres migrations after a schema change     |
+| `make db-migrate`  | Apply pending migrations to `DATABASE_URL` (also run on start) |
+| `make test-pg`     | Database tests against a throwaway Postgres in Docker          |
 | `make check-g2way` | Report whether a watched part of g2way has moved               |
 | `make sync-g2way`  | Regenerate `contracts/`, journal the change, commit it         |
 | `make hooks`       | Install the pre-commit drift hook                              |

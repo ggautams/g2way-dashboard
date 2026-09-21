@@ -43,3 +43,6 @@ next-env.d.ts
 
 # Next.js typegen output
 /.next/types
+
+# dashboard SQLite database (default DATABASE_URL)
+/data/

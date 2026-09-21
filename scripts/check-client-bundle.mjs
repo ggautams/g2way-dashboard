@@ -15,7 +15,8 @@
 
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { join, relative, resolve } from 'node:path';
 
@@ -23,6 +24,12 @@ const ROOT = resolve(import.meta.dirname, '..');
 const NEXT = join(ROOT, 'node_modules', '.bin', 'next');
 const STATIC = join(ROOT, '.next', 'static');
 const DEAD_GATEWAY = 'http://127.0.0.1:1';
+
+// A throwaway SQLite database, so the startup migrations (src/instrumentation.ts)
+// run for real without touching ./data.
+const DB_DIR = mkdtempSync(join(tmpdir(), 'g2dash-bundle-'));
+const DB_ENV = { DATABASE_URL: `file:${join(DB_DIR, 'dashboard.db')}` };
+process.on('exit', () => rmSync(DB_DIR, { recursive: true, force: true }));
 
 const canary = (name) => `canary-${name}-${randomBytes(12).toString('hex')}`;
 const secrets = {
@@ -132,7 +139,7 @@ async function scanRendered(form, env) {
   const child = spawn(NEXT, ['start', '-p', String(port), '-H', '127.0.0.1'], {
     cwd: ROOT,
     // Only this form's variables: the two forms are mutually exclusive.
-    env: { ...withoutG2(process.env), ...env },
+    env: { ...withoutG2(process.env), ...DB_ENV, ...env },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   try {
@@ -169,7 +176,7 @@ function withoutG2(env) {
 // prerender pass stays on the single form.
 const buildEnv = { ...namedForm, ...singleForm };
 delete buildEnv.G2_ENVIRONMENTS;
-await run(NEXT, ['build'], { ...withoutG2(process.env), ...buildEnv });
+await run(NEXT, ['build'], { ...withoutG2(process.env), ...DB_ENV, ...buildEnv });
 
 const scanned = scanStatic();
 const rendered =

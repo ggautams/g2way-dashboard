@@ -46,7 +46,7 @@ toolchain to regenerate its types.
 
 ## M2 — Identity, RBAC & audit
 
-- [ ] Drizzle schema + migrations (better-sqlite3 default, Postgres driver swap)
+- [x] Drizzle schema + migrations (better-sqlite3 default, Postgres driver swap)
 - [ ] Auth.js login; first-run bootstrap of the initial owner account
 - [ ] Roles: owner / admin / editor / viewer / portal-dev, enforced server-side
 - [ ] Audit log: actor, action, before/after diff, resulting gateway call
@@ -322,3 +322,29 @@ target atomic`), verified by breaking the build and confirming the spec
   **Keep up to date:** `PAGES` in the script lists the routes to render. Add each
   new page there as it lands (dynamic segments need a concrete example). Next:
   M2, the Drizzle schema and migrations.
+
+- M2 started: the database layer landed, recorded as ADR-0003
+  (it refines ADR-0001 §3). Drizzle table builders are dialect-typed, so "one
+  schema" is `src/lib/db/schema/{sqlite,pg}.ts` declaring the same tables, with
+  `schema.test.ts` failing on any divergence in tables, columns, nullability,
+  keys, indexes or the row's TypeScript type. Tables: `users` (email unique per
+  org, role as text over `ROLES` in `schema/shared.ts`) and `audit_log` (actor
+  snapshotted as id + email with no FK, so the trail survives user deletion;
+  before/after JSON; gateway method/path/status). Every table has a non-null
+  `org_id` with no default. `DATABASE_URL` picks the driver (`src/lib/db/config.ts`:
+  unset → `./data/dashboard.db`, `file:` → SQLite, `postgres(ql)://` → `pg`).
+  `getDatabase()` (server-only) returns a union tagged by `dialect`, and
+  data-access code narrows on it. Migrations are generated per dialect into
+  `drizzle/{sqlite,pg}/` (`make db-generate`) and applied on server start by
+  `src/instrumentation.ts` and by `make db-migrate` (tsx under
+  `--conditions=react-server`, so the `server-only` guard loads). **Surprises:**
+  Next 16 already treats `better-sqlite3` and `pg` as server externals, so
+  `next.config.ts` is unchanged. There is no local Postgres server or running
+  Docker here, so the `drizzle/pg/` migrations are proven in the plain test run
+  against PGlite (Postgres in WASM, a dev dependency). The live node-postgres test
+  is skipped unless `TEST_POSTGRES_URL` is set, and `make test-pg` (Docker)
+  provides one, but that target has **not been run yet**. `check:bundle` now
+  points `DATABASE_URL` at a temp file, so the startup migrations run on every
+  gate. `npm audit` reports a moderate, dev-only esbuild advisory pulled in by
+  drizzle-kit. Next: Auth.js login and first-run owner bootstrap, which will
+  write the first data-access module over the union.
