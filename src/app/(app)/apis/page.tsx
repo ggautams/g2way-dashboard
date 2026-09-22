@@ -14,10 +14,13 @@ import {
   type ApiFilter,
   type ApiSummary,
 } from '@/lib/apis/list';
+import { getDatabase } from '@/lib/db';
+import { listPendingChanges } from '@/lib/db/pending';
 import { loadApis, type ApiList } from '@/lib/g2/apis';
 import {
   RegistryConfigError,
   UnknownEnvironmentError,
+  getOrgId,
   listEnvironments,
 } from '@/lib/g2/environments';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
@@ -67,6 +70,10 @@ export default async function ApisPage({ searchParams }: PageProps<'/apis'>) {
   }
 
   const all = list.apis.value.map(summarise);
+  const { changes } = await listPendingChanges(getDatabase(), getOrgId(), list.environment);
+  const staged = new Set(
+    changes.filter((c) => c.action.startsWith('api.')).map((c) => c.target ?? ''),
+  );
   const shown = filterApis(all, filter);
   const inactive = all.filter((api) => !api.active).length;
 
@@ -93,7 +100,7 @@ export default async function ApisPage({ searchParams }: PageProps<'/apis'>) {
           </Link>
         </Empty>
       ) : (
-        <ApiTable apis={shown} />
+        <ApiTable apis={shown} staged={staged} />
       )}
     </Page>
   );
@@ -177,7 +184,14 @@ function FilterForm({ filter }: { filter: ApiFilter }) {
   );
 }
 
-function ApiTable({ apis }: { apis: readonly ApiSummary[] }) {
+function ApiTable({
+  apis,
+  staged,
+}: {
+  apis: readonly ApiSummary[];
+  /** Ids with saved changes not yet live (no reload since). */
+  staged: ReadonlySet<string>;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm">
@@ -220,6 +234,15 @@ function ApiTable({ apis }: { apis: readonly ApiSummary[] }) {
                 ) : (
                   <Badge variant="secondary" title="Loaded and listed, never routed to">
                     inactive
+                  </Badge>
+                )}
+                {staged.has(api.apiId) && (
+                  <Badge
+                    variant="outline"
+                    className="ml-1 border-warning/40 text-warning"
+                    title="Saved since the last reload: the gateway still routes the previous version"
+                  >
+                    not live
                   </Badge>
                 )}
               </td>

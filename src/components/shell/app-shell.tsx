@@ -4,6 +4,7 @@ import type { PublicUser } from '@/lib/auth/session';
 import { AccountMenu } from './account-menu';
 import { CommandPalette } from './command-palette';
 import { DegradedBanner } from './degraded-banner';
+import { PendingChanges } from './pending-changes';
 import { MobileBar, Sidebar } from './sidebar';
 import { Toaster } from './toaster';
 
@@ -36,6 +37,12 @@ export function AppShell({
         {can(user.role, 'gateway:read') && (
           <Suspense fallback={null}>
             <DegradedBanner />
+          </Suspense>
+        )}
+        {/* Staged API/policy writes: reload-required is never hidden (CLAUDE.md). */}
+        {can(user.role, 'apis:read') && (
+          <Suspense fallback={null}>
+            <PendingChanges role={user.role} />
           </Suspense>
         )}
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">

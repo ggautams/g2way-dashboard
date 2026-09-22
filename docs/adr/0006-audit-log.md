@@ -145,5 +145,14 @@ browse.
 - M3's config history and rollback can build on the same before/after snapshots,
   but will want its own table: audit rows are redacted, so they cannot restore a
   secret.
+- _Added 2026-09-23 (M3):_ reload-required state is **derived from this log**,
+  not stored separately (`src/lib/db/pending.ts`). A staged change is a
+  successful `api.*`/`policy.*` row for an environment that comes after that
+  environment's last successful `gateway.reload` row, ordered by
+  `(created_at, id)`. The log already records both atomically with the
+  gateway calls, so there is no second record to drift. The costs:
+  - A reload made outside the dashboard is invisible, and the UI says so.
+  - Retention (M11) must never prune a write row newer than its environment's
+    last reload, or staged changes would silently disappear.
 - Not built: retention or pruning, export, per-row integrity (hash chaining),
   and client IP or user agent.

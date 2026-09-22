@@ -84,7 +84,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Raw JSON/YAML editor (Monaco) validated live against the OpenAPI schema,
       kept in sync with the form both ways
 - [x] Diff preview before save; create/update/delete via `/g2/apis`
-- [ ] **Reload-required** as a first-class UI concept: writes are staged until
+- [x] **Reload-required** as a first-class UI concept: writes are staged until
       `POST /g2/reload`, with a visible pending-changes affordance
 - [ ] Import an OpenAPI/Swagger document → `ApiDefinition`
 - [ ] Config version history with rollback (dashboard-side)
@@ -169,7 +169,9 @@ the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
 - [ ] Dockerfile + `deploy/k8s/` applying as a plain directory alongside g2way's.
       The image must ship `drizzle/` (migrations resolve from `cwd`, ADR-0003) and
       set `AUTH_URL` or `AUTH_TRUST_HOST` (an empty `AUTH_URL=` breaks Auth.js)
-- [ ] Audit log retention/pruning and export (CSV/JSON)
+- [ ] Audit log retention/pruning and export (CSV/JSON). Pruning must keep every
+      `api.*`/`policy.*` row newer than its environment's last reload: pending
+      changes are derived from them (ADR-0006)
 - [ ] Force a password change at next sign-in after an admin reset, and a
       "sign out my other sessions" button (ADR-0004 §9 has the mechanism)
 
@@ -739,3 +741,20 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     definition, so the draft restarts from what was saved.
   - Not browser-verified (see the open box).
   - Next: reload-required as a first-class concept.
+
+- feat(M3): reload-required is first-class.
+  - For every role with `apis:read`, the shell shows a bar when the selected
+    environment has staged changes: "N saved changes in <env> are not live
+    yet". It expands into the list of writes (who, when) and states that a
+    reload from outside the dashboard isn't seen.
+  - Roles with `gateway:reload` get "Reload gateway" (`POST /g2/reload` via the
+    BFF, audited; refusals quoted). Other roles are told to ask an editor.
+  - `/apis` rows with staged changes carry a "not live" badge.
+  - Staged changes are derived from the audit log (`listPendingChanges`,
+    ADR-0006 amended), with no new table: successful `api.*`/`policy.*` writes
+    to the environment after its last successful reload, ordered by
+    `(created_at, id)`, so a same-millisecond write after a reload still
+    counts. Key writes are live at once and excluded.
+  - M11's retention box now carries the constraint that pruning must keep
+    staged rows.
+  - Next: OpenAPI/Swagger import.
