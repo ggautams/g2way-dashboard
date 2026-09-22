@@ -83,7 +83,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] API designer: structured form over `ApiDefinition`
 - [x] Raw JSON/YAML editor (Monaco) validated live against the OpenAPI schema,
       kept in sync with the form both ways
-- [ ] Diff preview before save; create/update/delete via `/g2/apis`
+- [x] Diff preview before save; create/update/delete via `/g2/apis`
 - [ ] **Reload-required** as a first-class UI concept: writes are staged until
       `POST /g2/reload`, with a visible pending-changes affordance
 - [ ] Import an OpenAPI/Swagger document → `ApiDefinition`
@@ -714,3 +714,28 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     build emits the workers, and the loader's CDN URL remains only as dead
     default config. Folded into the open browser-pass box.
   - Next: diff preview and save.
+
+- feat(M3): diff preview and create/update/delete.
+  - All writes go from the browser through the BFF (`src/lib/apis/save.ts`
+    over `bffClient`), so they reuse its RBAC, CSRF check, org scoping and
+    `api.create/update/delete` audit rows with before/after. Nothing new
+    server-side.
+  - "Review changes" re-reads the stored definition via the BFF, diffs it
+    against the draft with the audit log's `diffJson`, and warns if someone
+    changed or deleted it since the page loaded.
+  - The table component is now shared (`src/components/diff/diff-table.tsx`)
+    with the audit detail page.
+  - Saving targets the environment the page was loaded from, named in
+    `X-G2-Environment`, so switching environments in another tab can't
+    redirect a save.
+  - Gateway refusals appear verbatim with their HTTP status, 409 "use PUT"
+    included.
+  - Editing may not change `api_id`: PUT refuses a body naming another id, so
+    the designer blocks it with a message instead.
+  - Delete sits behind a confirm dialog naming the API.
+  - Every step says the change is not live until reload: the save bar, the
+    dialog, and the saved and deleted notices.
+  - After a save the page refreshes and the designer is keyed on the stored
+    definition, so the draft restarts from what was saved.
+  - Not browser-verified (see the open box).
+  - Next: reload-required as a first-class concept.

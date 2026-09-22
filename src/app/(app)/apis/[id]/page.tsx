@@ -7,7 +7,13 @@ import { apiDefinitionSchema } from '@/lib/apis/schema';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import { loadApi, type ApiItem } from '@/lib/g2/apis';
-import { RegistryConfigError, UnknownEnvironmentError } from '@/lib/g2/environments';
+import {
+  RegistryConfigError,
+  UnknownEnvironmentError,
+  listEnvironments,
+} from '@/lib/g2/environments';
+import { DeleteApiButton, NotLiveNote } from '@/components/apis/save-bar';
+import { Notice } from '@/components/users/controls';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 
 export async function generateMetadata({ params }: PageProps<'/apis/[id]'>): Promise<Metadata> {
@@ -18,12 +24,20 @@ export async function generateMetadata({ params }: PageProps<'/apis/[id]'>): Pro
  * One stored definition in the designer: editable with `apis:write`, read-only
  * otherwise. A gateway failure is quoted verbatim; a 404 is the not-found page.
  */
-export default async function ApiPage({ params }: PageProps<'/apis/[id]'>) {
+export default async function ApiPage({ params, searchParams }: PageProps<'/apis/[id]'>) {
   const user = await requirePermission('apis:read');
   const id = decodeURIComponent((await params).id);
+  const { saved } = await searchParams;
   let api: ApiItem['api'];
+  let environment = { id: '', label: '' };
   try {
-    ({ api } = await loadApi(await selectedEnvironmentId(), id));
+    const item = await loadApi(await selectedEnvironmentId(), id);
+    api = item.api;
+    environment = {
+      id: item.environment,
+      label:
+        listEnvironments().find((env) => env.id === item.environment)?.label ?? item.environment,
+    };
   } catch (error) {
     if (!(error instanceof RegistryConfigError || error instanceof UnknownEnvironmentError)) {
       throw error;
@@ -31,25 +45,40 @@ export default async function ApiPage({ params }: PageProps<'/apis/[id]'>) {
     api = { ok: false, error: error.message };
   }
   if (!api.ok && api.status === 404) notFound();
+  const canWrite = can(user.role, 'apis:write');
 
   return (
     <div className="flex flex-col gap-6">
-      <header>
-        <p className="text-sm text-muted">
-          <Link href="/apis" className="hover:underline">
-            APIs
-          </Link>{' '}
-          / <span className="font-mono">{id}</span>
-        </p>
-        <h1 className="text-2xl font-semibold tracking-tight">{api.ok ? api.value.name : id}</h1>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm text-muted">
+            <Link href="/apis" className="hover:underline">
+              APIs
+            </Link>{' '}
+            / <span className="font-mono">{id}</span>
+          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">{api.ok ? api.value.name : id}</h1>
+        </div>
+        {api.ok && canWrite && (
+          <DeleteApiButton apiId={id} name={api.value.name} environment={environment} />
+        )}
       </header>
+      {saved === '1' && (
+        <div className="flex flex-col gap-1">
+          <Notice message={`Saved to ${environment.label}.`} />
+          <NotLiveNote environment={environment} />
+        </div>
+      )}
       {api.ok ? (
         <ApiDesigner
+          // A save refreshes the page with the new stored definition: start a fresh draft.
+          key={JSON.stringify(api.value)}
+          environment={environment}
           original={api.value}
           initial={api.value}
           help={fieldHelp()}
           schema={apiDefinitionSchema()}
-          canWrite={can(user.role, 'apis:write')}
+          canWrite={canWrite}
         />
       ) : (
         <section

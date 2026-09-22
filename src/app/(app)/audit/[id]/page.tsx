@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { OutcomeBadge, formatAuditTime } from '@/components/audit/outcome-badge';
-import { diffJson, type DiffEntry } from '@/lib/audit/diff';
+import { DiffTable } from '@/components/diff/diff-table';
+import { diffJson } from '@/lib/audit/diff';
 import { requirePermission } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
 import { getAuditEntry } from '@/lib/db/audit';
@@ -11,12 +12,6 @@ import type { JsonValue } from '@/lib/db/schema/shared';
 import { getOrgId } from '@/lib/g2/environments';
 
 export const metadata: Metadata = { title: 'Audit entry' };
-
-const KIND_STYLE: Record<DiffEntry['kind'], string> = {
-  added: 'text-success',
-  removed: 'text-danger',
-  changed: 'text-warning',
-};
 
 /** One audit entry: who, what, the gateway call, and the before/after diff (ADR-0006). */
 export default async function AuditEntryPage({ params }: PageProps<'/audit/[id]'>) {
@@ -95,39 +90,7 @@ export default async function AuditEntryPage({ params }: PageProps<'/audit/[id]'
         ) : changes.length === 0 ? (
           <p className="text-sm text-muted">Before and after are identical.</p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-subtle text-left text-xs uppercase tracking-wide text-muted">
-                <tr>
-                  <th className="px-3 py-2 font-medium">Path</th>
-                  <th className="px-3 py-2 font-medium">Change</th>
-                  <th className="px-3 py-2 font-medium">Before</th>
-                  <th className="px-3 py-2 font-medium">After</th>
-                </tr>
-              </thead>
-              <tbody>
-                {changes.map((change) => (
-                  <tr
-                    key={`${change.kind}:${change.path}`}
-                    className="border-t border-border align-top"
-                  >
-                    <td className="px-3 py-2 font-mono text-xs">
-                      {change.path || '(whole document)'}
-                    </td>
-                    <td className={`px-3 py-2 font-mono text-xs ${KIND_STYLE[change.kind]}`}>
-                      {change.kind}
-                    </td>
-                    <td className="px-3 py-2">
-                      {'before' in change && <Json value={change.before} />}
-                    </td>
-                    <td className="px-3 py-2">
-                      {'after' in change && <Json value={change.after} />}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DiffTable changes={changes} />
         )}
       </section>
 
@@ -149,14 +112,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <dt className="text-xs uppercase tracking-wide text-muted">{label}</dt>
       <dd>{children}</dd>
     </>
-  );
-}
-
-function Json({ value }: { value: JsonValue }) {
-  return (
-    <pre className="max-w-md overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs">
-      {JSON.stringify(value, null, 2)}
-    </pre>
   );
 }
 

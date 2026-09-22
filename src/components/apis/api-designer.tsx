@@ -6,7 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { draftProblems, otherFields, type FormField } from '@/lib/apis/draft';
 import type { ApiDefinition } from '@/lib/apis/list';
 import { isDraftShape, parseRaw, schemaValidator, serialize, type RawFormat } from '@/lib/apis/raw';
+import { saveBlocker } from '@/lib/apis/save';
 import { ApiForm } from './api-form';
+import { SaveBar, type DesignerEnvironment } from './save-bar';
 
 // Monaco is large and browser-only: load it on first use, never on the server.
 const RawEditor = dynamic(() => import('./raw-editor'), {
@@ -24,6 +26,8 @@ type Props = {
   schema: { $id: string } & object;
   /** Whether the role holds `apis:write`; otherwise the designer is read-only. */
   canWrite: boolean;
+  /** The environment the definition was loaded from, and is saved back to. */
+  environment: DesignerEnvironment;
 };
 
 type View = 'form' | RawFormat;
@@ -35,7 +39,7 @@ type View = 'form' | RawFormat;
  * re-rendered from it whenever a raw view is opened. Everything the form does
  * not cover is carried along untouched.
  */
-export function ApiDesigner({ original, initial, help, schema, canWrite }: Props) {
+export function ApiDesigner({ original, initial, help, schema, canWrite, environment }: Props) {
   const [draft, setDraft] = useState(initial);
   const [view, setView] = useState<View>('form');
   const [text, setText] = useState('');
@@ -45,6 +49,13 @@ export function ApiDesigner({ original, initial, help, schema, canWrite }: Props
   const problems = draftProblems(draft);
   const schemaProblems = validate(draft);
   const others = otherFields(draft);
+  const blocker =
+    saveBlocker(original, draft) ??
+    (unapplied !== null
+      ? 'The raw text has errors; fix them or switch back to the form.'
+      : Object.keys(problems).length > 0
+        ? 'Fix the fields marked in the form first.'
+        : null);
 
   const open = (next: string) => {
     const nextView = next as View;
@@ -114,6 +125,9 @@ export function ApiDesigner({ original, initial, help, schema, canWrite }: Props
         ))}
       </Tabs>
       <SchemaProblems problems={schemaProblems} />
+      {canWrite && (
+        <SaveBar original={original} draft={draft} blocker={blocker} environment={environment} />
+      )}
     </div>
   );
 }

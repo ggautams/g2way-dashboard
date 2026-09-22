@@ -5,11 +5,15 @@ import { newDraft } from '@/lib/apis/draft';
 import { fieldHelp } from '@/lib/apis/field-help';
 import { apiDefinitionSchema } from '@/lib/apis/schema';
 import { requirePermission } from '@/lib/auth/session';
+import { listEnvironments } from '@/lib/g2/environments';
+import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 
 export const metadata: Metadata = { title: 'New API' };
 
 export default async function NewApiPage() {
   await requirePermission('apis:write');
+  const id = await selectedEnvironmentId();
+  const label = listEnvironments().find((env) => env.id === id)?.label ?? id;
   return (
     <div className="flex flex-col gap-6">
       <header>
@@ -27,6 +31,7 @@ export default async function NewApiPage() {
         help={fieldHelp()}
         schema={apiDefinitionSchema()}
         canWrite
+        environment={{ id, label }}
       />
     </div>
   );

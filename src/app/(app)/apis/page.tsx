@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Notice } from '@/components/users/controls';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import {
@@ -30,7 +31,9 @@ export const metadata: Metadata = { title: 'APIs' };
 export default async function ApisPage({ searchParams }: PageProps<'/apis'>) {
   const user = await requirePermission('apis:read');
   const canWrite = can(user.role, 'apis:write');
-  const filter = parseApiFilter(await searchParams);
+  const params = await searchParams;
+  const filter = parseApiFilter(params);
+  const deleted = typeof params.deleted === 'string' ? params.deleted : null;
 
   let list: ApiList;
   let label: string;
@@ -69,6 +72,9 @@ export default async function ApisPage({ searchParams }: PageProps<'/apis'>) {
 
   return (
     <Page environment={label} canWrite={canWrite}>
+      {deleted && (
+        <Notice message={`Deleted ${deleted}. It keeps routing until the gateway reloads.`} />
+      )}
       <FilterForm filter={filter} />
       <p className="text-xs text-muted" aria-live="polite">
         {shown.length === all.length
