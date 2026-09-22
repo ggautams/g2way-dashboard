@@ -88,7 +88,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       `POST /g2/reload`, with a visible pending-changes affordance
 - [x] Import an OpenAPI/Swagger document → `ApiDefinition`
 - [x] Config version history with rollback (dashboard-side)
-- [ ] Export a definition bundle for `--apps-dir` / GitOps
+- [x] Export a definition bundle for `--apps-dir` / GitOps
 
 ## M4 — Policies & keys
 
@@ -807,3 +807,27 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
       secrets (BFF reads and history together).
     - M11: restoring deleted resources from history, and retention for the table.
   - Next: export a definition bundle.
+
+- feat(M3): definition bundle export.
+  - `/apis` has "Export bundle" (JSON or YAML). It builds a `.tar.gz` in the
+    browser from `GET /g2/apis` through the BFF: `README.md` plus
+    `apps/<id>.<json|yaml>`, one definition per file, which is exactly what
+    g2way's `load_dir` reads (`crates/g2-core/src/loader.rs`: flat directory,
+    `*.json`/`*.yaml`/`*.yml`, one definition each).
+  - `bundle.ts` has a dependency-free ustar writer and gzips via
+    `CompressionStream`, so there is no server endpoint and no new package.
+    File names are made safe from any id and unique regardless of case.
+  - The README warns that g2way refuses duplicate `api_id`/`listen_path`
+    across files and storage, and that definitions are exported unredacted.
+  - The loader is now a watched area (`file-loader` in `contracts/watch.json`)
+    and a row in the map.
+  - **M3 complete.** API list, environment switcher, shadcn/ui, designer form,
+    raw JSON/YAML editor, diff-previewed saves through the audited BFF,
+    reload-required bar, OpenAPI import, version history with rollback, and
+    bundle export.
+    - Open from M2: the browser pass, which now also has to cover Monaco. It
+      has never been run in a browser.
+    - Follow-ups filed: M4 (policy history UI, secret visibility for viewers),
+      M11 (restore deleted from history, history retention, Postgres
+      end-to-end boot).
+  - Next: M4, policy CRUD over `/g2/policies`.

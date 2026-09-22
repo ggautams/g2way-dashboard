@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { ExportButton } from '@/components/apis/export-button';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -78,7 +79,7 @@ export default async function ApisPage({ searchParams }: PageProps<'/apis'>) {
   const inactive = all.filter((api) => !api.active).length;
 
   return (
-    <Page environment={label} canWrite={canWrite}>
+    <Page environment={label} environmentId={list.environment} canWrite={canWrite}>
       {deleted && (
         <Notice message={`Deleted ${deleted}. It keeps routing until the gateway reloads.`} />
       )}
@@ -108,10 +109,13 @@ export default async function ApisPage({ searchParams }: PageProps<'/apis'>) {
 
 function Page({
   environment,
+  environmentId,
   canWrite = false,
   children,
 }: {
   environment?: string;
+  /** Set once the list loaded: the export needs something to export. */
+  environmentId?: string;
   canWrite?: boolean;
   children: React.ReactNode;
 }) {
@@ -131,16 +135,21 @@ function Page({
             .
           </p>
         </div>
-        {canWrite && (
-          <div className="flex gap-2">
-            <Button asChild variant="outline">
-              <Link href="/apis/import">Import OpenAPI</Link>
-            </Button>
-            <Button asChild>
-              <Link href="/apis/new">New API</Link>
-            </Button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-start gap-2">
+          {environmentId && environment && (
+            <ExportButton environment={{ id: environmentId, label: environment }} />
+          )}
+          {canWrite && (
+            <div className="flex gap-2">
+              <Button asChild variant="outline">
+                <Link href="/apis/import">Import OpenAPI</Link>
+              </Button>
+              <Button asChild>
+                <Link href="/apis/new">New API</Link>
+              </Button>
+            </div>
+          )}
+        </div>
       </header>
       {children}
     </div>

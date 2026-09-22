@@ -15,6 +15,12 @@
       "onChange": "New or changed ApiDefinition fields need form controls, validation and a migration for stored config history."
     },
     {
+      "id": "file-loader",
+      "paths": ["crates/g2-core/src/loader.rs"],
+      "surfaces": ["Definition bundle export (M3): src/lib/apis/bundle.ts"],
+      "onChange": "The --apps-dir file layout or accepted extensions moved: check bundleFiles() still writes what load_dir() reads, and the README's duplicate-id caveat."
+    },
+    {
       "id": "auth-modes",
       "paths": [
         "crates/g2-middleware/src/auth.rs",
@@ -34,7 +40,7 @@
       "id": "middleware-chain",
       "paths": ["crates/g2-middleware/src/chain.rs"],
       "surfaces": ["Visual chain designer (M5)"],
-      "onChange": "The slot order/count is the designer's canonical ordering — re-read the ChainBuilder rustdoc and update it."
+      "onChange": "The slot order/count is the designer's canonical ordering \u2014 re-read the ChainBuilder rustdoc and update it."
     },
     {
       "id": "traffic-middleware",
@@ -74,13 +80,13 @@
       "id": "storage-keys",
       "paths": ["crates/g2-storage/src", "crates/g2-core/src/config.rs"],
       "surfaces": ["Ingest worker, direct Redis access (M6)"],
-      "onChange": "Redis key schema or analytics sink names changed — the ingest worker reads these keys directly."
+      "onChange": "Redis key schema or analytics sink names changed \u2014 the ingest worker reads these keys directly."
     },
     {
       "id": "deploy",
       "paths": ["deploy/k8s", "deploy/docker"],
       "surfaces": ["Dashboard manifests (M11)"],
-      "onChange": "Ports, Services or env changed — recheck that the dashboard can still reach the admin API in-cluster."
+      "onChange": "Ports, Services or env changed \u2014 recheck that the dashboard can still reach the admin API in-cluster."
     },
     {
       "id": "docs",

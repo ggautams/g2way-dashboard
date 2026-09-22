@@ -20,26 +20,27 @@ otherwise). Vendored copies of everything under `docs/` are in
 
 ## Upstream source, by topic
 
-| Topic                                                                 | File                                                                                                   |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Admin routes, admin auth, error envelope                              | `crates/g2-admin/src/lib.rs`                                                                           |
-| Key CRUD handlers                                                     | `crates/g2-admin/src/keys.rs`                                                                          |
-| API-definition + policy CRUD (generic `StoredResource`)               | `crates/g2-admin/src/resources.rs`                                                                     |
-| `/g2/node` and `/g2/stats` payload shapes                             | `crates/g2-admin/src/dashboard.rs`                                                                     |
-| OpenAPI assembly                                                      | `crates/g2-admin/src/openapi.rs`                                                                       |
-| `ApiDefinition` struct + `validate()`                                 | `crates/g2-core/src/api_definition.rs`                                                                 |
-| `AuthConfig` tagged enum (all 7 modes)                                | `crates/g2-core/src/api_definition.rs` (`AuthConfig`)                                                  |
-| `KeySession`, `RateLimit`, `Quota`, key hashing, Redis key helpers    | `crates/g2-core/src/session.rs`                                                                        |
-| `Policy`                                                              | `crates/g2-core/src/policy.rs`                                                                         |
-| `AnalyticsRecord` fields                                              | `crates/g2-core/src/analytics.rs`                                                                      |
-| GraphQL config (UDG, federation, persisted, cache)                    | `crates/g2-core/src/graphql.rs`, `federation.rs`                                                       |
-| Header/URL transforms, body transforms, path rules, CORS, versioning  | `crates/g2-core/src/transform.rs`, `body_transform.rs`, `endpoints.rs`, `security.rs`, `versioning.rs` |
-| **Middleware slot order (19 slots, and how versioned APIs split it)** | `crates/g2-middleware/src/chain.rs` — the `ChainBuilder` rustdoc                                       |
-| Auth enforcement behaviour, status codes                              | `crates/g2-middleware/src/auth.rs`                                                                     |
-| `Storage` trait, Redis impl, Lua rate/quota scripts                   | `crates/g2-storage/src/lib.rs`, `redis.rs`                                                             |
-| Analytics sinks (incl. the Redis list the ingest worker drains)       | `crates/g2-telemetry/src/analytics.rs`                                                                 |
-| Gateway CLI flags and env vars                                        | `crates/g2way/src/main.rs`                                                                             |
-| k8s manifests, ports, smoke script                                    | `deploy/k8s/`                                                                                          |
+| Topic                                                                   | File                                                                                                   |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Admin routes, admin auth, error envelope                                | `crates/g2-admin/src/lib.rs`                                                                           |
+| Key CRUD handlers                                                       | `crates/g2-admin/src/keys.rs`                                                                          |
+| API-definition + policy CRUD (generic `StoredResource`)                 | `crates/g2-admin/src/resources.rs`                                                                     |
+| `/g2/node` and `/g2/stats` payload shapes                               | `crates/g2-admin/src/dashboard.rs`                                                                     |
+| OpenAPI assembly                                                        | `crates/g2-admin/src/openapi.rs`                                                                       |
+| `ApiDefinition` struct + `validate()`                                   | `crates/g2-core/src/api_definition.rs`                                                                 |
+| `--apps-dir` file loader (one definition per `*.json`/`*.yaml`/`*.yml`) | `crates/g2-core/src/loader.rs`                                                                         |
+| `AuthConfig` tagged enum (all 7 modes)                                  | `crates/g2-core/src/api_definition.rs` (`AuthConfig`)                                                  |
+| `KeySession`, `RateLimit`, `Quota`, key hashing, Redis key helpers      | `crates/g2-core/src/session.rs`                                                                        |
+| `Policy`                                                                | `crates/g2-core/src/policy.rs`                                                                         |
+| `AnalyticsRecord` fields                                                | `crates/g2-core/src/analytics.rs`                                                                      |
+| GraphQL config (UDG, federation, persisted, cache)                      | `crates/g2-core/src/graphql.rs`, `federation.rs`                                                       |
+| Header/URL transforms, body transforms, path rules, CORS, versioning    | `crates/g2-core/src/transform.rs`, `body_transform.rs`, `endpoints.rs`, `security.rs`, `versioning.rs` |
+| **Middleware slot order (19 slots, and how versioned APIs split it)**   | `crates/g2-middleware/src/chain.rs` — the `ChainBuilder` rustdoc                                       |
+| Auth enforcement behaviour, status codes                                | `crates/g2-middleware/src/auth.rs`                                                                     |
+| `Storage` trait, Redis impl, Lua rate/quota scripts                     | `crates/g2-storage/src/lib.rs`, `redis.rs`                                                             |
+| Analytics sinks (incl. the Redis list the ingest worker drains)         | `crates/g2-telemetry/src/analytics.rs`                                                                 |
+| Gateway CLI flags and env vars                                          | `crates/g2way/src/main.rs`                                                                             |
+| k8s manifests, ports, smoke script                                      | `deploy/k8s/`                                                                                          |
 
 ## Invariants the OpenAPI document does not tell you
 
