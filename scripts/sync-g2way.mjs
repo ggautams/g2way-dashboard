@@ -56,9 +56,12 @@ const head = headSha(g2way.path);
 const lock = readLock();
 const drift = computeDrift(g2way.path, watch, lock);
 const changed = drift.filter((d) => d.drifted);
+// Areas added to watch.json since the lock was written: nothing drifted, but
+// they still need a first fingerprint, or check:g2way warns about them forever.
+const added = drift.filter((d) => d.unlocked);
 const first = lock === null;
 
-if (!first && changed.length === 0 && lock.head === head) {
+if (!first && changed.length === 0 && added.length === 0 && lock.head === head) {
   console.log(`Already in sync with g2way ${SHORT(head)}.`);
   process.exit(0);
 }
@@ -130,10 +133,16 @@ if (first) {
     `Initial lock against g2way \`${head}\`. All ${watch.areas.length} watched areas recorded; ` +
     `no drift to report yet.\n`;
 } else {
-  entry +=
-    areasChanged.length > 0
-      ? `Watched areas changed: **${areasChanged.join(', ')}**\n`
-      : `Upstream moved, but no watched area changed. Lock advanced; nothing to do here.\n`;
+  if (areasChanged.length > 0) {
+    entry += `Watched areas changed: **${areasChanged.join(', ')}**\n`;
+  } else if (added.length === 0) {
+    entry += `Upstream moved, but no watched area changed. Lock advanced; nothing to do here.\n`;
+  }
+  if (added.length > 0) {
+    entry +=
+      `Newly watched: **${added.map((d) => d.area.id).join(', ')}** — first fingerprint ` +
+      `recorded; nothing to catch up on.\n`;
+  }
   for (const d of changed) {
     entry += `\n### ${d.area.id}\n\n`;
     entry += `- Drives: ${d.area.surfaces.join(', ')}\n`;
