@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ApiDefinition } from './list';
-import { isDraftShape, parseRaw, schemaValidator, serialize } from './raw';
+import { parseRaw, schemaValidator, serialize } from '@/lib/designer/raw';
+import { isDraftShape } from './raw';
 import { apiDefinitionSchema } from './schema';
 
 const api: ApiDefinition = {

@@ -68,8 +68,9 @@ export const NAV: readonly NavGroup[] = [
         href: '/policies',
         label: 'Policies',
         description: 'Access policies',
+        keywords: ['rate limit', 'quota', 'tiers'],
         milestone: 'M4',
-        ready: false,
+        ready: true,
         permission: 'policies:read',
       },
       {

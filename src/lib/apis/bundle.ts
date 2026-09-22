@@ -8,7 +8,7 @@
  */
 
 import type { ApiDefinition } from './list';
-import { serialize, type RawFormat } from './raw';
+import { serialize, type RawFormat } from '@/lib/designer/raw';
 
 export type BundleFile = { path: string; content: string };
 

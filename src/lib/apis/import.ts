@@ -8,7 +8,7 @@
 
 import { slugify } from './draft';
 import type { ApiDefinition } from './list';
-import { parseRaw } from './raw';
+import { parseRaw } from '@/lib/designer/raw';
 
 export type ImportResult =
   { ok: true; draft: ApiDefinition; notes: string[] } | { ok: false; error: string };

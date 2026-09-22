@@ -1,21 +1,16 @@
 'use client';
 
-import dynamic from 'next/dynamic';
 import { useMemo, useState } from 'react';
+import { RawPanel, SchemaProblems, useRawView } from '@/components/designer/raw-view';
+import { SaveBar, type DesignerEnvironment } from '@/components/designer/save-bar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { draftProblems, otherFields, type FormField } from '@/lib/apis/draft';
 import type { ApiDefinition } from '@/lib/apis/list';
-import { isDraftShape, parseRaw, schemaValidator, serialize, type RawFormat } from '@/lib/apis/raw';
+import { isDraftShape } from '@/lib/apis/raw';
 import { saveBlocker } from '@/lib/apis/save';
+import { RAW_FORMATS, schemaValidator } from '@/lib/designer/raw';
 import { ApiForm } from './api-form';
 import { HistoryPanel, type HistoryEntry } from './history-panel';
-import { SaveBar, type DesignerEnvironment } from './save-bar';
-
-// Monaco is large and browser-only: load it on first use, never on the server.
-const RawEditor = dynamic(() => import('./raw-editor'), {
-  ssr: false,
-  loading: () => <p className="p-4 text-sm text-muted">Loading the editor…</p>,
-});
 
 type Props = {
   /** The stored definition when editing; `null` when creating. */
@@ -32,8 +27,6 @@ type Props = {
   /** Its stored versions, newest first (ADR-0008); absent when creating. */
   history?: readonly HistoryEntry[];
 };
-
-type View = 'form' | RawFormat | 'history';
 
 /**
  * The API designer: one draft `ApiDefinition`, edited through the structured
@@ -52,9 +45,16 @@ export function ApiDesigner({
   history,
 }: Props) {
   const [draft, setDraft] = useState(initial);
-  const [view, setView] = useState<View>('form');
-  const [text, setText] = useState('');
-  const [unapplied, setUnapplied] = useState<string | null>(null);
+  const { view, setView, text, unapplied, open, edit } = useRawView<
+    ApiDefinition,
+    'form' | 'history'
+  >({
+    draft,
+    setDraft,
+    initialView: 'form',
+    isShape: isDraftShape,
+    shapeError: 'api_id, name, listen_path and target_url must all be strings.',
+  });
   const [restored, setRestored] = useState<string | null>(null);
   const validate = useMemo(() => schemaValidator(schema), [schema]);
 
@@ -68,24 +68,6 @@ export function ApiDesigner({
       : Object.keys(problems).length > 0
         ? 'Fix the fields marked in the form first.'
         : null);
-
-  const open = (next: string) => {
-    const nextView = next as View;
-    if (nextView === 'json' || nextView === 'yaml') setText(serialize(draft, nextView));
-    setUnapplied(null);
-    setView(nextView);
-  };
-
-  const editRaw = (format: RawFormat, value: string) => {
-    setText(value);
-    const parsed = parseRaw(value, format);
-    if (!parsed.ok) return setUnapplied(parsed.error);
-    if (!isDraftShape(parsed.value)) {
-      return setUnapplied('api_id, name, listen_path and target_url must all be strings.');
-    }
-    setUnapplied(null);
-    setDraft(parsed.value);
-  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -123,22 +105,18 @@ export function ApiDesigner({
             </p>
           )}
         </TabsContent>
-        {(['json', 'yaml'] as const).map((format) => (
+        {RAW_FORMATS.map((format) => (
           <TabsContent key={format} value={format} className="mt-4 flex flex-col gap-2">
-            {view === format && (
-              <RawEditor
-                format={format}
-                value={text}
-                onChange={(value) => editRaw(format, value)}
-                schema={schema}
-                readOnly={!canWrite}
-              />
-            )}
-            {unapplied !== null && (
-              <p role="alert" className="text-xs text-danger">
-                Not applied to the draft: {unapplied}
-              </p>
-            )}
+            <RawPanel
+              format={format}
+              shown={view === format}
+              text={text}
+              unapplied={unapplied}
+              onEdit={edit}
+              schema={schema}
+              model="api-definition"
+              readOnly={!canWrite}
+            />
           </TabsContent>
         ))}
         {history !== undefined && (
@@ -157,29 +135,14 @@ export function ApiDesigner({
       </Tabs>
       <SchemaProblems problems={schemaProblems} />
       {canWrite && (
-        <SaveBar original={original} draft={draft} blocker={blocker} environment={environment} />
+        <SaveBar
+          kind="api"
+          original={original}
+          draft={draft}
+          blocker={blocker}
+          environment={environment}
+        />
       )}
     </div>
-  );
-}
-
-function SchemaProblems({ problems }: { problems: { path: string; message: string }[] }) {
-  if (problems.length === 0) {
-    return <p className="text-xs text-success">Valid against g2way&apos;s schema.</p>;
-  }
-  return (
-    <section aria-label="Schema problems" className="rounded-md border border-warning/40 p-3">
-      <p className="text-sm font-medium text-warning">
-        {problems.length} schema problem{problems.length === 1 ? '' : 's'} (the gateway will refuse
-        this as it stands)
-      </p>
-      <ul className="mt-1 flex flex-col gap-0.5 font-mono text-xs">
-        {problems.map(({ path, message }) => (
-          <li key={path}>
-            {path}: {message}
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { bundleFiles, gzip, tar } from '@/lib/apis/bundle';
-import type { RawFormat } from '@/lib/apis/raw';
+import type { RawFormat } from '@/lib/designer/raw';
 import { bffClient, unwrap } from '@/lib/g2/client';
 import { GatewayError } from '@/lib/g2/errors';
 

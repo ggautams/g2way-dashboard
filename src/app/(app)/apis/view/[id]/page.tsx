@@ -15,7 +15,7 @@ import {
   getOrgId,
   listEnvironments,
 } from '@/lib/g2/environments';
-import { DeleteApiButton, NotLiveNote } from '@/components/apis/save-bar';
+import { DeleteButton, NotLiveNote } from '@/components/designer/save-bar';
 import { Notice } from '@/components/users/controls';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 
@@ -80,13 +80,13 @@ export default async function ApiPage({ params, searchParams }: PageProps<'/apis
           <h1 className="text-2xl font-semibold tracking-tight">{api.ok ? api.value.name : id}</h1>
         </div>
         {api.ok && canWrite && (
-          <DeleteApiButton apiId={id} name={api.value.name} environment={environment} />
+          <DeleteButton kind="api" id={id} name={api.value.name} environment={environment} />
         )}
       </header>
       {saved === '1' && (
         <div className="flex flex-col gap-1">
           <Notice message={`Saved to ${environment.label}.`} />
-          <NotLiveNote environment={environment} />
+          <NotLiveNote kind="api" environment={environment} />
         </div>
       )}
       {api.ok ? (

@@ -2,7 +2,7 @@ import { gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { bundleFiles, fileNameFor, gzip, tar } from './bundle';
 import type { ApiDefinition } from './list';
-import { parseRaw } from './raw';
+import { parseRaw } from '@/lib/designer/raw';
 
 const apis: ApiDefinition[] = [
   { api_id: 'orders', name: 'Orders', listen_path: '/orders/', target_url: 'http://o' },

@@ -93,7 +93,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 ## M4 — Policies & keys
 
-- [ ] Policy CRUD over `/g2/policies`
+- [x] Policy CRUD over `/g2/policies`
 - [ ] Key create / list / rotate / revoke; raw key shown once, on creation
 - [ ] Per-API access matrix, rate and quota editors
 - [ ] Dashboard-side key metadata (label, owner, notes) — the gateway lists
@@ -845,3 +845,28 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   **not done**: the Claude-in-Chrome extension was still not connected (three
   tries). The box stays open. Next: run `make serve-scratch` with the extension
   connected, then M4 policy CRUD.
+
+- feat(M4): policy CRUD over `/g2/policies`.
+  - `/policies` (search, rate/quota/APIs/state, "not live" badge from the
+    pending changes), `/policies/new` and `/policies/view/[id]`, gated on
+    `policies:read`/`policies:write`; the nav entry is ready.
+  - `PolicyDesigner` mirrors the API designer: a form for `policy_id`, `name`,
+    `active` and nullable `rate`/`quota` editors (off = unlimited, zero
+    blocked as `Policy::validate` does), raw JSON/YAML validated against the
+    contract's `Policy` schema, diff-previewed save and delete through the BFF.
+    `access` is raw-only; the form shows what it grants and warns loudly when
+    it is empty (every API in the org).
+  - Shared, not copied: `components/designer/` (Monaco `RawEditor` with a model
+    name, `useRawView`/`RawPanel`/`SchemaProblems`, form `fields`, and a
+    `kind`-driven `SaveBar`/`DeleteButton`/`NotLiveNote`) and `lib/designer/`
+    (`raw`, `write`, `schema`'s `contractSchema()`, `help`'s `propertyHelp()`,
+    and the `RESOURCES` registry). The API designer now uses them.
+  - Fixed: `createTargetFromBody` read `id` for policies, so a policy create's
+    pending audit row had a null target; it reads `policy_id` now (tests in
+    `audit-trail.test.ts` and `proxy.test.ts`).
+  - Upstream gap filed in `UPSTREAM.md`: the `Policy` schema allows zero limits
+    and omits its serde defaults. The map gained the policy defaults.
+  - Not run in a browser (same open M2 browser pass). The rate/quota part of the
+    "access matrix, rate and quota editors" box is done by the form; the matrix
+    itself remains. History tab: its own box, and the designer's tabs have room.
+  - Next: key create / list / rotate / revoke.

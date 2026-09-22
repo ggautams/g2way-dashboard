@@ -8,18 +8,17 @@
  * `POST /g2/reload` (`docs/g2way-map.md`).
  */
 
-import { diffJson, type DiffEntry } from '@/lib/audit/diff';
-import type { JsonValue } from '@/lib/db/schema/shared';
 import { unwrap, type G2Client } from '@/lib/g2/client';
-import { GatewayError } from '@/lib/g2/errors';
+import {
+  saveDiff,
+  settleStored,
+  settleWrite,
+  type StoredResult,
+  type WriteResult,
+} from '@/lib/designer/write';
 import type { ApiDefinition } from './list';
 
-export type WriteResult = { ok: true } | { ok: false; error: string; status?: number };
-
-/** The changes a save would make, from what is stored (`null`: nothing yet) to the draft. */
-export function saveDiff(stored: ApiDefinition | null, draft: ApiDefinition): DiffEntry[] {
-  return diffJson(stored as JsonValue | null, draft as JsonValue);
-}
+export { saveDiff, type WriteResult };
 
 /**
  * Why the draft cannot be saved as it is, beyond the form's own checks, or
@@ -32,19 +31,6 @@ export function saveBlocker(stored: ApiDefinition | null, draft: ApiDefinition):
     return `The id cannot change (it was ${stored.api_id}). Create a new API to use another id.`;
   }
   return null;
-}
-
-async function settleWrite(call: () => Promise<unknown>): Promise<WriteResult> {
-  try {
-    await call();
-    return { ok: true };
-  } catch (error) {
-    // The BFF answers every failure, the gateway's own included, as {"error"}.
-    if (error instanceof GatewayError) {
-      return { ok: false, error: error.message, status: error.status };
-    }
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
 }
 
 /** Creates (`POST /g2/apis`) or replaces (`PUT /g2/apis/{id}`) the definition. */
@@ -72,17 +58,8 @@ export function deleteApi(client: G2Client, apiId: string): Promise<WriteResult>
  * The definition as stored right now, to diff against before saving: someone
  * may have changed it since the designer loaded it. `null` if it is gone.
  */
-export async function fetchStored(
-  client: G2Client,
-  apiId: string,
-): Promise<{ ok: true; stored: ApiDefinition | null } | { ok: false; error: string }> {
-  try {
-    return {
-      ok: true,
-      stored: await unwrap(client.GET('/g2/apis/{id}', { params: { path: { id: apiId } } })),
-    };
-  } catch (error) {
-    if (error instanceof GatewayError && error.status === 404) return { ok: true, stored: null };
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
+export function fetchStored(client: G2Client, apiId: string): Promise<StoredResult<ApiDefinition>> {
+  return settleStored(() =>
+    unwrap(client.GET('/g2/apis/{id}', { params: { path: { id: apiId } } })),
+  );
 }

@@ -8,7 +8,7 @@ import type { FormField } from '@/lib/apis/draft';
 import { importOpenApi } from '@/lib/apis/import';
 import type { ApiDefinition } from '@/lib/apis/list';
 import { ApiDesigner } from './api-designer';
-import type { DesignerEnvironment } from './save-bar';
+import type { DesignerEnvironment } from '@/components/designer/save-bar';
 
 type Props = {
   help: Record<FormField, string>;

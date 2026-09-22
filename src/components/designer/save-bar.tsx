@@ -13,8 +13,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { DiffEntry } from '@/lib/audit/diff';
-import type { ApiDefinition } from '@/lib/apis/list';
-import { deleteApi, fetchStored, saveApi, saveDiff } from '@/lib/apis/save';
+import { RESOURCES, type ResourceKind, type ResourceKinds } from '@/lib/designer/resources';
+import { describeFailure, saveDiff } from '@/lib/designer/write';
 import { bffClient } from '@/lib/g2/client';
 
 export type DesignerEnvironment = { id: string; label: string };
@@ -22,39 +22,49 @@ export type DesignerEnvironment = { id: string; label: string };
 type Review =
   | { state: 'loading' }
   | { state: 'failed'; error: string }
-  | { state: 'ready'; stored: ApiDefinition | null; changes: DiffEntry[]; drifted: boolean };
+  | { state: 'ready'; stored: object | null; changes: DiffEntry[]; drifted: boolean };
 
 /** Every write screen says so: saving is not the same as going live (CLAUDE.md). */
-export function NotLiveNote({ environment }: { environment: DesignerEnvironment }) {
+export function NotLiveNote({
+  kind,
+  environment,
+}: {
+  kind: ResourceKind;
+  environment: DesignerEnvironment;
+}) {
   return (
     <p className="text-xs text-muted">
       Saving writes to <span className="font-medium text-foreground">{environment.label}</span>
-      &apos;s storage. Nothing routes differently until the gateway reloads.
+      &apos;s storage. {RESOURCES[kind].notLive}
     </p>
   );
 }
 
 /**
- * Review-and-save for the designer. "Review changes" re-reads the stored
- * definition through the BFF and diffs it against the draft, so the preview
+ * Review-and-save for a designer. "Review changes" re-reads the stored
+ * resource through the BFF and diffs it against the draft, so the preview
  * shows what the save will really change, including anything someone else
  * changed since the page loaded. Saving goes to the environment the page was
  * loaded from, named explicitly, whatever the switcher says by then.
  */
-export function SaveBar({
+export function SaveBar<K extends ResourceKind>({
+  kind,
   original,
   draft,
   blocker,
   environment,
 }: {
-  original: ApiDefinition | null;
-  draft: ApiDefinition;
+  kind: K;
+  original: ResourceKinds[K] | null;
+  draft: ResourceKinds[K];
   /** Why the draft cannot be saved yet, or `null`. */
   blocker: string | null;
   environment: DesignerEnvironment;
 }) {
   const router = useRouter();
+  const resource = RESOURCES[kind];
   const creating = original === null;
+  const id = resource.idOf(draft);
   const [review, setReview] = useState<Review | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +77,7 @@ export function SaveBar({
       return;
     }
     setReview({ state: 'loading' });
-    const current = await fetchStored(client, original.api_id);
+    const current = await resource.fetchStored(client, resource.idOf(original));
     if (!current.ok) return setReview({ state: 'failed', error: current.error });
     setReview({
       state: 'ready',
@@ -79,16 +89,11 @@ export function SaveBar({
 
   const save = async () => {
     setSaving(true);
-    const result = await saveApi(client, draft, creating);
+    const result = await resource.save(client, draft, creating);
     setSaving(false);
-    if (!result.ok) {
-      setError(
-        result.status === undefined ? result.error : `${result.error} (HTTP ${result.status})`,
-      );
-      return;
-    }
+    if (!result.ok) return setError(describeFailure(result));
     setReview(null);
-    router.replace(`/apis/view/${encodeURIComponent(draft.api_id)}?saved=1`);
+    router.replace(`${resource.viewHref(id)}?saved=1`);
     router.refresh();
   };
 
@@ -98,7 +103,7 @@ export function SaveBar({
         {blocker ? (
           <p className="text-xs text-danger">{blocker}</p>
         ) : (
-          <NotLiveNote environment={environment} />
+          <NotLiveNote kind={kind} environment={environment} />
         )}
       </div>
       <Button onClick={openReview} disabled={blocker !== null}>
@@ -108,12 +113,10 @@ export function SaveBar({
       <Dialog open={review !== null} onOpenChange={(open) => !open && setReview(null)}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>
-              {creating ? `Create ${draft.api_id}` : `Save changes to ${draft.api_id}`}
-            </DialogTitle>
+            <DialogTitle>{creating ? `Create ${id}` : `Save changes to ${id}`}</DialogTitle>
             <DialogDescription>
-              In {environment.label}. The gateway validates the definition when it is saved; nothing
-              routes differently until it reloads.
+              In {environment.label}. The gateway validates the {resource.noun} when it is saved.{' '}
+              {resource.notLive}
             </DialogDescription>
           </DialogHeader>
 
@@ -122,20 +125,21 @@ export function SaveBar({
           )}
           {review?.state === 'failed' && (
             <p role="alert" className="font-mono text-xs text-danger">
-              Could not read the stored definition: {review.error}
+              Could not read the stored {resource.noun}: {review.error}
             </p>
           )}
           {review?.state === 'ready' && (
             <div className="flex flex-col gap-3">
               {!creating && review.stored === null && (
                 <p className="text-sm text-warning">
-                  This API has been deleted since you opened it. Saving will create it again.
+                  This {resource.noun} has been deleted since you opened it. Saving will create it
+                  again.
                 </p>
               )}
               {review.drifted && review.stored !== null && (
                 <p className="text-sm text-warning">
-                  Someone changed this API since you opened it. The changes below are against what
-                  is stored now, so saving also overwrites theirs.
+                  Someone changed this {resource.noun} since you opened it. The changes below are
+                  against what is stored now, so saving also overwrites theirs.
                 </p>
               )}
               {review.changes.length === 0 ? (
@@ -168,32 +172,30 @@ export function SaveBar({
   );
 }
 
-/** Deletes a stored definition after a confirmation naming it. */
-export function DeleteApiButton({
-  apiId,
+/** Deletes a stored resource after a confirmation naming it. */
+export function DeleteButton({
+  kind,
+  id,
   name,
   environment,
 }: {
-  apiId: string;
+  kind: ResourceKind;
+  id: string;
   name: string;
   environment: DesignerEnvironment;
 }) {
   const router = useRouter();
+  const resource = RESOURCES[kind];
   const [open, setOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const remove = async () => {
     setDeleting(true);
-    const result = await deleteApi(bffClient(environment.id), apiId);
+    const result = await resource.remove(bffClient(environment.id), id);
     setDeleting(false);
-    if (!result.ok) {
-      setError(
-        result.status === undefined ? result.error : `${result.error} (HTTP ${result.status})`,
-      );
-      return;
-    }
-    router.replace(`/apis?deleted=${encodeURIComponent(apiId)}`);
+    if (!result.ok) return setError(describeFailure(result));
+    router.replace(`${resource.listHref}?deleted=${encodeURIComponent(id)}`);
     router.refresh();
   };
 
@@ -207,8 +209,8 @@ export function DeleteApiButton({
           <DialogHeader>
             <DialogTitle>Delete {name}?</DialogTitle>
             <DialogDescription>
-              Removes <span className="font-mono">{apiId}</span> from {environment.label}&apos;s
-              storage. It keeps routing until the gateway reloads.
+              Removes the {resource.noun} <span className="font-mono">{id}</span> from{' '}
+              {environment.label}&apos;s storage. {resource.notLive}
             </DialogDescription>
           </DialogHeader>
           {error && (

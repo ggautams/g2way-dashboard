@@ -66,6 +66,17 @@ commit this project is waiting on.
       `body = …` upstream; then delete the hand-written types and keep the
       parser only if it still earns its place. _Not a blocker._
 
+- [ ] **The Policy schema is looser than `Policy::validate`.** _Found 2026-09-23
+      (M4)._ `RateLimit.requests`/`per_seconds` and `Quota.max`/
+      `renewal_rate_secs` are `minimum: 0`, but `validate` refuses zero ("use
+      None for unlimited, never zero"), and `Policy.active` / `access` carry no
+      `default` (serde: `true` / `{}`, and an empty `access` grants every API in
+      the org). So a schema-valid policy can still be refused with 400, and the
+      dashboard restates those rules in `policyProblems()` and `summarisePolicy()`
+      (`src/lib/policies/`). Needs `#[schema(minimum = 1)]` on the four fields
+      and schema defaults in `crates/g2-core/src/policy.rs` (see the serde-defaults
+      item above); then drop the duplicated checks. _Not a blocker._
+
 - [ ] **`/g2/stats` is process-local** and resets on restart, so with more than
       one replica it is a per-pod sample rather than a cluster total. Cluster-wide
       numbers must come from the analytics feed or Prometheus. Shapes M6; not a

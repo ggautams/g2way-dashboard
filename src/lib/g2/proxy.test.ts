@@ -734,6 +734,50 @@ describe('audited writes (ADR-0006)', () => {
     await database.close();
   });
 
+  it('names a policy create by the body’s policy_id from the pending row on', async () => {
+    const pending: AuditRecord[] = [];
+    const completed: AuditRecord[] = [];
+    const sink: AuditSink = {
+      async record(record) {
+        pending.push(record);
+        return `row-${pending.length}`;
+      },
+      async complete(_id, record) {
+        completed.push(record);
+      },
+    };
+    const body = JSON.stringify({
+      policy_id: 'gold',
+      name: 'Gold',
+      rate: { requests: 100, per_seconds: 60 },
+      access: { httpbin: {} },
+    });
+    const refused = await proxyToGateway(
+      request('policies', { method: 'POST', body }),
+      ['policies'],
+      actorFor('editor'),
+      {
+        fetch: fakeGateway(() =>
+          Response.json({ error: 'policy gold already exists; use PUT' }, { status: 409 }),
+        ).fetch,
+        registry,
+        audit: sink,
+      },
+    );
+    expect(refused.status).toBe(409);
+    expect(pending[0]).toMatchObject({
+      action: 'policy.create',
+      target: 'gold',
+      outcome: 'pending',
+    });
+    // A refusal never learns the id from the gateway: the body's is all there is.
+    expect(completed[0]).toMatchObject({
+      target: 'gold',
+      outcome: 'failure',
+      error: 'policy gold already exists; use PUT',
+    });
+  });
+
   it('records a gateway refusal with its message verbatim and no after', async () => {
     const gateway = statefulGateway();
     const { database, sink, rows } = await sqliteAudit();

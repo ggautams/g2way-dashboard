@@ -89,18 +89,27 @@ export function describeGatewayWrite(
   };
 }
 
+/** The body field that names a created item, per collection (`contracts/g2way.d.ts`). */
+const CREATE_ID_FIELDS: Readonly<Record<string, string>> = {
+  apis: 'api_id',
+  policies: 'policy_id',
+};
+
 /**
  * The target a create names in its own request body, before the gateway
- * answers: `api_id` for an API definition, `id` for a policy. Keys get their
- * identity from the gateway.
+ * answers: `api_id` for an API definition, `policy_id` for a policy. Keys get
+ * their identity from the gateway.
  */
 export function createTargetFromBody(
   collection: string | null,
   body: JsonValue | null,
 ): string | null {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
-  const field = collection === 'apis' ? 'api_id' : collection === 'policies' ? 'id' : null;
-  const value = field === null ? undefined : body[field];
+  const field =
+    collection !== null && Object.hasOwn(CREATE_ID_FIELDS, collection)
+      ? CREATE_ID_FIELDS[collection]
+      : undefined;
+  const value = field === undefined ? undefined : body[field];
   return typeof value === 'string' ? value : null;
 }
 

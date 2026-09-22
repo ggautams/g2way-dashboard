@@ -56,6 +56,11 @@ These are load-bearing for the dashboard and easy to get wrong:
   and an absent `auth` means token auth (keyless must be explicit). Read a
   definition through `summarise()` (`src/lib/apis/list.ts`) rather than testing
   `api.active` directly.
+- **Policy defaults** (`crates/g2-core/src/policy.rs`, also absent from the
+  OpenAPI): `active` defaults to `true`; an absent (or `null`) `rate` or `quota`
+  means unlimited, and zero is refused, never "unlimited"; `access` defaults to
+  `{}`, and an **empty `access` grants every API in the org**. Read a policy
+  through `summarisePolicy()` (`src/lib/policies/list.ts`).
 - **`GET /g2/keys` returns key _hashes_, not keys.** A raw key exists exactly once,
   in the `POST /g2/keys` 201 response. Anything richer (labels, owner, notes) is
   the dashboard's own data.
