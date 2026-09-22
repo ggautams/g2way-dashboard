@@ -61,7 +61,7 @@ export const NAV: readonly NavGroup[] = [
         description: 'API definitions',
         keywords: ['definitions', 'designer'],
         milestone: 'M3',
-        ready: false,
+        ready: true,
         permission: 'apis:read',
       },
       {

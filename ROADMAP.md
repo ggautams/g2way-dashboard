@@ -75,7 +75,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 - [x] Environment switcher in the shell (the BFF already honours
       `X-G2-Environment`; only `/gateway` has a picker today)
-- [ ] API list with search, filter, and active/inactive state
+- [x] API list with search, filter, and active/inactive state
 - [ ] Decide form primitives before the designer: adopt shadcn/ui as ADR-0001
       says, or record an ADR for the hand-rolled components the shell uses
 - [ ] API designer: structured form over `ApiDefinition`
@@ -630,3 +630,17 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   - **Surprise:** `client-boundary.test.ts` follows type-only imports too, so
     the client switcher restates `PublicEnvironment`'s three fields.
   - Next: the API list.
+
+- feat(M3): `/apis` lists the selected environment's
+  definitions as stored (`loadApis`, `src/lib/g2/apis.ts`). Each row shows
+  name, id, listen path, upstream (with a `target_list` shown as "+N more"),
+  auth mode and active/inactive. The filter is a plain GET form (`?q=&state=&auth=`,
+  `src/lib/apis/list.ts`), so a filtered view is a link that works without JS.
+  A failed `GET /g2/apis` is quoted verbatim. The nav entry is live and the
+  bundle scan covers the page.
+  **Surprise:** the OpenAPI document carries no serde defaults. `active`
+  defaults to `true` in `api_definition.rs`, which the generated types don't
+  say, so a naive `api.active` check would show every definition written
+  without the field as inactive. Recorded as an invariant in
+  `docs/g2way-map.md`; `summarise()` applies the defaults. Rows don't link
+  anywhere yet: the designer adds that. Next: the shadcn/ui adoption.

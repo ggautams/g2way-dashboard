@@ -49,6 +49,12 @@ These are load-bearing for the dashboard and easy to get wrong:
   storage. Nothing changes on the data plane until `POST /g2/reload`, which
   broadcasts on Redis pub/sub so every pod rebuilds its route table. Surface this
   in the UI; do not hide it.
+- **The OpenAPI document omits serde defaults.** An absent field means g2way's
+  default, not "unset". For `ApiDefinition` (`crates/g2-core/src/api_definition.rs`):
+  `active` defaults to `true` (`default_true`), `strip_listen_path` to `true`,
+  and an absent `auth` means token auth (keyless must be explicit). Read a
+  definition through `summarise()` (`src/lib/apis/list.ts`) rather than testing
+  `api.active` directly.
 - **`GET /g2/keys` returns key _hashes_, not keys.** A raw key exists exactly once,
   in the `POST /g2/keys` 201 response. Anything richer (labels, owner, notes) is
   the dashboard's own data.

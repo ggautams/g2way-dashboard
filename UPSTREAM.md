@@ -48,6 +48,14 @@ commit this project is waiting on.
       the utoipa `responses(...)` annotations in `crates/g2-admin`. _Shapes M3/M4
       save flows; not a blocker._
 
+- [ ] **The OpenAPI document omits serde defaults.** _Found 2026-09-23 (M3)._
+      `ApiDefinition.active` is `#[serde(default = "default_true")]`, but the
+      schema has no `"default": true`, so the generated type reads as "absent =
+      falsy". The dashboard hard-codes the defaults it relies on in `summarise()`
+      (`src/lib/apis/list.ts`), and the map lists them. Needs `#[schema(default
+    = …)]` on defaulted fields in `crates/g2-core`; then derive the defaults
+      from `contracts/openapi.json`. _Shapes the M3 designer; not a blocker._
+
 - [ ] **`/g2/node`, `/g2/version` and `/g2/health` have no response schema.**
       `/g2/node` is an untyped `serde_json::json!` in
       `crates/g2-admin/src/dashboard.rs`, and all three `responses(...)` omit

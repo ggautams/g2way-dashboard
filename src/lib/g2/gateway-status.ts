@@ -39,7 +39,8 @@ export type GatewayStatus = {
   fetchedAt: number;
 };
 
-async function settle<T>(work: () => Promise<T>): Promise<Outcome<T>> {
+/** Runs `work`, settling the failures a page shows (gateway, network, payload shape). */
+export async function settle<T>(work: () => Promise<T>): Promise<Outcome<T>> {
   try {
     return { ok: true, value: await work() };
   } catch (error) {
