@@ -11,13 +11,26 @@ import { Toaster } from './toaster';
  * The chrome around every signed-in page. A Server Component; only its
  * interactive parts are client. `user` is the already-authenticated account.
  */
-export function AppShell({ user, children }: { user: PublicUser; children: React.ReactNode }) {
+export function AppShell({
+  user,
+  environment,
+  children,
+}: {
+  user: PublicUser;
+  /** The environment switcher, or nothing when there is only one environment. */
+  environment?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   const permissions = permissionsFor(user.role);
   return (
     <div className="flex min-h-screen">
-      <Sidebar account={<AccountMenu user={user} />} permissions={permissions} />
+      <Sidebar
+        account={<AccountMenu user={user} />}
+        environment={environment}
+        permissions={permissions}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
-        <MobileBar account={<AccountMenu user={user} compact />} />
+        <MobileBar account={<AccountMenu user={user} compact />} environment={environment} />
         {/* Streams in after the page, so a slow or dead gateway never blocks the render.
             Only for roles that may see gateway status at all. */}
         {can(user.role, 'gateway:read') && (

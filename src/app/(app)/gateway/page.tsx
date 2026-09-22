@@ -10,6 +10,7 @@ import {
   listEnvironments,
   type PublicEnvironment,
 } from '@/lib/g2/environments';
+import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 import { loadGatewayStatus, type GatewayStatus, type Outcome } from '@/lib/g2/gateway-status';
 import { targetsWithHealth, type NodeInfo } from '@/lib/g2/node';
 
@@ -24,7 +25,7 @@ export default async function GatewayPage({ searchParams }: PageProps<'/gateway'
   let status: GatewayStatus;
   try {
     environments = listEnvironments();
-    status = await loadGatewayStatus(requested);
+    status = await loadGatewayStatus(await selectedEnvironmentId(requested));
   } catch (error) {
     if (error instanceof RegistryConfigError || error instanceof UnknownEnvironmentError) {
       return (
@@ -50,7 +51,11 @@ export default async function GatewayPage({ searchParams }: PageProps<'/gateway'
       actions={<AutoRefresh />}
       picker={
         environments.length > 1 && (
-          <EnvironmentPicker environments={environments} current={status.environment} />
+          <EnvironmentNote
+            environments={environments}
+            current={status.environment}
+            overridden={requested !== undefined}
+          />
         )
       }
     >
@@ -104,33 +109,33 @@ function Page({
   );
 }
 
-function EnvironmentPicker({
+/**
+ * Which environment this is. The shell's switcher picks it; a `?env=` link (the
+ * degraded banner's "details") shows another one without changing that choice.
+ */
+function EnvironmentNote({
   environments,
   current,
+  overridden,
 }: {
   environments: readonly PublicEnvironment[];
   current: string;
+  overridden: boolean;
 }) {
+  const label = environments.find(({ id }) => id === current)?.label ?? current;
   return (
-    <nav aria-label="Environment" className="flex flex-wrap gap-1">
-      {environments.map((environment) => {
-        const active = environment.id === current;
-        return (
-          <Link
-            key={environment.id}
-            href={{ pathname: '/gateway', query: { env: environment.id } }}
-            aria-current={active ? 'page' : undefined}
-            className={`rounded-md border px-3 py-1 text-sm ${
-              active
-                ? 'border-accent bg-accent text-accent-foreground'
-                : 'border-border hover:bg-subtle'
-            }`}
-          >
-            {environment.label}
+    <p className="text-sm text-muted">
+      Showing <span className="font-medium text-foreground">{label}</span>
+      {overridden && (
+        <>
+          {' '}
+          from a direct link, not your selected environment ·{' '}
+          <Link href="/gateway" className="underline">
+            show the selected one
           </Link>
-        );
-      })}
-    </nav>
+        </>
+      )}
+    </p>
   );
 }
 

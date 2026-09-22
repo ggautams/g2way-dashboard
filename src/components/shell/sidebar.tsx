@@ -42,20 +42,24 @@ function SearchButton({ compact = false }: { compact?: boolean }) {
 /**
  * Desktop sidebar; below `md` the {@link MobileBar} takes over and the palette is the nav.
  * `account` is the server-rendered user panel with its sign-out action;
+ * `environment` the server-rendered environment switcher, when there is a choice;
  * `permissions` are the signed-in role's, and hide what it cannot use (cosmetic:
  * pages and the BFF enforce them server-side).
  */
 export function Sidebar({
   account,
+  environment,
   permissions,
 }: {
   account: React.ReactNode;
+  environment?: React.ReactNode;
   permissions: readonly Permission[];
 }) {
   const pathname = usePathname();
   return (
     <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-4 border-r border-border bg-surface p-4 md:flex">
       <Brand />
+      {environment}
       <SearchButton />
       <nav aria-label="Main" className="flex flex-1 flex-col gap-4 overflow-y-auto">
         {navFor(permissions).map((group) => (
@@ -96,10 +100,17 @@ export function Sidebar({
   );
 }
 
-export function MobileBar({ account }: { account: React.ReactNode }) {
+export function MobileBar({
+  account,
+  environment,
+}: {
+  account: React.ReactNode;
+  environment?: React.ReactNode;
+}) {
   return (
     <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-surface px-4 py-2 md:hidden">
       <Brand />
+      {environment && <div className="min-w-0 max-w-40">{environment}</div>}
       <div className="ml-auto flex items-center gap-2">
         <SearchButton compact />
         <ThemeToggle />

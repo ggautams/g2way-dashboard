@@ -21,6 +21,7 @@ import {
   type GatewayWrite,
 } from './audit-trail';
 import { ENVIRONMENT_HEADER } from './client';
+import { ENVIRONMENT_COOKIE, pickEnvironmentId } from './selected-environment';
 import { GatewayError, describeFetchError } from './errors';
 import { operationPermission } from './operation-permissions';
 import { isBodyOrgScoped, scopeBody, withOrgId } from './org-scope';
@@ -127,6 +128,15 @@ export function originConfig(
     trustForwarded: trust === 'true' || trust === '1',
     publicUrl: env.AUTH_URL?.trim() || undefined,
   };
+}
+
+/** One cookie's value from a request's `Cookie` header. */
+function cookieValue(request: Request, name: string): string | undefined {
+  for (const pair of (request.headers.get('cookie') ?? '').split(';')) {
+    const [key, ...value] = pair.trim().split('=');
+    if (key === name) return decodeURIComponent(value.join('='));
+  }
+  return undefined;
 }
 
 /** The first value of a possibly comma-joined header (proxies append to X-Forwarded-*). */
@@ -261,7 +271,12 @@ export async function proxyToGateway(
   let target: GatewayTarget;
   try {
     const registry = deps.registry ?? getRegistry();
-    target = resolveEnvironment(request.headers.get(ENVIRONMENT_HEADER) ?? undefined, registry);
+    // The header when the caller names one; else the shell's remembered choice.
+    const id = pickEnvironmentId(registry, {
+      override: request.headers.get(ENVIRONMENT_HEADER) ?? undefined,
+      remembered: cookieValue(request, ENVIRONMENT_COOKIE),
+    });
+    target = resolveEnvironment(id, registry);
   } catch (error) {
     if (error instanceof UnknownEnvironmentError) return errorResponse(400, error.message);
     if (error instanceof RegistryConfigError) return errorResponse(500, error.message);

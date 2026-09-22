@@ -73,7 +73,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 ## M3 — API management
 
-- [ ] Environment switcher in the shell (the BFF already honours
+- [x] Environment switcher in the shell (the BFF already honours
       `X-G2-Environment`; only `/gateway` has a picker today)
 - [ ] API list with search, filter, and active/inactive state
 - [ ] Decide form primitives before the designer: adopt shadcn/ui as ADR-0001
@@ -612,3 +612,21 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   Next 16 refuses a second `next dev` in the same checkout, so while a dev
   server holds :3000 the pass needs a production server on another port. Moving
   on to M3; the open box does not block the read-only API list.
+
+- feat(M3): environment switcher in the shell.
+  - With more than one environment, the sidebar (and the mobile bar) shows a
+    select that remembers the choice in a `g2-environment` cookie.
+  - The cookie is httpOnly and holds only the public id. `selectEnvironmentAction`
+    validates the id against the registry before setting it.
+  - `selectedEnvironmentId()` (`src/lib/g2/selected-environment.ts`) is how
+    server pages pick an environment: an explicit `?env=`, else the cookie if
+    that environment is still configured, else the default.
+  - The BFF resolves the same way: the `X-G2-Environment` header, else the
+    cookie, else the default. M3's client components can therefore omit the
+    header and still hit the environment the user sees.
+  - `/gateway` lost its own picker. It now says which environment it shows, and
+    offers a way back when a `?env=` link (the degraded banner's "details")
+    overrides the selection.
+  - **Surprise:** `client-boundary.test.ts` follows type-only imports too, so
+    the client switcher restates `PublicEnvironment`'s three fields.
+  - Next: the API list.

@@ -1,3 +1,4 @@
+import { ENVIRONMENT_COOKIE } from './selected-environment';
 import { describe, expect, it, vi } from 'vitest';
 import spec from '../../../contracts/openapi.json';
 import type { Role } from '@/lib/auth/rbac';
@@ -178,6 +179,19 @@ describe('forwarding', () => {
     expect(calls[0].url).toBe('https://gw-staging/admin/g2/version');
     expect(new Headers(calls[0].init.headers).get('x-g2-authorization')).toBe(STAGING_SECRET);
     expect(response.headers.get(ENVIRONMENT_HEADER)).toBe('staging');
+  });
+
+  it('falls back to the shell’s remembered environment, then the default', async () => {
+    const remembered = await proxy('version', {
+      headers: { cookie: `theme=dark; ${ENVIRONMENT_COOKIE}=staging` },
+    });
+    expect(remembered.calls[0].url).toBe('https://gw-staging/admin/g2/version');
+    const header = await proxy('version', {
+      headers: { cookie: `${ENVIRONMENT_COOKIE}=staging`, [ENVIRONMENT_HEADER]: 'dev' },
+    });
+    expect(header.response.headers.get(ENVIRONMENT_HEADER)).toBe('dev');
+    const stale = await proxy('version', { headers: { cookie: `${ENVIRONMENT_COOKIE}=gone` } });
+    expect(stale.response.status).toBe(200);
   });
 });
 
