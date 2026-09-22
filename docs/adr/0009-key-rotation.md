@@ -97,6 +97,11 @@ old key. That takes three admin calls, and the gateway cannot make them atomic.
      `STAGED_ACTIONS`.
    - A key deleted outside the dashboard leaves an orphan row. Nothing lists it,
      because rows are only read for hashes the gateway returns.
+     _(2026-09-23)_ `/keys` now lists such rows to `keys:write` roles and
+     prunes them after a review step (`lib/g2/key-orphans.ts`), each audited
+     as `key.metadata.delete` with the row as `before`. A row counts as an
+     orphan only when `GET /g2/keys` succeeded and does not list its hash; the
+     prune re-reads that list itself, and a failed read prunes nothing.
 
 ## Consequences
 

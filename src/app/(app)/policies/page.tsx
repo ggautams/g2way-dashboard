@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Badge } from '@/components/ui/badge';
+import { PolicyTable } from '@/components/policies/policy-table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Notice } from '@/components/users/controls';
@@ -16,13 +16,7 @@ import {
 } from '@/lib/g2/environments';
 import { loadPolicies, type PolicyList } from '@/lib/g2/policies';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
-import {
-  describeQuota,
-  describeRate,
-  filterPolicies,
-  summarisePolicy,
-  type PolicySummary,
-} from '@/lib/policies/list';
+import { filterPolicies, summarisePolicy } from '@/lib/policies/list';
 
 export const metadata: Metadata = { title: 'Policies' };
 
@@ -109,7 +103,11 @@ export default async function PoliciesPage({ searchParams }: PageProps<'/policie
           </Link>
         </Empty>
       ) : (
-        <PolicyTable policies={shown} staged={staged} />
+        <PolicyTable
+          policies={shown}
+          staged={[...staged]}
+          bulk={canWrite ? { environment: { id: list.environment, label } } : undefined}
+        />
       )}
     </Page>
   );
@@ -147,81 +145,6 @@ function Page({
         )}
       </header>
       {children}
-    </div>
-  );
-}
-
-function PolicyTable({
-  policies,
-  staged,
-}: {
-  policies: readonly PolicySummary[];
-  /** Ids with saved changes not yet live (no reload since). */
-  staged: ReadonlySet<string>;
-}) {
-  return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-sm">
-        <thead className="bg-subtle text-left text-xs uppercase tracking-wide text-muted">
-          <tr>
-            <th className="px-3 py-2 font-medium">Policy</th>
-            <th className="px-3 py-2 font-medium">Rate</th>
-            <th className="px-3 py-2 font-medium">Quota</th>
-            <th className="px-3 py-2 font-medium">APIs</th>
-            <th className="px-3 py-2 font-medium">State</th>
-          </tr>
-        </thead>
-        <tbody>
-          {policies.map((policy) => (
-            <tr key={policy.policyId} className="border-t border-border align-top">
-              <td className="px-3 py-2">
-                <Link
-                  href={`/policies/view/${encodeURIComponent(policy.policyId)}`}
-                  className="font-medium hover:underline"
-                >
-                  {policy.name}
-                </Link>
-                <p className="font-mono text-xs text-muted">{policy.policyId}</p>
-              </td>
-              <td className="px-3 py-2 font-mono text-xs">{describeRate(policy.rate)}</td>
-              <td className="px-3 py-2 font-mono text-xs">{describeQuota(policy.quota)}</td>
-              <td className="px-3 py-2 text-xs">
-                {policy.apis.length === 0 ? (
-                  <span className="text-warning" title="An empty access map grants every API">
-                    every API
-                  </span>
-                ) : (
-                  <span className="font-mono" title={policy.apis.join('\n')}>
-                    {policy.apis.length <= 3
-                      ? policy.apis.join(', ')
-                      : `${policy.apis.slice(0, 3).join(', ')} +${policy.apis.length - 3} more`}
-                  </span>
-                )}
-              </td>
-              <td className="px-3 py-2">
-                {policy.active ? (
-                  <Badge variant="outline" className="border-success/40 text-success">
-                    active
-                  </Badge>
-                ) : (
-                  <Badge variant="secondary" title="Denies every key that references it">
-                    inactive
-                  </Badge>
-                )}
-                {staged.has(policy.policyId) && (
-                  <Badge
-                    variant="outline"
-                    className="ml-1 border-warning/40 text-warning"
-                    title="Saved since the last reload: keys still get the previous version"
-                  >
-                    not live
-                  </Badge>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

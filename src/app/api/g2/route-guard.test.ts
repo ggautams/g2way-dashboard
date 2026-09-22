@@ -37,4 +37,16 @@ describe('BFF route', () => {
       ['POST', 'handle'],
     ]);
   });
+
+  // Bulk operations: same guard, same actor, and only POST.
+  it('guards the bulk route the same way', () => {
+    const source = readFileSync(join(import.meta.dirname, 'bulk', 'route.ts'), 'utf8');
+    expect(source).toMatch(/const handle = withUser\(/);
+    expect(source).toMatch(
+      /runBulkOperation\(request, \{ id: user\.id, email: user\.email, role: user\.role \}\)/,
+    );
+    expect([...source.matchAll(/export const (\w+) = (\w+);/g)].map((m) => [m[1], m[2]])).toEqual([
+      ['POST', 'handle'],
+    ]);
+  });
 });

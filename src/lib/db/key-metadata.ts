@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { KeyMetadataFields } from '@/lib/keys/metadata';
 import { auditValues, type AuditActor, type AuditRecord } from './audit';
 import type { JsonValue } from './schema/shared';
@@ -101,6 +101,32 @@ export async function listKeyMetadata(
     for (const row of rows) out.set(row.keyHash, row);
   }
   return out;
+}
+
+/**
+ * Every metadata row of `environment`, oldest first: orphan detection compares
+ * them with the hashes the gateway lists (`lib/keys/orphans.ts`).
+ */
+export async function listAllKeyMetadata(
+  handle: DataHandle,
+  orgId: string,
+  environment: string,
+): Promise<KeyMetadata[]> {
+  if (handle.dialect === 'sqlite') {
+    const t = handle.schema.keyMetadata;
+    return handle.db
+      .select()
+      .from(t)
+      .where(and(eq(t.orgId, orgId), eq(t.environment, environment)))
+      .orderBy(asc(t.createdAt), asc(t.keyHash))
+      .all();
+  }
+  const t = handle.schema.keyMetadata;
+  return handle.db
+    .select()
+    .from(t)
+    .where(and(eq(t.orgId, orgId), eq(t.environment, environment)))
+    .orderBy(asc(t.createdAt), asc(t.keyHash));
 }
 
 export type MetadataChange = { before: KeyMetadata | null; after: KeyMetadata | null };

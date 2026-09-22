@@ -101,10 +101,15 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [ ] Live quota and rate-limit usage per key — **blocked**: g2way has no usage endpoint
       (`UPSTREAM.md`); `/keys/view/[hash]` shows the configured limits in effect meanwhile
 - [x] "What does this key allow" resolver that folds `apply_policies`
-- [ ] Bulk operations and search by alias
-- [ ] Search and filter `/keys` by dashboard label and owner (today they only
+- [x] Bulk operations and search by alias
+- [x] Search and filter `/keys` by dashboard label and owner (today they only
       show on the page being viewed), and prune `key_metadata` rows orphaned by
       key deletes made outside the dashboard (ADR-0009 §7)
+- [ ] Bulk selection across pages ("select every match"): today a bulk action
+      covers the rows on screen (25 at most; the BFF takes up to 100)
+- [ ] Complete alias/policy/state search past 200 keys: needs g2way to list
+      sessions, or at least aliases, in one call (`UPSTREAM.md`, hashes-only
+      listing); until then `/keys` says when a search stopped short
 - [ ] Policy history tab and rollback (versions are already kept, ADR-0008)
 - [ ] Replace the BFF rotate orchestration with g2way's native atomic rotate once it
       exists (`UPSTREAM.md`, ADR-0009); blocked upstream
@@ -991,3 +996,39 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     run in a browser (the open M2 browser pass covers it too).
   - Follow-up filed: M4 hmac-secret exposure on the key view.
   - Next: bulk operations and search by alias (M4).
+
+- feat(M4): `/keys` search and filter, bulk key and policy operations,
+  orphaned key-metadata pruning.
+  - Filter in the URL (`?q=&policy=&state=`, `lib/keys/filter.ts`, as `/apis` does it):
+    `q` matches label, owner, alias or a hash prefix; policy is an id or "none";
+    state is active/revoked/expired (revoked wins over expired).
+  - Read-cost trade-off: label and owner come from `key_metadata` in one query for
+    every listed hash. Alias, policy and state are only in the session, so
+    `loadKeySearch` reads sessions (5 at a time, as the list does) in `scanOrder`:
+    label/owner matches first, then the rest, **at most `KEY_SCAN_LIMIT` = 200 per
+    search**, and pages the matches 25 at a time. Past the cap the page says how many
+    keys were not read and that alias/policy/state matches among them are missing.
+    Each filtered page view re-runs the scan (no cache: sessions change live). A
+    failed session read is listed "unchecked", never dropped as a miss.
+  - Bulk (`POST /api/g2/bulk`, `lib/g2/bulk.ts`): revoke, reactivate, delete, apply
+    or remove one policy on keys (`keys:write`), delete on policies
+    (`policies:write`). No batch endpoint upstream, so each item is its own
+    `proxyToGateway` call: permission, org scope, per-item audit row, and the key
+    delete's metadata drop, exactly as one at a time. Updates re-read the session
+    and change one field (`applyKeyOp`); an item already in the target state is
+    "unchanged" and writes nothing. A `key.bulk`/`policy.bulk` summary row is
+    written pending first (fail closed, 503) and completed with the tally. The
+    review dialog lists the items first; the report shows each item's outcome and
+    the gateway's message. Policy deletes say they are not live until reload.
+  - The `/keys` table is now a client component fed display strings only
+    (`toKeyListRow`), never sessions, which can hold hmac secrets. `/policies`
+    table likewise moved to `components/policies/policy-table.tsx`.
+  - Orphans: `/keys` lists `key_metadata` rows whose hash a successful
+    `GET /g2/keys` does not contain, to `keys:write` roles, with a review-and-prune
+    dialog. The server action re-reads the list, prunes only rows still orphaned,
+    audits each as `key.metadata.delete`, and prunes nothing when the list fails.
+    ADR-0009 §7's last bullet gained a dated note.
+  - Not run in a browser (the open M2 browser pass now covers this too).
+  - Follow-ups filed: M4 cross-page bulk selection; M4 complete search past
+    200 keys (blocked on a g2way listing with sessions).
+  - Next: policy history tab and rollback (M4).

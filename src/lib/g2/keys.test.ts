@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { parseEnvironments } from './environments';
-import { KEY_PAGE_SIZE, loadKey, loadKeyPage, loadPolicyChoices, mapLimit } from './keys';
+import {
+  KEY_PAGE_SIZE,
+  KEY_SCAN_LIMIT,
+  loadKey,
+  loadKeyHashes,
+  loadKeyPage,
+  loadKeySearch,
+  loadPolicyChoices,
+  mapLimit,
+} from './keys';
+import type { KeyFilter } from '@/lib/keys/filter';
 
 // Stand-in org: the real one comes from config.
 const registry = parseEnvironments({
@@ -109,5 +119,125 @@ describe('mapLimit', () => {
     expect(out).toEqual([2, 4, 6, 8, 10, 12, 14]);
     expect(peak).toBe(3);
     expect(await mapLimit([], 3, async (n: number) => n)).toEqual([]);
+  });
+});
+
+describe('loadKeySearch', () => {
+  const many = Array.from({ length: KEY_SCAN_LIMIT + 50 }, (_, i) =>
+    i.toString(16).padStart(64, '0'),
+  );
+  const filter = (over: Partial<KeyFilter>): KeyFilter => ({
+    q: '',
+    policy: '',
+    state: 'all',
+    ...over,
+  });
+
+  /** A gateway listing `many`; key i has alias `k<i>`, even keys apply `gold`, key 3 is corrupt. */
+  function big() {
+    const reads: string[] = [];
+    let inFlight = 0;
+    let peak = 0;
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(new Request(input, init).url);
+      if (url.pathname === '/g2/keys') return Response.json({ keys: many });
+      const hash = url.pathname.split('/').at(-1)!;
+      reads.push(hash);
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      inFlight--;
+      const i = many.indexOf(hash);
+      if (i === 3) return Response.json({ error: 'corrupt record' }, { status: 500 });
+      return Response.json({
+        alias: `k${i}`,
+        ...(i % 2 === 0 ? { apply_policies: ['gold'] } : {}),
+      });
+    }) as typeof globalThis.fetch;
+    return { fetch, reads, peak: () => peak };
+  }
+
+  const far = many[KEY_SCAN_LIMIT + 40];
+  const labelsFor = async (_env: string, hashes: readonly string[]) => {
+    expect(hashes).toEqual(many);
+    return new Map([[far, { label: 'Checkout service', owner: null }]]);
+  };
+
+  it('reads label/owner matches first, so one past the scan cap is still found', async () => {
+    const gw = big();
+    const { keys, labels } = await loadKeySearch('dev', filter({ q: 'checkout' }), 1, {
+      registry,
+      fetch: gw.fetch,
+      labelsFor,
+    });
+    if (!keys.ok) throw new Error(keys.error);
+    expect(labels.ok).toBe(true);
+    expect(gw.reads[0]).toBe(far);
+    expect(gw.reads).toHaveLength(KEY_SCAN_LIMIT);
+    expect(gw.peak()).toBeLessThanOrEqual(5);
+    // Key 3 could not be read: listed unchecked, never dropped as a miss.
+    expect(keys.value.items.map((row) => row.hash)).toEqual([far, many[3]]);
+    expect(keys.value.scan).toEqual({
+      total: many.length,
+      scanned: KEY_SCAN_LIMIT,
+      matched: 1,
+      unchecked: 1,
+    });
+    expect(keys.value.hashes).toEqual(many);
+  });
+
+  it('says it was truncated: an alias beyond the cap is not found', async () => {
+    const gw = big();
+    const { keys } = await loadKeySearch('dev', filter({ q: `k${KEY_SCAN_LIMIT + 10}` }), 1, {
+      registry,
+      fetch: gw.fetch,
+      labelsFor,
+    });
+    if (!keys.ok) throw new Error(keys.error);
+    expect(keys.value.total).toBe(1); // only the unreadable key 3, listed unchecked
+    expect(keys.value.scan.matched).toBe(0);
+    expect(keys.value.scan.scanned).toBeLessThan(keys.value.scan.total);
+  });
+
+  it('filters by policy and pages the matches, listing unreadable keys as unchecked', async () => {
+    const { keys } = await loadKeySearch('dev', filter({ policy: 'gold' }), 2, {
+      registry,
+      fetch: big().fetch,
+      labelsFor,
+    });
+    if (!keys.ok) throw new Error(keys.error);
+    // 100 even keys among the first 200 read, plus key 3 (unchecked).
+    expect(keys.value.scan).toMatchObject({ matched: KEY_SCAN_LIMIT / 2, unchecked: 1 });
+    expect(keys.value).toMatchObject({ page: 2, total: KEY_SCAN_LIMIT / 2 + 1 });
+    expect(keys.value.items).toHaveLength(KEY_PAGE_SIZE);
+  });
+
+  it('still searches aliases when the dashboard database fails, and says so', async () => {
+    const { keys, labels } = await loadKeySearch('dev', filter({ q: 'k7' }), 1, {
+      registry,
+      fetch: big().fetch,
+      labelsFor: async () => {
+        throw new Error('database locked');
+      },
+    });
+    expect(labels).toEqual({ ok: false, error: 'database locked' });
+    if (!keys.ok) throw new Error(keys.error);
+    expect(keys.value.items.map((row) => row.hash)).toContain(many[7]);
+  });
+
+  it('settles a failed list with the gateway’s message', async () => {
+    const fetch = (async () =>
+      Response.json({ error: 'storage unavailable' }, { status: 503 })) as typeof globalThis.fetch;
+    const search = await loadKeySearch('dev', filter({ q: 'x' }), 1, {
+      registry,
+      fetch,
+      labelsFor,
+    });
+    expect(search.keys).toEqual({ ok: false, error: 'storage unavailable', status: 503 });
+    expect((await loadKeyHashes('dev', { registry, fetch })).hashes).toEqual({
+      ok: false,
+      error: 'storage unavailable',
+      status: 503,
+    });
   });
 });
