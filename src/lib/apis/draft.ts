@@ -6,6 +6,14 @@
  * the client designer and the tests share it.
  */
 
+import {
+  authProblems,
+  parseLines,
+  isIpOrCidr,
+  isTransformMethod,
+  type AuthField,
+  type AuthHelp,
+} from './auth';
 import type { ApiDefinition, AuthMode } from './list';
 
 /** The fields the structured form edits; the raw editor covers the rest. */
@@ -21,9 +29,20 @@ export const FORM_FIELDS = [
   'preserve_host_header',
   'upstream_timeout_ms',
   'upstream_retries',
+  'transform_method',
+  'max_request_body_bytes',
+  'allow_ips',
+  'block_ips',
 ] as const satisfies readonly (keyof ApiDefinition)[];
 
 export type FormField = (typeof FORM_FIELDS)[number];
+
+/** A problem's key: a form field, or one auth setting as `auth.<setting>`. */
+export type ProblemKey = FormField | `auth.${AuthField}`;
+export type DraftProblems = Partial<Record<ProblemKey, string>>;
+
+/** The form's help text: g2way's rustdoc per field, and per auth mode and setting. */
+export type ApiHelp = { fields: Record<FormField, string>; auth: AuthHelp };
 
 /** A new API: the four required fields, empty, and active as g2way defaults it. */
 export function newDraft(): ApiDefinition {
@@ -58,8 +77,8 @@ type AuthConfig = NonNullable<ApiDefinition['auth']>;
 /**
  * `draft` switched to auth `mode`. Returning to the mode the definition was
  * loaded with restores its full config (keys, issuers, realms); any other mode
- * starts from the smallest config g2way accepts the shape of, and its settings
- * are filled in through the raw editor. Token auth is g2way's default, so it is
+ * starts from the smallest config g2way accepts the shape of, and the form's
+ * per-mode settings (or `draftProblems`) say what it still needs. Token auth is g2way's default, so it is
  * written as no `auth` at all unless the original carried one.
  */
 export function withAuthMode(
@@ -86,13 +105,7 @@ function minimalAuth(mode: Exclude<AuthMode, 'auth_token'>): AuthConfig {
 }
 
 /** The `target_list` textarea: one URL per line; none means "use target_url". */
-export function parseTargetList(text: string): string[] | undefined {
-  const urls = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
-  return urls.length > 0 ? urls : undefined;
-}
+export const parseTargetList = parseLines;
 
 /**
  * A whole-number field: blank means "g2way's default" (`undefined`); anything
@@ -141,11 +154,12 @@ function isHttpUrl(text: string): boolean {
 /**
  * What the form can tell before the gateway does: the required fields and the
  * rules the contract states (`listen_path` starts with `/`, targets are
- * absolute http(s) URLs). The gateway's own validation is the authority; its
+ * absolute http(s) URLs, `ApiDefinition::validate` and `AuthConfig::validate`
+ * in `api_definition.rs`). The gateway's own validation is the authority; its
  * 400 message is shown verbatim on save.
  */
-export function draftProblems(draft: ApiDefinition): Partial<Record<FormField, string>> {
-  const problems: Partial<Record<FormField, string>> = {};
+export function draftProblems(draft: ApiDefinition): DraftProblems {
+  const problems: DraftProblems = {};
   if (draft.api_id.trim() === '') problems.api_id = 'Give the API an id.';
   else if (/[\s/?#]/.test(draft.api_id)) problems.api_id = 'No spaces, slashes, ? or #.';
   if (draft.name.trim() === '') problems.name = 'Give the API a name.';
@@ -156,5 +170,19 @@ export function draftProblems(draft: ApiDefinition): Partial<Record<FormField, s
   }
   const bad = (draft.target_list ?? []).find((url) => !isHttpUrl(url));
   if (bad !== undefined) problems.target_list = `Not an absolute http(s) URL: ${bad}`;
+  const method = draft.transform_method;
+  if (method !== undefined && method !== null && !isTransformMethod(method)) {
+    problems.transform_method = `Not a method g2way can forward as (CONNECT never is): ${method}`;
+  }
+  if (draft.max_request_body_bytes === 0) {
+    problems.max_request_body_bytes = 'Must be greater than zero; leave it blank for no limit.';
+  }
+  for (const field of ['allow_ips', 'block_ips'] as const) {
+    const entry = (draft[field] ?? []).find((ip) => !isIpOrCidr(ip));
+    if (entry !== undefined) problems[field] = `Not an IP address or CIDR network: ${entry}`;
+  }
+  for (const [field, problem] of Object.entries(authProblems(draft.auth))) {
+    problems[`auth.${field as AuthField}`] = problem;
+  }
   return problems;
 }

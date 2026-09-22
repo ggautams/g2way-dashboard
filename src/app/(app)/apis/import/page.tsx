@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ImportFlow } from '@/components/apis/import-flow';
-import { fieldHelp } from '@/lib/apis/field-help';
+import { apiHelp } from '@/lib/apis/field-help';
 import { apiDefinitionSchema } from '@/lib/apis/schema';
 import { requirePermission } from '@/lib/auth/session';
 import { listEnvironments } from '@/lib/g2/environments';
@@ -27,7 +27,7 @@ export default async function ImportApiPage() {
           Start an API definition from an OpenAPI 3.x or Swagger 2.0 description of the upstream.
         </p>
       </header>
-      <ImportFlow help={fieldHelp()} schema={apiDefinitionSchema()} environment={{ id, label }} />
+      <ImportFlow help={apiHelp()} schema={apiDefinitionSchema()} environment={{ id, label }} />
     </div>
   );
 }

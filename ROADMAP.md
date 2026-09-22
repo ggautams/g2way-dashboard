@@ -68,7 +68,10 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       match", orphan prune), `/keys/view/[hash]` (metadata, Usage, Effective
       access, masked secrets as a viewer/editor) and the History tab with
       rollback on APIs and policies — and M5's Chain tab on the API designer
-      (unversioned, versioned and udg definitions; anchors resolve) (M1 and M2
+      (unversioned, versioned and udg definitions; anchors resolve), its
+      "Edit" links switching to the Form tab and scrolling, and the 2a editors
+      (each auth mode's settings, the hs256 secret shown as hidden to a viewer,
+      Radix selects disabled read-only, IP lists, size limit, method) (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23, twice. `make serve-scratch` is the one-step way to run the
       pass: a production build on :3100 against a fresh temp-dir SQLite
@@ -142,9 +145,17 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 - [x] Visual middleware chain reflecting g2way's real slot order
       (`crates/g2-middleware/src/chain.rs`), including how versioned APIs split it
-- [ ] Editors: auth mode, header transforms, body transforms, URL rewrites,
-      method transform, allow/block/ignore paths, mock responses, CORS,
-      IP allow/deny, request size limit, endpoint rate limits, versioning
+- [ ] Editors (ticked when all four below are)
+  - [x] 2a. Auth mode settings (the full `AuthConfig` per mode: `auth_token`,
+        `jwt`, `oidc`, `hmac`, `basic_auth`, `mtls`, `keyless`), method
+        transform, request size limit, IP allow/deny
+  - [ ] 2b. A shared path-rule list editor (pattern + methods) used for
+        allow/block/ignore paths, URL rewrites, mock responses, endpoint rate
+        limits
+  - [ ] 2c. Header transforms, body transforms (minijinja rules +
+        `max_response_body_bytes`), CORS
+  - [ ] 2d. Versioning (`VersioningConfig`; each version's overrides reuse the
+        2b/2c editors; non-overridable fields shown as inherited)
 - [ ] Explain panel per slot rendered from `contracts/g2way-docs/`
 - [ ] Request console: send a test request through the gateway, show the
       response and which middleware acted on it
@@ -1211,3 +1222,41 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - Slots 1–4 depend on gateway flags and show as "gateway flag".
   - Not run in a browser; added to the open M2 browser-pass box.
   - Next: M5 editors.
+- feat(M5): editors 2a: auth settings, IP filter, size limit,
+  method transform.
+  - The single Editors box is now four sub-boxes, 2a–2d. The parent is ticked
+    only when all four are.
+  - `src/lib/apis/auth.ts` is the pure model. `AUTH_FIELDS` lists each mode's
+    settings, and a test checks it against the OpenAPI branches.
+    `authProblems` mirrors `AuthConfig::validate` (api_definition.rs).
+    `draftProblems` reports it under `auth.<setting>`, and also checks the
+    method, the size limit (`0` is refused) and the IP lists.
+  - Serde defaults are hard-coded in `AUTH_DEFAULTS` and used as
+    placeholders: header `Authorization`, claims `sub`/`azp`, realm `g2way`,
+    300 s for JWKS refresh and HMAC skew.
+  - Help text: `apiHelp()` returns `{ fields, auth }`. Per-mode text comes
+    from `variantHelp` (designer/help.ts), which reads one `oneOf` branch.
+  - A masked hs256 secret is shown as "Hidden", never as an input.
+    `authProblems` also refuses a masked secret.
+  - Switching the signing method or the rs256 key source drops the other
+    key material, which g2way refuses.
+  - HMAC's `allowed_clock_skew_secs: null` (check disabled) is kept apart
+    from absent (the default).
+  - Reusable inputs are in `src/components/apis/form-inputs.tsx`:
+    `NumberField`, `LinesField` and `TextField` (blank means unset, or `''`
+    when the value is required). 2b–2d should build on them.
+  - **Linking convention for 2b–2d:** links go one way, chain to editor. To
+    add an editor, add its slot id to `EDITOR_SLOTS` in chain.ts and give
+    its section `<Section id={editorAnchor(slotId)}>` (`edit-<id>`). The
+    Chain tab then shows an "Edit" link. `api-designer.tsx` catches any
+    `#edit-…` or `#chain-…` click, switches tab and scrolls.
+  - Per-version slots link to the base editor for now. 2d should add
+    per-version anchors.
+  - Upstream is now the forwarder's section (`edit-forwarder`). It holds
+    `transform_method`.
+  - **Unresolved:** does g2way build a layer for an empty-but-present block
+    (`transform_headers: {}`)? chain.rs's `ChainBuilder` only takes
+    `Option<Layer>`s. The route-table code that decides is still outside
+    the map, so chain.ts keeps its assumption.
+  - Not run in a browser; added to the open M2 browser-pass box.
+  - Next: 2b, the shared path-rule list editor.

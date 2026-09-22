@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { FORM_FIELDS } from '@/lib/apis/draft';
-import { fieldHelp } from '@/lib/apis/field-help';
+import { AUTH_FIELDS } from '@/lib/apis/auth';
+import { authHelp, fieldHelp } from '@/lib/apis/field-help';
+import { AUTH_MODES } from '@/lib/apis/list';
 import { accessFieldHelp } from './access-help';
 import { firstParagraph, propertyHelp, schemaHelp } from './help';
 
@@ -46,5 +48,18 @@ describe('accessFieldHelp', () => {
     expect(help.allowed_types).toMatch(/allow list wins/);
     expect(help.max_query_depth).toMatch(/inherits/);
     expect(accessFieldHelp('KeySession').access).toMatch(/every API/);
+  });
+});
+
+describe('authHelp', () => {
+  it('has g2way’s description for every auth mode and setting', () => {
+    const help = authHelp();
+    for (const mode of AUTH_MODES) {
+      expect(help[mode].summary, mode).not.toBe('');
+      for (const field of AUTH_FIELDS[mode]) expect(help[mode].fields[field], field).not.toBe('');
+    }
+    expect(help.oidc.fields.audiences).toMatch(/non-empty/);
+    expect(help.auth_token.summary).toMatch(/KeySession/);
+    expect(help.auth_token.summary).not.toMatch(/crate::/);
   });
 });

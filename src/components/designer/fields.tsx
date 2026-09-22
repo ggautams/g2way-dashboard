@@ -6,9 +6,21 @@ import { Switch } from '@/components/ui/switch';
 
 /** Layout and inputs every designer form shares. */
 
-export function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/**
+ * A titled group of fields. `id` makes it a link target: the API form gives a
+ * section that edits a chain slot `editorAnchor(slotId)` (`src/lib/apis/chain.ts`).
+ */
+export function Section({
+  id,
+  title,
+  children,
+}: {
+  id?: string;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="flex flex-col gap-4">
+    <section id={id} className="flex scroll-mt-4 flex-col gap-4">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">{title}</h2>
       <div className="grid gap-5 md:grid-cols-2">{children}</div>
     </section>

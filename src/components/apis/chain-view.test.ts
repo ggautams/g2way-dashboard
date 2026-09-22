@@ -21,6 +21,14 @@ describe('ChainView', () => {
     expect(source).toContain('chain.versions.map(');
   });
 
+  it('links slots with an editor to their form section, only through editorAnchor', () => {
+    expect(source).toContain('EDITOR_SLOTS.includes(slotId)');
+    expect(source).toContain('href={`#${editorAnchor(slotId)}`}');
+    expect(source).toContain('<EditLink slotId={slot.id} />');
+    expect(source).toContain('<EditLink slotId={FORWARDER_ID} />');
+    expect(source).not.toMatch(/href=\{?[`'"]#edit-/);
+  });
+
   it('says the chain is not live until saved and reloaded', () => {
     expect(source).toMatch(/not live until saved and\s+reloaded/);
   });
@@ -37,5 +45,12 @@ describe('ApiDesigner', () => {
     const source = read('api-designer.tsx');
     expect(source).toContain('<TabsTrigger value="chain">Chain</TabsTrigger>');
     expect(source).toContain('<ChainView draft={draft} />');
+  });
+
+  it('follows #edit- and #chain- links across tabs', () => {
+    const source = read('api-designer.tsx');
+    expect(source).toContain('onClickCapture={followAnchor}');
+    expect(source).toMatch(/startsWith\('edit-'\) \? 'form'/);
+    expect(source).toMatch(/startsWith\('chain-'\) \? 'chain'/);
   });
 });

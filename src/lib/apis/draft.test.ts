@@ -38,7 +38,7 @@ describe('withField', () => {
 
 describe('otherFields', () => {
   it('names what the form does not edit, not org_id', () => {
-    expect(otherFields(stored)).toEqual(['cors', 'transform_method']);
+    expect(otherFields(stored)).toEqual(['cors']);
     expect(otherFields(newDraft())).toEqual([]);
   });
 });
@@ -106,5 +106,31 @@ describe('draftProblems', () => {
       listen_path: 'Must begin with /.',
       target_list: 'Not an absolute http(s) URL: ftp://no',
     });
+  });
+
+  it('checks the method override, size limit and IP lists as g2way validates them', () => {
+    expect(
+      draftProblems({
+        ...stored,
+        transform_method: 'CONNECT',
+        max_request_body_bytes: 0,
+        allow_ips: ['10.0.0.0/8', 'not-an-ip'],
+        block_ips: ['10.0.0.0/99'],
+      }),
+    ).toEqual({
+      transform_method: expect.stringContaining('CONNECT'),
+      max_request_body_bytes: expect.stringContaining('greater than zero'),
+      allow_ips: 'Not an IP address or CIDR network: not-an-ip',
+      block_ips: 'Not an IP address or CIDR network: 10.0.0.0/99',
+    });
+    expect(
+      draftProblems({ ...stored, transform_method: 'patch', max_request_body_bytes: null }),
+    ).toEqual({});
+  });
+
+  it('reports auth settings under auth.<setting>', () => {
+    expect(
+      draftProblems({ ...stored, auth: { mode: 'jwt', signing_method: 'hs256', secret: ' ' } }),
+    ).toEqual({ 'auth.secret': 'hs256 needs a secret.' });
   });
 });

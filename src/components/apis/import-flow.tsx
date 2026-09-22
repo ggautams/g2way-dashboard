@@ -4,14 +4,14 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import type { FormField } from '@/lib/apis/draft';
+import type { ApiHelp } from '@/lib/apis/draft';
 import { importOpenApi } from '@/lib/apis/import';
 import type { ApiDefinition } from '@/lib/apis/list';
 import { ApiDesigner } from './api-designer';
 import type { DesignerEnvironment } from '@/components/designer/save-bar';
 
 type Props = {
-  help: Record<FormField, string>;
+  help: ApiHelp;
   schema: { $id: string } & object;
   environment: DesignerEnvironment;
 };

@@ -48,3 +48,26 @@ export function schemaHelp(schema: string): string {
     .filter((paragraph) => paragraph !== '' && !paragraph.startsWith('#'))
     .join(' ');
 }
+
+type VariantSchema = {
+  description?: string;
+  properties?: Record<string, PropertySchema & { enum?: string[] }>;
+};
+
+function variant(schema: string, tag: string, value: string): VariantSchema | undefined {
+  const schemas = spec.components.schemas as unknown as Record<string, { oneOf?: VariantSchema[] }>;
+  return schemas[schema]?.oneOf?.find((branch) => branch.properties?.[tag]?.enum?.includes(value));
+}
+
+/**
+ * For a tagged union (`AuthConfig`, tagged by `mode`): the first paragraph of
+ * the `value` branch's own description, or of its `property` when one is named.
+ */
+export function variantHelp(schema: string, tag: string, value: string, property?: string): string {
+  const branch = variant(schema, tag, value);
+  if (property === undefined) return firstParagraph(branch?.description ?? '');
+  const node = branch?.properties?.[property];
+  return firstParagraph(
+    node?.description ?? node?.oneOf?.find((b) => b.description)?.description ?? '',
+  );
+}

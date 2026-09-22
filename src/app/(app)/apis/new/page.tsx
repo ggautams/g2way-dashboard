@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ApiDesigner } from '@/components/apis/api-designer';
 import { newDraft } from '@/lib/apis/draft';
-import { fieldHelp } from '@/lib/apis/field-help';
+import { apiHelp } from '@/lib/apis/field-help';
 import { apiDefinitionSchema } from '@/lib/apis/schema';
 import { requirePermission } from '@/lib/auth/session';
 import { listEnvironments } from '@/lib/g2/environments';
@@ -28,7 +28,7 @@ export default async function NewApiPage() {
       <ApiDesigner
         original={null}
         initial={newDraft()}
-        help={fieldHelp()}
+        help={apiHelp()}
         schema={apiDefinitionSchema()}
         canWrite
         environment={{ id, label }}

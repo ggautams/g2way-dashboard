@@ -1,11 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { RawPanel, SchemaProblems, useRawView } from '@/components/designer/raw-view';
 import { HistoryPanel, RestoredNote } from '@/components/designer/history-panel';
 import { SaveBar, type DesignerEnvironment } from '@/components/designer/save-bar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { draftProblems, otherFields, type FormField } from '@/lib/apis/draft';
+import { draftProblems, otherFields, type ApiHelp } from '@/lib/apis/draft';
 import type { ApiDefinition } from '@/lib/apis/list';
 import { isDraftShape } from '@/lib/apis/raw';
 import { saveBlocker } from '@/lib/apis/save';
@@ -19,7 +19,7 @@ type Props = {
   original: ApiDefinition | null;
   /** Where the draft starts: the stored definition, or a new one. */
   initial: ApiDefinition;
-  help: Record<FormField, string>;
+  help: ApiHelp;
   /** `apiDefinitionSchema()`: g2way's JSON Schema for the definition. */
   schema: { $id: string } & object;
   /** Whether the role holds `apis:write`; otherwise the designer is read-only. */
@@ -59,6 +59,29 @@ export function ApiDesigner({
     shapeError: 'api_id, name, listen_path and target_url must all be strings.',
   });
   const [restored, setRestored] = useState<string | null>(null);
+  const pendingAnchor = useRef<string | null>(null);
+  // In-page links between tabs (the Chain tab's "Edit" links, EDITOR_SLOTS in
+  // chain.ts): switch to the tab holding the target, then scroll to it once
+  // that tab has rendered.
+  useEffect(() => {
+    const id = pendingAnchor.current;
+    if (id === null) return;
+    pendingAnchor.current = null;
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [view]);
+  const followAnchor = (event: React.MouseEvent) => {
+    const link = (event.target as Element).closest('a[href^="#"]');
+    const id = link?.getAttribute('href')?.slice(1) ?? '';
+    const target = id.startsWith('edit-') ? 'form' : id.startsWith('chain-') ? 'chain' : null;
+    if (target === null) return;
+    event.preventDefault();
+    if (view === target) {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      pendingAnchor.current = id;
+      open(target);
+    }
+  };
   const validate = useMemo(() => schemaValidator(schema), [schema]);
 
   const problems = draftProblems(draft);
@@ -73,7 +96,7 @@ export function ApiDesigner({
         : null);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" onClickCapture={followAnchor}>
       {!canWrite && (
         <p className="rounded-md border border-border bg-subtle px-3 py-2 text-sm text-muted">
           Read-only: your role can view API definitions but not change them.

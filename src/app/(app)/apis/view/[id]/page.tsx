@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ApiDesigner } from '@/components/apis/api-designer';
-import { fieldHelp } from '@/lib/apis/field-help';
+import { apiHelp } from '@/lib/apis/field-help';
 import { apiDefinitionSchema } from '@/lib/apis/schema';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
@@ -94,7 +94,7 @@ export default async function ApiPage({ params, searchParams }: PageProps<'/apis
           history={history}
           original={api.value}
           initial={api.value}
-          help={fieldHelp()}
+          help={apiHelp()}
           schema={apiDefinitionSchema()}
           canWrite={canWrite}
         />

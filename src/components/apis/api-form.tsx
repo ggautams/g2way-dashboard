@@ -1,6 +1,6 @@
 'use client';
 
-import { Field, Section, Toggle, useSyncedText } from '@/components/designer/fields';
+import { Field, Section, Toggle } from '@/components/designer/fields';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -9,34 +9,48 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+import { effectiveAuth, TRANSFORM_METHODS, type AuthField } from '@/lib/apis/auth';
+import { editorAnchor, FORWARDER_ID } from '@/lib/apis/chain';
 import {
-  parseTargetList,
-  parseWholeNumber,
   slugify,
   withAuthMode,
   withField,
-  type FormField,
+  type ApiHelp,
+  type DraftProblems,
 } from '@/lib/apis/draft';
 import { AUTH_MODES, summarise, type ApiDefinition, type AuthMode } from '@/lib/apis/list';
+import { AuthSettings } from './auth-settings';
+import { LinesField, NumberField } from './form-inputs';
+
+/** The Select's value for "no override": Radix items cannot have an empty value. */
+const CLIENT_METHOD = 'client';
 
 type Props = {
   draft: ApiDefinition;
   onChange: (draft: ApiDefinition) => void;
   /** The definition as loaded, for restoring its auth config; `null` when creating. */
   original: ApiDefinition | null;
-  /** g2way's own description of each field (`fieldHelp()`). */
-  help: Record<FormField, string>;
-  problems: Partial<Record<FormField, string>>;
+  /** g2way's own description of each field and auth setting (`apiHelp()`). */
+  help: ApiHelp;
+  problems: DraftProblems;
   readOnly: boolean;
 };
 
 /**
  * The structured half of the API designer: the fields most APIs need, each
  * editing the draft in place (`withField`), so fields not shown here survive.
+ * A section editing a chain slot carries `editorAnchor(slotId)` as its id, so
+ * the Chain tab's "Edit" links land on it (`EDITOR_SLOTS` in chain.ts).
  */
-export function ApiForm({ draft, onChange, original, help, problems, readOnly }: Props) {
+export function ApiForm({ draft, onChange, original, help: allHelp, problems, readOnly }: Props) {
+  const help = allHelp.fields;
   const creating = original === null;
+  const auth = effectiveAuth(draft);
+  const authProblems = Object.fromEntries(
+    Object.entries(problems)
+      .filter(([key]) => key.startsWith('auth.'))
+      .map(([key, problem]) => [key.slice('auth.'.length), problem]),
+  ) as Partial<Record<AuthField, string>>;
   const summary = summarise(draft);
   const set = <K extends keyof ApiDefinition>(key: K, value: ApiDefinition[K] | undefined) =>
     onChange(withField(draft, key, value));
@@ -103,11 +117,14 @@ export function ApiForm({ draft, onChange, original, help, problems, readOnly }:
             onChange={(event) => set('target_url', event.target.value)}
           />
         </Field>
-        <TargetList
-          value={draft.target_list}
-          onChange={(list) => set('target_list', list)}
+        <LinesField
+          id="target_list"
+          label="Load-balanced targets"
           help={help.target_list}
           problem={problems.target_list}
+          value={draft.target_list}
+          placeholder="One URL per line (optional)"
+          onChange={(list) => set('target_list', list)}
         />
       </Section>
 
@@ -119,7 +136,10 @@ export function ApiForm({ draft, onChange, original, help, problems, readOnly }:
           checked={summary.active}
           onChange={(value) => set('active', value)}
         />
-        <Field id="auth" label="Authentication" help={help.auth}>
+      </Section>
+
+      <Section id={editorAnchor('auth')} title="Authentication">
+        <Field id="auth" label="Mode" help={allHelp.auth[auth.mode].summary || help.auth}>
           <Select
             value={summary.authMode}
             onValueChange={(mode) =>
@@ -138,18 +158,52 @@ export function ApiForm({ draft, onChange, original, help, problems, readOnly }:
               ))}
             </SelectContent>
           </Select>
-          {draft.auth !== undefined &&
-            draft.auth.mode !== 'keyless' &&
-            draft.auth.mode !== original?.auth?.mode && (
-              <p className="text-xs text-warning">
-                {draft.auth.mode} needs settings of its own (keys, issuers, realms); set them in the
-                raw definition before saving.
-              </p>
-            )}
         </Field>
+        <AuthSettings
+          auth={auth}
+          onChange={(next) => set('auth', next)}
+          original={original?.auth}
+          help={allHelp.auth}
+          problems={authProblems}
+          readOnly={readOnly}
+        />
       </Section>
 
-      <Section title="Upstream">
+      <Section id={editorAnchor('ip-filter')} title="IP filter">
+        <LinesField
+          id="allow_ips"
+          label="Allow only"
+          help={help.allow_ips}
+          problem={problems.allow_ips}
+          value={draft.allow_ips}
+          placeholder="One IP or CIDR per line (empty: everyone)"
+          onChange={(value) => set('allow_ips', value)}
+        />
+        <LinesField
+          id="block_ips"
+          label="Block"
+          help={help.block_ips}
+          problem={problems.block_ips}
+          value={draft.block_ips}
+          placeholder="One IP or CIDR per line"
+          onChange={(value) => set('block_ips', value)}
+        />
+      </Section>
+
+      <Section id={editorAnchor('size-limit')} title="Request size limit">
+        <NumberField
+          id="max_request_body_bytes"
+          label="Largest request body (bytes)"
+          help={help.max_request_body_bytes}
+          problem={problems.max_request_body_bytes}
+          value={draft.max_request_body_bytes}
+          min={1}
+          placeholder="no limit"
+          onChange={(value) => set('max_request_body_bytes', value)}
+        />
+      </Section>
+
+      <Section id={editorAnchor(FORWARDER_ID)} title="Upstream">
         <Toggle
           id="preserve_host_header"
           label="Preserve the Host header"
@@ -174,77 +228,33 @@ export function ApiForm({ draft, onChange, original, help, problems, readOnly }:
           max={10}
           onChange={(value) => set('upstream_retries', value)}
         />
+        <Field
+          id="transform_method"
+          label="Method sent upstream"
+          help={help.transform_method}
+          problem={problems.transform_method}
+        >
+          <Select
+            value={draft.transform_method?.toUpperCase() ?? CLIENT_METHOD}
+            onValueChange={(method) =>
+              set('transform_method', method === CLIENT_METHOD ? undefined : method)
+            }
+            disabled={readOnly}
+          >
+            <SelectTrigger id="transform_method" className="w-56 font-mono">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={CLIENT_METHOD}>The client&apos;s method</SelectItem>
+              {TRANSFORM_METHODS.map((method) => (
+                <SelectItem key={method} value={method} className="font-mono">
+                  {method}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
       </Section>
     </fieldset>
-  );
-}
-
-function NumberField({
-  id,
-  label,
-  help,
-  value,
-  min,
-  max,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  help: string;
-  value: number | undefined;
-  min: number;
-  max?: number;
-  onChange: (value: number | undefined) => void;
-}) {
-  const parse = (text: string) => {
-    const parsed = parseWholeNumber(text, min, max);
-    return parsed.ok ? parsed.value : undefined;
-  };
-  const [text, setText] = useSyncedText(value, (v) => (v === undefined ? '' : String(v)), parse);
-  const parsed = parseWholeNumber(text, min, max);
-  return (
-    <Field id={id} label={label} help={help} problem={parsed.ok ? undefined : parsed.problem}>
-      <Input
-        id={id}
-        inputMode="numeric"
-        className="w-40 font-mono"
-        placeholder="g2way default"
-        value={text}
-        onChange={(event) => {
-          setText(event.target.value);
-          const next = parseWholeNumber(event.target.value, min, max);
-          if (next.ok) onChange(next.value);
-        }}
-      />
-    </Field>
-  );
-}
-
-function TargetList({
-  value,
-  onChange,
-  help,
-  problem,
-}: {
-  value: string[] | undefined;
-  onChange: (value: string[] | undefined) => void;
-  help: string;
-  problem?: string;
-}) {
-  const [text, setText] = useSyncedText(value, (v) => (v ?? []).join('\n'), parseTargetList);
-  return (
-    <Field id="target_list" label="Load-balanced targets" help={help} problem={problem}>
-      <Textarea
-        id="target_list"
-        rows={3}
-        className="font-mono text-xs"
-        placeholder="One URL per line (optional)"
-        value={text}
-        onChange={(event) => {
-          setText(event.target.value);
-          onChange(parseTargetList(event.target.value));
-        }}
-      />
-    </Field>
   );
 }

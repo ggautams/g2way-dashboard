@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { applyVersion, CHAIN_SLOTS, chainAnchor, chainFor, type SlotStatus } from './chain';
+import {
+  applyVersion,
+  CHAIN_SLOTS,
+  chainAnchor,
+  chainFor,
+  EDITOR_SLOTS,
+  editorAnchor,
+  FORWARDER_ID,
+  type SlotStatus,
+} from './chain';
 import type { ApiDefinition } from './list';
 
 const base: ApiDefinition = {
@@ -216,5 +225,13 @@ describe('chainFor, versioned', () => {
     const def = applyVersion({ ...base, allow_paths: [{ pattern: '/a' }] }, { allow_paths: [] });
     expect(def.allow_paths).toEqual([]);
     expect(def.versioning).toBeNull();
+  });
+});
+
+describe('editor links', () => {
+  it('names only real slots (or the forwarder), anchored as edit-<id>', () => {
+    const ids = new Set([...CHAIN_SLOTS.map((slot) => slot.id), FORWARDER_ID]);
+    for (const id of EDITOR_SLOTS) expect(ids.has(id), id).toBe(true);
+    expect(editorAnchor('auth')).toBe('edit-auth');
   });
 });

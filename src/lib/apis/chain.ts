@@ -270,6 +270,21 @@ export function chainAnchor(slotId: string, version?: string): string {
 }
 
 /**
+ * The slots (and the forwarder) the designer's Form tab has an editor section
+ * for. Linking runs one way, chain to editor: the Chain tab gives each of
+ * these an "Edit" link to `#editorAnchor(id)`, and the form's section for it
+ * carries that id (`<Section id={editorAnchor(id)}>`). Adding an editor means
+ * adding its slot id here and that `id` to its section; `api-designer.tsx`
+ * switches tabs and scrolls for any `#edit-…` link.
+ */
+export const EDITOR_SLOTS: readonly string[] = ['ip-filter', 'size-limit', 'auth', FORWARDER_ID];
+
+/** The DOM id of the form section editing a slot (see {@link EDITOR_SLOTS}). */
+export function editorAnchor(slotId: string): string {
+  return `edit-${slotId}`;
+}
+
+/**
  * - `on`: the definition configures it (or it is always present).
  * - `off`: absent from this chain.
  * - `gateway`: depends on gateway flags the dashboard cannot see.

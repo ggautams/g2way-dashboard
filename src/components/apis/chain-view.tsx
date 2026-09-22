@@ -2,12 +2,24 @@ import { Badge } from '@/components/ui/badge';
 import {
   chainAnchor,
   chainFor,
+  EDITOR_SLOTS,
+  editorAnchor,
   FORWARDER_ID,
   type ForwarderStatus,
   type SlotState,
   type SlotStatus,
 } from '@/lib/apis/chain';
 import type { ApiDefinition } from '@/lib/apis/list';
+
+/** A link to the form section editing `slotId`, when there is one (`EDITOR_SLOTS`). */
+function EditLink({ slotId }: { slotId: string }) {
+  if (!EDITOR_SLOTS.includes(slotId)) return null;
+  return (
+    <a href={`#${editorAnchor(slotId)}`} className="ml-auto text-xs text-accent hover:underline">
+      Edit
+    </a>
+  );
+}
 
 const STATE_LABEL: Record<SlotState, string> = {
   on: 'on',
@@ -33,6 +45,7 @@ function Slot({ status, version }: { status: SlotStatus; version?: string }) {
           {STATE_LABEL[state]}
         </Badge>
         <span className="font-mono text-xs text-muted">{slot.layer}</span>
+        <EditLink slotId={slot.id} />
       </div>
       <p className="mt-1 pl-8 text-xs text-muted">
         {reason} {slot.summary}
@@ -47,12 +60,15 @@ function Forwarder({ forwarder, version }: { forwarder: ForwarderStatus; version
       id={chainAnchor(FORWARDER_ID, version)}
       className="rounded-md border border-dashed border-border px-3 py-2"
     >
-      <p className="text-sm font-medium">
-        Forwarder{' '}
-        <span className="text-xs font-normal text-muted">
-          (not a slot: proxies to the upstream once every slot above has passed)
-        </span>
-      </p>
+      <div className="flex flex-wrap items-baseline gap-2">
+        <p className="text-sm font-medium">
+          Forwarder{' '}
+          <span className="text-xs font-normal text-muted">
+            (not a slot: proxies to the upstream once every slot above has passed)
+          </span>
+        </p>
+        <EditLink slotId={FORWARDER_ID} />
+      </div>
       <p className="mt-1 text-xs text-muted">
         {forwarder.target === null ? 'Forwards nothing.' : `Upstream: ${forwarder.target}.`}{' '}
         {forwarder.notes.join(' ')}
