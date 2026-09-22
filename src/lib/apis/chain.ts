@@ -277,7 +277,15 @@ export function chainAnchor(slotId: string, version?: string): string {
  * adding its slot id here and that `id` to its section; `api-designer.tsx`
  * switches tabs and scrolls for any `#edit-…` link.
  */
-export const EDITOR_SLOTS: readonly string[] = ['ip-filter', 'size-limit', 'auth', FORWARDER_ID];
+export const EDITOR_SLOTS: readonly string[] = [
+  'ip-filter',
+  'path-policy',
+  'size-limit',
+  'auth',
+  'rate-limit',
+  'mock',
+  FORWARDER_ID,
+];
 
 /** The DOM id of the form section editing a slot (see {@link EDITOR_SLOTS}). */
 export function editorAnchor(slotId: string): string {

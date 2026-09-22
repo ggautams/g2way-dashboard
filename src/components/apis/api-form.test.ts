@@ -30,9 +30,58 @@ describe('ApiForm', () => {
     expect(source).toContain('TRANSFORM_METHODS.map(');
   });
 
+  it('edits all six path-rule lists through the shared RuleList', () => {
+    for (const list of [
+      'block_paths',
+      'allow_paths',
+      'ignore_auth_paths',
+      'endpoint_rate_limits',
+      'mock_responses',
+      'url_rewrites',
+    ]) {
+      expect(source, list).toContain(`{...rules('${list}')}`);
+    }
+    expect(source).toContain('extra={RateExtra}');
+    expect(source).toContain('extra={MockExtra}');
+    expect(source).toContain('extra={RewriteExtra}');
+    expect(source).toContain('problemsOf(problems, list)');
+  });
+
   it('imports nothing server-only (it is a client component)', () => {
     expect(source.startsWith("'use client';")).toBe(true);
     expect(source).not.toMatch(/field-help|designer\/help|server-client|lib\/g2\//);
+  });
+});
+
+describe('RuleList', () => {
+  const source = read('rule-list.tsx');
+  const fields = read('rule-fields.tsx');
+
+  it('keeps order (first match wins) and shows empty methods as every method', () => {
+    expect(source).toContain('moveBy(rules, index, by)');
+    expect(source).toContain('describeMethods(value)');
+    expect(source).toContain('TRANSFORM_METHODS');
+  });
+
+  it('has an inherited-from-base state for version overrides: absent inherits, [] clears', () => {
+    expect(source).toContain('const override = inherited !== undefined');
+    expect(source).toMatch(/Inherited from base/);
+    expect(source).toContain('next.length === 0 && !override ? undefined : next');
+    expect(source).toMatch(/Cleared for this version/);
+  });
+
+  it('renders kind settings with module-level components, so inputs keep focus', () => {
+    for (const name of ['RewriteExtra', 'MockExtra', 'RateExtra']) {
+      expect(fields).toContain(`export const ${name}: RuleExtra<`);
+    }
+    expect(fields).toContain('<LimitInput');
+  });
+
+  it('imports nothing server-only', () => {
+    for (const text of [source, fields]) {
+      expect(text.startsWith("'use client';")).toBe(true);
+      expect(text).not.toMatch(/field-help|designer\/help|server-client|lib\/g2\//);
+    }
   });
 });
 

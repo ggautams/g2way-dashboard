@@ -62,7 +62,8 @@
       "surfaces": [
         "Middleware designer (M5)",
         "Chain view (M5): applyVersion in src/lib/apis/chain.ts mirrors VersioningConfig::apply",
-        "Form checks (M5): TRANSFORM_METHODS and isIpOrCidr in src/lib/apis/auth.ts mirror transform.rs and security.rs"
+        "Form checks (M5): TRANSFORM_METHODS and isIpOrCidr in src/lib/apis/auth.ts mirror transform.rs and security.rs",
+        "Path-rule editors (M5): ruleProblems, HOP_BY_HOP and MOCK_DEFAULT_STATUS in src/lib/apis/rules.ts mirror PathRule/MockResponse/EndpointRateLimit::validate (endpoints.rs) and UrlRewriteRule::validate (transform.rs)"
       ],
       "onChange": "New transform or rule kinds need editors; check whether validation rules changed. A new VersionOverrides field, or a change to which fields apply() replaces, must be reflected in applyVersion."
     },

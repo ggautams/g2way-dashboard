@@ -15,6 +15,7 @@ import {
   type AuthHelp,
 } from './auth';
 import type { ApiDefinition, AuthMode } from './list';
+import { listProblems, RULE_LISTS, type RuleHelp, type RuleProblemKey } from './rules';
 
 /** The fields the structured form edits; the raw editor covers the rest. */
 export const FORM_FIELDS = [
@@ -33,16 +34,25 @@ export const FORM_FIELDS = [
   'max_request_body_bytes',
   'allow_ips',
   'block_ips',
+  'block_paths',
+  'allow_paths',
+  'ignore_auth_paths',
+  'endpoint_rate_limits',
+  'mock_responses',
+  'url_rewrites',
 ] as const satisfies readonly (keyof ApiDefinition)[];
 
 export type FormField = (typeof FORM_FIELDS)[number];
 
-/** A problem's key: a form field, or one auth setting as `auth.<setting>`. */
-export type ProblemKey = FormField | `auth.${AuthField}`;
+/**
+ * A problem's key: a form field, one auth setting as `auth.<setting>`, or one
+ * rule's setting as `<list>.<index>.<setting>` (`RuleProblemKey`).
+ */
+export type ProblemKey = FormField | `auth.${AuthField}` | RuleProblemKey;
 export type DraftProblems = Partial<Record<ProblemKey, string>>;
 
-/** The form's help text: g2way's rustdoc per field, and per auth mode and setting. */
-export type ApiHelp = { fields: Record<FormField, string>; auth: AuthHelp };
+/** The form's help text: g2way's rustdoc per field, per auth mode and setting, and per rule setting. */
+export type ApiHelp = { fields: Record<FormField, string>; auth: AuthHelp; rules: RuleHelp };
 
 /** A new API: the four required fields, empty, and active as g2way defaults it. */
 export function newDraft(): ApiDefinition {
@@ -155,7 +165,8 @@ function isHttpUrl(text: string): boolean {
  * What the form can tell before the gateway does: the required fields and the
  * rules the contract states (`listen_path` starts with `/`, targets are
  * absolute http(s) URLs, `ApiDefinition::validate` and `AuthConfig::validate`
- * in `api_definition.rs`). The gateway's own validation is the authority; its
+ * in `api_definition.rs`, the path rules' `validate` in `endpoints.rs` and
+ * `transform.rs`). The gateway's own validation is the authority; its
  * 400 message is shown verbatim on save.
  */
 export function draftProblems(draft: ApiDefinition): DraftProblems {
@@ -184,5 +195,6 @@ export function draftProblems(draft: ApiDefinition): DraftProblems {
   for (const [field, problem] of Object.entries(authProblems(draft.auth))) {
     problems[`auth.${field as AuthField}`] = problem;
   }
+  for (const list of RULE_LISTS) Object.assign(problems, listProblems(list, draft[list]));
   return problems;
 }

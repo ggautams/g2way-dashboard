@@ -71,7 +71,10 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       (unversioned, versioned and udg definitions; anchors resolve), its
       "Edit" links switching to the Form tab and scrolling, and the 2a editors
       (each auth mode's settings, the hs256 secret shown as hidden to a viewer,
-      Radix selects disabled read-only, IP lists, size limit, method) (M1 and M2
+      Radix selects disabled read-only, IP lists, size limit, method), and the
+      2b rule lists (add, reorder, remove; method toggles; a mock's headers and
+      status; an endpoint limit's rate; URL rewrites in Upstream; focus kept
+      while typing in a rule's settings; locked for a viewer) (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23, twice. `make serve-scratch` is the one-step way to run the
       pass: a production build on :3100 against a fresh temp-dir SQLite
@@ -149,9 +152,12 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
   - [x] 2a. Auth mode settings (the full `AuthConfig` per mode: `auth_token`,
         `jwt`, `oidc`, `hmac`, `basic_auth`, `mtls`, `keyless`), method
         transform, request size limit, IP allow/deny
-  - [ ] 2b. A shared path-rule list editor (pattern + methods) used for
+  - [x] 2b. A shared path-rule list editor (pattern + methods) used for
         allow/block/ignore paths, URL rewrites, mock responses, endpoint rate
         limits
+  - [ ] 2b-follow-up. Check rule patterns with g2way's own regex engine
+        instead of the browser's best-effort translation — **blocked**: no
+        validate-only endpoint (`UPSTREAM.md`)
   - [ ] 2c. Header transforms, body transforms (minijinja rules +
         `max_response_body_bytes`), CORS
   - [ ] 2d. Versioning (`VersioningConfig`; each version's overrides reuse the
@@ -1260,3 +1266,42 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     the map, so chain.ts keeps its assumption.
   - Not run in a browser; added to the open M2 browser-pass box.
   - Next: 2b, the shared path-rule list editor.
+- feat(M5): editors 2b: the shared path-rule list editor.
+  - `src/lib/apis/rules.ts` is the pure model for the six rule lists
+    (`RULE_LISTS`, each also a `VersionOverrides` field). `ruleProblems`
+    mirrors `PathRule`/`MockResponse`/`EndpointRateLimit::validate`
+    (endpoints.rs) and `UrlRewriteRule::validate` (transform.rs): methods from
+    `TRANSFORM_METHODS`, rewrite starts with `/`, mock status 100–599, header
+    names are tokens, no hop-by-hop headers (`HOP_BY_HOP`), no control bytes
+    in values, rate fields at least 1. `draftProblems` reports them as
+    `<list>.<index>.<setting>`; `problemsOf(problems, list)` reads them back.
+  - **Regex dialect:** g2way compiles with Rust's `regex` crate. `regexProblem`
+    reports look-around and backreferences (JS accepts, Rust refuses),
+    translates `(?P<name>` and inline flag groups, gives up silently on
+    verbose mode and nested classes, then compiles in lenient non-`u` JS.
+    It errs towards silence: Rust is stricter in places (bare `{`, unknown
+    escapes) and the gateway's 400 has the last word. Exact checking needs
+    a validate-only endpoint: new `UPSTREAM.md` item and an open M5 box.
+  - New rules start as `^<listen_path>`, not the empty regex (which matches
+    everything). Methods are toggles; none means every method and is written
+    as no `methods` field, as g2way serialises it. Serde default
+    `MOCK_DEFAULT_STATUS` = 200 is a placeholder.
+  - Components: `RuleList<R>` (`src/components/apis/rule-list.tsx`) is the
+    generic ordered editor (pattern, `MethodPicker`, up/down/remove, per-kind
+    `extra`). Kind settings are module-level components in `rule-fields.tsx`:
+    `RewriteExtra`, `MockExtra`, `RateExtra`. They must stay module-level; a
+    function built per render remounts the inputs and loses focus.
+    `LimitInput` is now exported from `designer/limits.tsx` for the rate.
+  - **For 2d:** pass `inherited={baseRules}` to `RuleList` for a version
+    override. Absent/`null` value then shows "Inherited from base" with an
+    "Override for this version" button; emptying keeps `[]` ("cleared for
+    this version"), and "Inherit from base" writes `undefined`. Use a
+    per-version `id` (e.g. `v2.allow_paths`) and per-version problem keys.
+  - ADR-0010: mock headers go to clients, so they are not a secret path, but
+    the name fallback can still mask a value (`X-Api-Key`). `ruleProblems`
+    refuses a masked value, like `authProblems` does.
+  - Chain links: `path-policy`, `rate-limit` and `mock` joined `EDITOR_SLOTS`.
+    URL rewrites sit in the Upstream (forwarder) section. `watch.json`'s
+    traffic-middleware area names rules.ts.
+  - Not run in a browser; added to the open M2 browser-pass box.
+  - Next: 2c, header/body transforms and CORS.

@@ -134,3 +134,22 @@ describe('draftProblems', () => {
     ).toEqual({ 'auth.secret': 'hs256 needs a secret.' });
   });
 });
+
+describe('draftProblems: path rules', () => {
+  it('reports each rule’s problem under <list>.<index>.<setting>', () => {
+    const problems = draftProblems({
+      ...stored,
+      auth: undefined,
+      block_paths: [{ pattern: '^/ok$' }, { pattern: '(' }],
+      url_rewrites: [{ pattern: '^/a', rewrite: 'b' }],
+      mock_responses: [{ pattern: '^/m', status: 42 }],
+      endpoint_rate_limits: [{ pattern: '^/e', rate: { requests: 1, per_seconds: 0 } }],
+    });
+    expect(Object.keys(problems).sort()).toEqual([
+      'block_paths.1.pattern',
+      'endpoint_rate_limits.0.rate',
+      'mock_responses.0.status',
+      'url_rewrites.0.rewrite',
+    ]);
+  });
+});

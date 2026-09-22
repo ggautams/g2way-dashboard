@@ -82,7 +82,7 @@ export function LimitEditor<K extends string>({
   );
 }
 
-function LimitInput<K extends string>({
+export function LimitInput<K extends string>({
   id,
   field,
   value,

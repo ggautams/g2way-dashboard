@@ -19,8 +19,20 @@ import {
   type DraftProblems,
 } from '@/lib/apis/draft';
 import { AUTH_MODES, summarise, type ApiDefinition, type AuthMode } from '@/lib/apis/list';
+import {
+  newRule,
+  problemsOf,
+  type EndpointRateLimit,
+  type MockResponse,
+  type PathRule,
+  type RuleList as RuleListName,
+  type RuleOf,
+  type UrlRewriteRule,
+} from '@/lib/apis/rules';
 import { AuthSettings } from './auth-settings';
 import { LinesField, NumberField } from './form-inputs';
+import { MockExtra, RateExtra, RewriteExtra } from './rule-fields';
+import { RuleList } from './rule-list';
 
 /** The Select's value for "no override": Radix items cannot have an empty value. */
 const CLIENT_METHOD = 'client';
@@ -54,6 +66,17 @@ export function ApiForm({ draft, onChange, original, help: allHelp, problems, re
   const summary = summarise(draft);
   const set = <K extends keyof ApiDefinition>(key: K, value: ApiDefinition[K] | undefined) =>
     onChange(withField(draft, key, value));
+  // What every rule list shares: its field, help, problems and new-rule shape.
+  const rules = <L extends RuleListName>(list: L) => ({
+    id: list,
+    help: help[list],
+    value: draft[list] as readonly RuleOf<L>[] | undefined,
+    onChange: (value: RuleOf<L>[] | undefined) => set(list, value as ApiDefinition[L] | undefined),
+    newRule: () => newRule(list, draft.listen_path),
+    problems: problemsOf(problems, list),
+    ruleHelp: allHelp.rules,
+    readOnly,
+  });
 
   return (
     <fieldset disabled={readOnly} className="flex flex-col gap-8 disabled:opacity-90">
@@ -190,6 +213,29 @@ export function ApiForm({ draft, onChange, original, help: allHelp, problems, re
         />
       </Section>
 
+      <Section id={editorAnchor('path-policy')} title="Path rules">
+        <p className="text-xs text-muted md:col-span-2">
+          Each pattern is a regex searched against the full client path, listen path included
+          (anchor it with ^ and $). Rules are tried in order and the first match wins. A block
+          always wins, then the allow list, then ignore-auth.
+        </p>
+        <RuleList<PathRule>
+          {...rules('block_paths')}
+          label="Block"
+          empty="Nothing is blocked by path."
+        />
+        <RuleList<PathRule>
+          {...rules('allow_paths')}
+          label="Allow only"
+          empty="Every path is allowed."
+        />
+        <RuleList<PathRule>
+          {...rules('ignore_auth_paths')}
+          label="Skip authentication"
+          empty="Every path authenticates."
+        />
+      </Section>
+
       <Section id={editorAnchor('size-limit')} title="Request size limit">
         <NumberField
           id="max_request_body_bytes"
@@ -200,6 +246,24 @@ export function ApiForm({ draft, onChange, original, help: allHelp, problems, re
           min={1}
           placeholder="no limit"
           onChange={(value) => set('max_request_body_bytes', value)}
+        />
+      </Section>
+
+      <Section id={editorAnchor('rate-limit')} title="Endpoint rate limits">
+        <RuleList<EndpointRateLimit>
+          {...rules('endpoint_rate_limits')}
+          label="Limits for all clients combined"
+          empty="Only each key's own rate and quota apply (set on keys and policies)."
+          extra={RateExtra}
+        />
+      </Section>
+
+      <Section id={editorAnchor('mock')} title="Mock responses">
+        <RuleList<MockResponse>
+          {...rules('mock_responses')}
+          label="Answer without the upstream"
+          empty="Every request that gets this far is forwarded."
+          extra={MockExtra}
         />
       </Section>
 
@@ -254,6 +318,13 @@ export function ApiForm({ draft, onChange, original, help: allHelp, problems, re
             </SelectContent>
           </Select>
         </Field>
+        <RuleList<UrlRewriteRule>
+          {...rules('url_rewrites')}
+          label="URL rewrites"
+          empty="The listen path is stripped (or not) and the rest joined onto the target."
+          methods={false}
+          extra={RewriteExtra}
+        />
       </Section>
     </fieldset>
   );

@@ -129,6 +129,18 @@ commit this project is waiting on.
       countdown; `src/lib/keys/usage.test.ts` fails as soon as the spec gains a
       `usage` path. _Blocks one task in M4._
 
+- [ ] **No validate-only endpoint for definitions.** _Found 2026-09-23 (M5)._
+      Every rule `pattern` is compiled with Rust's `regex` crate
+      (`endpoints.rs` `validate_pattern`, `UrlRewriteRule::validate`), whose
+      dialect the browser cannot reproduce. `regexProblem` in
+      `src/lib/apis/rules.ts` is a best-effort translation that errs towards
+      silence, so some bad patterns are only caught by the save's `400`. Ask
+      for `POST /g2/apis/validate` (or `?dry_run=true` on the write paths)
+      that runs `ApiDefinition::validate` and answers `204` or the usual
+      `{"error": …}` without storing anything. Then the designer can check
+      a draft (debounced) through the BFF before save. _Blocks one M5 box
+      (2b follow-up)._
+
 - [ ] **`/g2/stats` is process-local** and resets on restart, so with more than
       one replica it is a per-pod sample rather than a cluster total. Cluster-wide
       numbers must come from the analytics feed or Prometheus. Shapes M6; not a

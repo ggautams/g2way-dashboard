@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FORM_FIELDS } from '@/lib/apis/draft';
 import { AUTH_FIELDS } from '@/lib/apis/auth';
-import { authHelp, fieldHelp } from '@/lib/apis/field-help';
+import { authHelp, fieldHelp, ruleHelp } from '@/lib/apis/field-help';
 import { AUTH_MODES } from '@/lib/apis/list';
 import { accessFieldHelp } from './access-help';
 import { firstParagraph, propertyHelp, schemaHelp } from './help';
@@ -11,6 +11,15 @@ describe('fieldHelp', () => {
     const help = fieldHelp();
     expect(Object.keys(help).sort()).toEqual([...FORM_FIELDS].sort());
     expect(help.listen_path).toMatch(/begin with/);
+  });
+});
+
+describe('ruleHelp', () => {
+  it('has g2way’s description for every path-rule setting', () => {
+    const help = ruleHelp();
+    for (const [key, text] of Object.entries(help)) expect(text, key).not.toBe('');
+    expect(help.methods).toMatch(/Empty = every method/);
+    expect(help.rewrite).toMatch(/start with/);
   });
 });
 
