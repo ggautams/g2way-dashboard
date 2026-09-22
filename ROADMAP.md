@@ -59,8 +59,11 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       others (audited, obeying ADR-0005's who-may-manage-whom rules)
 - [x] Run `make test-pg` against a live Postgres (never run yet; only PGlite has
       exercised the pg path, and only real pg races concurrent connections)
-- [ ] Browser pass over `/setup`, `/login`, `/users`, `/audit` and sign-out
-      (M1 and M2 were only smoke-tested over HTTP; the extension was never connected)
+- [ ] Browser pass over `/setup`, `/login`, `/users` (now including password
+      reset and the row-error fix), `/account`, `/audit` and sign-out (M1 and M2
+      were only smoke-tested over HTTP; the extension was not connected on
+      2026-09-23 either — run `next build && next start -p 3100` with a scratch
+      `DATABASE_URL`, since `next dev` refuses a second server per checkout)
 - [x] Bug: on `/users`, an error on one row's form lingers after the other form
       on the same row succeeds
 - [x] `org-literal.test.ts` only follows `function`-declared org-taking helpers;
@@ -602,3 +605,10 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   run covers `src/lib/db` only; the throttle and password suites exercise pg
   through PGlite. The app itself has still never booted on `DATABASE_URL=postgres://…`.
   That belongs with the M11 Docker and deploy work. Next: the browser pass.
+
+- Browser pass attempted and **not done**: the Claude-in-Chrome
+  extension was not connected. Box stays open, with its scope widened to cover
+  this session's UI (password reset, the row fix, `/account`). **Surprise:**
+  Next 16 refuses a second `next dev` in the same checkout, so while a dev
+  server holds :3000 the pass needs a production server on another port. Moving
+  on to M3; the open box does not block the read-only API list.
