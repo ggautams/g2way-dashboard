@@ -89,7 +89,21 @@ commit this project is waiting on.
       works. Then proxy it and retire `src/lib/g2/rotate-key.ts`; its test fails
       as soon as the spec gains a `/rotate` path. Related, the same gap as the
       error-envelope item: `GET /g2/keys` and the `POST /g2/keys` 201 declare no
-      body, so `src/lib/keys/session.ts` parses both at runtime. _Not a blocker._
+      body, so `src/lib/keys/session.ts` parses both at runtime. _Blocks one
+      task in M4 (native rotate); the BFF orchestration works meanwhile._
+
+- [ ] **No key listing with sessions, or at least aliases.** _Found 2026-09-23
+      (M4)._ `GET /g2/keys` answers hashes only (see the item above), so
+      searching `/keys` by alias, policy or state costs one
+      `GET /g2/keys/{hash}?hashed=true` per key. The dashboard caps that at
+      `KEY_SCAN_LIMIT` = 200 reads per search (`src/lib/g2/keys.ts`). Past the
+      cap, the search and "select every match" cover only the keys read, and
+      say so. Ask for `GET /g2/keys?include=summary` (or a separate path),
+      paged, that returns per hash the non-secret fields a list needs:
+      `alias`, `active`, `expires`, `apply_policies`. It must never include
+      `hmac`/`basic_auth`. Server-side `alias`/`policy`/`active` filters would
+      do as well. Then `loadKeySearch`/`loadKeyMatches` drop the per-key reads
+      and the cap. _Blocks one task in M4._
 
 - [ ] **`GET /g2/apis` lists stored definitions only.** _Found 2026-09-23 (M4)._
       Definitions loaded from `--apps-dir` files (ADR-0002) never appear in it,

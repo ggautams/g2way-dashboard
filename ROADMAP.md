@@ -60,9 +60,14 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Run `make test-pg` against a live Postgres (never run yet; only PGlite has
       exercised the pg path, and only real pg races concurrent connections)
 - [ ] Browser pass over `/setup`, `/login`, `/users` (now including password
-      reset and the row-error fix), `/account`, `/audit` and sign-out — and M3's
+      reset and the row-error fix), `/account`, `/audit` and sign-out — M3's
       `/apis` designer: Monaco has only been built, never run (workers, theme,
-      inline schema markers) (M1 and M2
+      inline schema markers) — and M4's surfaces: `/policies` (list, designer,
+      access matrix, bulk delete), `/keys` (create and the raw-key-once dialog,
+      rotate, revoke, search and filter, bulk actions including "select every
+      match", orphan prune), `/keys/view/[hash]` (metadata, Usage, Effective
+      access, masked secrets as a viewer/editor) and the History tab with
+      rollback on APIs and policies (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23, twice. `make serve-scratch` is the one-step way to run the
       pass: a production build on :3100 against a fresh temp-dir SQLite
@@ -98,7 +103,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Per-API access matrix, rate and quota editors
 - [x] Dashboard-side key metadata (label, owner, notes) — the gateway lists
       hashes only, so inventory lives here
-- [ ] Live quota and rate-limit usage per key — **blocked**: g2way has no usage endpoint
+- [ ] Live quota and rate-limit usage per key — **blocked**: no per-key usage endpoint
       (`UPSTREAM.md`); `/keys/view/[hash]` shows the configured limits in effect meanwhile
 - [x] "What does this key allow" resolver that folds `apply_policies`
 - [x] Bulk operations and search by alias
@@ -109,12 +114,13 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       resolves the filter's whole match set server-side (the search loader's
       scan, same 200-read cap), never includes a key whose read failed, and
       runs it in requests of at most 100
-- [ ] Complete alias/policy/state search past 200 keys: needs g2way to list
-      sessions, or at least aliases, in one call (`UPSTREAM.md`, hashes-only
-      listing); until then `/keys` says when a search stopped short
+- [ ] Complete alias/policy/state search past 200 keys — **blocked**: no key
+      listing with sessions or aliases, only hashes (`UPSTREAM.md`); until then
+      `/keys` and "select every match" say when a search stopped short
 - [x] Policy history tab and rollback (versions are already kept, ADR-0008)
-- [ ] Replace the BFF rotate orchestration with g2way's native atomic rotate once it
-      exists (`UPSTREAM.md`, ADR-0009); blocked upstream
+- [ ] Replace the BFF rotate orchestration with g2way's native atomic rotate —
+      **blocked**: no atomic rotate endpoint yet (`UPSTREAM.md`, ADR-0009); the
+      BFF's three-call rotate works meanwhile and says when it half-fails
 - [x] Keys carry live secrets too: `hmac.secret` and `basic_auth.password_hash`
       are now masked (`[secret hidden]`) for every role without `keys:write`, in
       BFF reads and on `/keys/view/[hash]` (ADR-0010)
@@ -1142,3 +1148,31 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     Today the cap means at most two requests.
   - Not run in a browser (the open M2 browser pass covers this too).
   - Next: close out M4 (the rest is blocked upstream), then M5.
+
+- docs(M4): **M4 complete.**
+  - Landed: policy CRUD over `/g2/policies`. Key create, list, rotate and
+    revoke, with the raw key shown once. The per-API access matrix and the
+    rate and quota editors, shared by policies and keys. Dashboard-side key
+    metadata (label, owner, notes; ADR-0009 §7). The "what does this key
+    allow" resolver. `/keys` search and filter. Bulk key and policy
+    operations, with "select every match" across pages. Orphaned-metadata
+    pruning. The policy History tab with rollback. Secret masking for
+    read-only roles (ADR-0010), extended to URL-embedded credentials and the
+    audit redactor.
+  - Blocked upstream, kept open in M4 with a matching `UPSTREAM.md` TODO:
+    - live quota and rate usage per key (no per-key usage endpoint);
+    - complete search past 200 keys (no key listing with sessions or aliases;
+      the TODO was added today);
+    - native atomic rotate (no rotate endpoint; that TODO now says it blocks
+      this task).
+    - Tripwires: `usage.test.ts` and `rotate-key.test.ts` fail as soon as the
+      spec gains their path. The search item has none, because a listing
+      change can take many shapes; the `admin-api` drift check flags it.
+  - Open from M2: the browser pass. Its box now also lists M4's surfaces:
+    `/policies`, `/keys` (create and the raw-key dialog, rotate, bulk, search,
+    orphans), the key view, and the History tab. None of M4 has run in a
+    browser.
+  - Follow-ups filed: `UPSTREAM.md` gained the key-listing-with-sessions item,
+    and its rotate item now names the M4 task it blocks. Nothing moved to a
+    later milestone.
+  - Next: M5, the traffic and middleware designer.
