@@ -9,6 +9,7 @@
 
 import type { ApiDefinition } from './list';
 import { serialize, type RawFormat } from '@/lib/designer/raw';
+import { SECRET_MASK, findMasked } from '@/lib/secrets/redact';
 
 export type BundleFile = { path: string; content: string };
 
@@ -46,8 +47,16 @@ export function bundleFiles(
     'the same api_id or listen_path, across files and storage alike, so load these into a',
     'gateway whose storage does not already hold the same APIs.',
     '',
-    'Definitions are exported unredacted: they may contain secrets (JWT keys, basic-auth',
-    'hashes). Treat this archive like the gateway configuration it is.',
+    ...(apis.some((api) => findMasked(api).length > 0)
+      ? [
+          `Secrets are hidden: they read "${SECRET_MASK}", because the exporting role cannot`,
+          'write API definitions (ADR-0010). These definitions will not authenticate or reach',
+          'their upstreams as stored; export again with apis:write for a deployable bundle.',
+        ]
+      : [
+          'Definitions are exported unredacted: they may contain secrets (JWT keys, upstream',
+          'credentials). Treat this archive like the gateway configuration it is.',
+        ]),
     '',
   ].join('\n');
   return [{ path: 'README.md', content: readme }, ...files];

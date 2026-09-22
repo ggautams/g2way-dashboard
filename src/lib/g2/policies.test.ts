@@ -53,7 +53,9 @@ describe('loadPolicies', () => {
 describe('loadPolicy', () => {
   it('fetches one policy by id, path-encoded and org-scoped', async () => {
     const gw = gateway(() => Response.json(gold));
-    expect((await loadPolicy('dev', 'a b', { registry, fetch: gw.fetch })).policy).toEqual({
+    expect(
+      (await loadPolicy('dev', 'a b', 'editor', { registry, fetch: gw.fetch })).policy,
+    ).toEqual({
       ok: true,
       value: gold,
     });
@@ -62,7 +64,7 @@ describe('loadPolicy', () => {
 
   it('settles a 404 with its status, for the page to turn into not-found', async () => {
     const gw = gateway(() => Response.json({ error: 'policy not found' }, { status: 404 }));
-    expect((await loadPolicy('dev', 'x', { registry, fetch: gw.fetch })).policy).toEqual({
+    expect((await loadPolicy('dev', 'x', 'editor', { registry, fetch: gw.fetch })).policy).toEqual({
       ok: false,
       error: 'policy not found',
       status: 404,

@@ -60,7 +60,7 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
   let nowSecs = 0;
   try {
     const selected = await selectedEnvironmentId();
-    const item = await loadKey(selected, hash);
+    const item = await loadKey(selected, hash, user.role);
     session = item.session;
     nowSecs = Math.floor(item.fetchedAt / 1000);
     environment = {
@@ -74,7 +74,7 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
         loadPolicyChoices(item.environment),
         policyId === undefined
           ? null
-          : loadPolicy(item.environment, policyId).then((result) => result.policy),
+          : loadPolicy(item.environment, policyId, user.role).then((result) => result.policy),
       ]);
       apis = can(user.role, 'apis:read')
         ? await loadApiChoices(item.environment)

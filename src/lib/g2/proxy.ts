@@ -27,6 +27,14 @@ import { GatewayError, describeFetchError } from './errors';
 import { operationPermission } from './operation-permissions';
 import { isBodyOrgScoped, scopeBody, withOrgId } from './org-scope';
 import { ADMIN_SECRET_HEADER, GATEWAY_TIMEOUT_MS } from './server-client';
+import {
+  REVEAL_PERMISSION,
+  SECRET_MASK,
+  findMasked,
+  mayReveal,
+  redactEachFor,
+  type SecretKind,
+} from '@/lib/secrets/redact';
 
 export { ENVIRONMENT_HEADER };
 
@@ -51,9 +59,26 @@ export { ENVIRONMENT_HEADER };
  * so no gateway write goes unrecorded — and the row is completed with the
  * gateway's answer, the state before (a GET of the same item) and after (a GET
  * once it succeeded).
+ *
+ * Secrets (ADR-0010): a GET of API definitions, policies or a key session is
+ * redacted for a role without that kind's write permission, and a write whose
+ * body carries the redaction mask is refused (`denied`, 422), so a masked
+ * value can never replace a real secret.
  */
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * GET operations whose answer carries a kind's secrets, one record or a list
+ * of them (ADR-0010). `GET /g2/keys` lists hashes only, so it is not here.
+ */
+export const SECRET_READS: Readonly<Record<string, SecretKind>> = {
+  '/g2/apis': 'api',
+  '/g2/apis/{id}': 'api',
+  '/g2/policies': 'policy',
+  '/g2/policies/{id}': 'policy',
+  '/g2/keys/{key}': 'key',
+};
 
 /** Browser request headers worth passing on. Everything else — cookies included — is dropped. */
 const FORWARDED_REQUEST_HEADERS = ['accept', 'content-type'];
@@ -252,7 +277,7 @@ export async function proxyToGateway(
     : null;
   const audit = deps.audit ?? databaseAuditSink();
   /** A refused write: recorded as `denied` (best effort — nothing reached the gateway), then 403. */
-  const deny = async (message: string) => {
+  const deny = async (message: string, status = 403) => {
     if (write !== null) {
       await recordLoudly(audit, {
         actor,
@@ -263,7 +288,7 @@ export async function proxyToGateway(
         notes: write.notes,
       });
     }
-    return errorResponse(403, message);
+    return errorResponse(status, message);
   };
 
   const permission = operationPermission(method, endpoint.path);
@@ -324,6 +349,18 @@ export async function proxyToGateway(
     if (scoped.body !== text) body = new TextEncoder().encode(scoped.body).buffer;
   }
 
+  if (write !== null && body !== undefined) {
+    const masked = maskedIn(body);
+    if (masked.length > 0) {
+      return deny(
+        `refused: the body carries the redaction mask "${SECRET_MASK}" at ${masked.join(', ')}; ` +
+          'writing it would replace the real secret with the mask. It comes from a read by a role ' +
+          'that may not see secrets: re-read the resource with write access and edit the real value',
+        422,
+      );
+    }
+  }
+
   if (write !== null) {
     return auditedWrite({
       write,
@@ -369,7 +406,47 @@ export async function proxyToGateway(
     const value = upstream.headers.get(name);
     if (value !== null) responseHeaders.set(name, value);
   }
+  const secretKind = method === 'GET' ? SECRET_READS[endpoint.path] : undefined;
+  if (secretKind !== undefined && upstream.ok && !mayReveal(role, secretKind)) {
+    return redactedRead(upstream, secretKind, role, responseHeaders, target.id);
+  }
   return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+}
+
+// ---- secret visibility (ADR-0010) --------------------------------------------
+
+/**
+ * A successful secret-bearing read, redacted for `role`. It fails closed: a
+ * body that is not JSON cannot be redacted, so it is not passed on.
+ */
+async function redactedRead(
+  upstream: Response,
+  kind: SecretKind,
+  role: AuditActor['role'],
+  headers: Headers,
+  environment: string,
+): Promise<Response> {
+  const json = parseJson(await upstream.arrayBuffer());
+  if (json === null) {
+    return errorResponse(
+      502,
+      `the gateway's answer is not JSON, so its secrets cannot be hidden from the ${role} role ` +
+        `(no ${REVEAL_PERMISSION[kind]}); it was not passed on`,
+      { [ENVIRONMENT_HEADER]: environment },
+    );
+  }
+  headers.set('content-type', 'application/json');
+  return new Response(JSON.stringify(redactEachFor(role, kind, json)), {
+    status: upstream.status,
+    headers,
+  });
+}
+
+/** Where a write body carries {@link SECRET_MASK}: parsed paths, or the body itself if not JSON. */
+function maskedIn(body: ArrayBuffer): string[] {
+  const json = parseJson(body);
+  if (json !== null) return findMasked(json);
+  return new TextDecoder().decode(body).includes(SECRET_MASK) ? ['(the body)'] : [];
 }
 
 // ---- audited writes (ADR-0006) ---------------------------------------------

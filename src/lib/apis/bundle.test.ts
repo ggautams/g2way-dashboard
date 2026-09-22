@@ -1,4 +1,5 @@
 import { gunzipSync } from 'node:zlib';
+import { SECRET_MASK, redactSecrets } from '@/lib/secrets/redact';
 import { describe, expect, it } from 'vitest';
 import { bundleFiles, fileNameFor, gzip, tar } from './bundle';
 import type { ApiDefinition } from './list';
@@ -57,6 +58,22 @@ describe('the --apps-dir bundle', () => {
       const defs = unpacked.slice(1).map(([, content]) => parseRaw(content, format));
       expect(defs).toEqual(apis.map((value) => ({ ok: true, value })));
     }
+  });
+
+  it('says in the README when the exporting role saw secrets masked (ADR-0010)', () => {
+    const readme = (defs: typeof apis) =>
+      bundleFiles(defs, 'json', { environment: 'Production', exportedAt: when })[0].content;
+    expect(readme(apis)).toContain('exported unredacted');
+    const masked = readme(
+      apis.map((api) =>
+        redactSecrets('api', {
+          ...api,
+          auth: { mode: 'jwt', signing_method: 'hs256', secret: 's' },
+        }),
+      ),
+    );
+    expect(masked).toContain(`Secrets are hidden: they read "${SECRET_MASK}"`);
+    expect(masked).not.toContain('exported unredacted');
   });
 
   it('pads multi-block files and ends with two zero blocks', () => {

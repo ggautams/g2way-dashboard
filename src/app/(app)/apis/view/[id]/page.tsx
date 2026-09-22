@@ -36,7 +36,7 @@ export default async function ApiPage({ params, searchParams }: PageProps<'/apis
   let api: ApiItem['api'];
   let environment = { id: '', label: '' };
   try {
-    const item = await loadApi(await selectedEnvironmentId(), id);
+    const item = await loadApi(await selectedEnvironmentId(), id, user.role);
     api = item.api;
     environment = {
       id: item.environment,
@@ -52,11 +52,16 @@ export default async function ApiPage({ params, searchParams }: PageProps<'/apis
   if (!api.ok && api.status === 404) notFound();
   const canWrite = can(user.role, 'apis:write');
   const history = api.ok
-    ? await loadHistory(getDatabase(), getOrgId(), {
-        environment: environment.id,
-        kind: 'api',
-        resourceId: id,
-      })
+    ? await loadHistory(
+        getDatabase(),
+        getOrgId(),
+        {
+          environment: environment.id,
+          kind: 'api',
+          resourceId: id,
+        },
+        user.role,
+      )
     : [];
 
   return (

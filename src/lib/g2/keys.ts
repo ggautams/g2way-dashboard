@@ -1,5 +1,7 @@
 import 'server-only';
 
+import type { Role } from '@/lib/auth/rbac';
+import { redactFor } from '@/lib/secrets/redact';
 import { matchKey, scanOrder, type KeyFilter, type KeyLabels } from '@/lib/keys/filter';
 import {
   pageOf,
@@ -195,10 +197,15 @@ export type KeyItem = {
   fetchedAt: number;
 };
 
-/** One session by hash (`GET /g2/keys/{hash}?hashed=true`); a 404 settles with `status: 404`. */
+/**
+ * One session by hash (`GET /g2/keys/{hash}?hashed=true`), as `role` may see
+ * it: `hmac.secret` and `basic_auth.password_hash` masked without `keys:write`
+ * (ADR-0010). A 404 settles with `status: 404`.
+ */
 export async function loadKey(
   environmentId: string | undefined,
   hash: string,
+  role: Role,
   deps: GatewayClientDeps & { now?: () => number } = {},
 ): Promise<KeyItem> {
   const { id } = resolveEnvironment(environmentId, deps.registry);
@@ -207,9 +214,15 @@ export async function loadKey(
   return {
     environment: id,
     fetchedAt,
-    session: await settle(() =>
-      unwrap(
-        client.GET('/g2/keys/{key}', { params: { path: { key: hash }, query: { hashed: true } } }),
+    session: await settle(async () =>
+      redactFor(
+        role,
+        'key',
+        await unwrap(
+          client.GET('/g2/keys/{key}', {
+            params: { path: { key: hash }, query: { hashed: true } },
+          }),
+        ),
       ),
     ),
   };

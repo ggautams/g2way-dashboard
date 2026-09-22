@@ -52,6 +52,9 @@ history "will want its own table".
    `GET /g2/apis/{id}` through the BFF already shows full definitions to. If the
    BFF ever redacts secrets for read-only roles, history must redact with it.
    That is a roadmap item.
+   _Amended 2026-09-23 (ADR-0010):_ it does now. `toHistoryEntry` masks a
+   version's secrets for a role without the kind's write permission, exactly
+   as the BFF and the page loaders do. The table itself stays unredacted.
 
 ## Consequences
 

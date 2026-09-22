@@ -113,14 +113,19 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Policy history tab and rollback (versions are already kept, ADR-0008)
 - [ ] Replace the BFF rotate orchestration with g2way's native atomic rotate once it
       exists (`UPSTREAM.md`, ADR-0009); blocked upstream
-- [ ] Keys carry live secrets too: `GET /g2/keys/{key}` returns an hmac session's
-      plaintext `hmac.secret` (vendored `hmac.md`), and `/keys/view/[hash]` hands the
-      whole session to the designer for every `keys:read` role. Effective access
-      reports credentials by presence only; decide redaction with the item below
-- [ ] Decide whether read-only roles see secrets in API definitions and policies.
-      Today the BFF passes `GET` bodies through, and history (ADR-0008 §6) shows
-      viewers the same; redact both together or neither; history's seam is
-      `toHistoryEntry` in `src/lib/designer/load-history.ts`
+- [x] Keys carry live secrets too: `hmac.secret` and `basic_auth.password_hash`
+      are now masked (`[secret hidden]`) for every role without `keys:write`, in
+      BFF reads and on `/keys/view/[hash]` (ADR-0010)
+- [x] Read-only roles do not see secrets: a role without a kind's write
+      permission gets API-definition, policy and key secrets masked in BFF `GET`s,
+      page loaders and history alike, and the BFF refuses any write carrying the
+      mask (ADR-0010)
+- [ ] Credentials embedded in URLs (`target_url`, `schema_sync.url`, UDG/subgraph
+      `url` with `user:pass@` or `?api_key=`) are not masked for read-only roles
+      (ADR-0010 §3)
+- [ ] Move the audit redactor (ADR-0006 §4) onto ADR-0010's typed path list as
+      well as its name rule: an upstream header like `X-Upstream-Key` is stored
+      unredacted in audit snapshots today
 
 ## M5 — Traffic & middleware designer
 
@@ -1054,3 +1059,31 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - Not run in a browser (the open M2 browser pass covers this too).
   - Next: decide and implement secret redaction for read-only roles in BFF reads
     and history together (M4).
+
+- feat(M4): secret visibility for read-only roles (ADR-0010).
+  - Decision (the user's): a role without a kind's write permission sees that
+    kind's secrets as `[secret hidden]`. Viewers lose API, policy and key
+    secrets; editors lose key secrets only (no `keys:write`).
+  - `src/lib/secrets/redact.ts`: pure `redactSecrets(kind, body)` over an
+    explicit, contract-typed path list (`SecretPath<T>`, a moved field fails
+    `tsc`) plus a narrow name fallback. Keys: `hmac.secret`,
+    `basic_auth.password_hash`. APIs: `auth.secret` and the four upstream-bound
+    header maps (request `transform_headers.add`, schema sync, UDG data sources,
+    subgraphs), again under `versioning.versions.*`. Policies: none. The
+    contract has no OIDC client secret or TLS key material.
+  - Applied in the BFF `GET` passthrough (fails closed with 502 on a non-JSON
+    body), in `loadApi`/`loadPolicy`/`loadKey` (role now required), and at
+    `toHistoryEntry`. The BFF refuses a write carrying the mask with 422,
+    audited `denied`. The bundle README says when a bundle was masked.
+  - Guard test `src/app/(app)/secret-visibility.test.ts`: no page reaches
+    the gateway client, every redacting-loader call passes `user.role`, and
+    list pages only summarise. The audit log is unchanged (admin and owner
+    only, and both hold every write permission). ADR-0008 §6 was amended.
+  - **Surprise:** editors used to see hmac secrets on the key view even though
+    they cannot write keys. They now see the mask.
+  - Not run in a browser (the open M2 browser pass covers this too).
+  - Follow-ups filed: M4 URL-embedded credentials; M4 audit redactor on the
+    typed path list.
+  - Next: M4's remaining boxes are blocked upstream or deferred (cross-page bulk
+    selection, complete search, native rotate). Either take cross-page bulk
+    selection or start M5.

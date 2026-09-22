@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { migrateDatabase, openDatabase } from '@/lib/db';
 import { recordVersion } from '@/lib/db/config-versions';
 import type { DataHandle } from '@/lib/db/users';
-import { loadHistory } from './load-history';
+import { SECRET_MASK } from '@/lib/secrets/redact';
+import { loadHistory, toHistoryEntry } from './load-history';
 
 // Stand-in org: the real one always comes from config (G2_ORG_ID), never a literal.
 const ORG = 'org-under-test';
@@ -52,17 +53,65 @@ describe('loadHistory', () => {
       auditId: 'a3',
     });
 
-    const history = await loadHistory(handle, ORG, {
-      environment: 'prod',
-      kind: 'policy',
-      resourceId: 'gold',
-    });
+    const history = await loadHistory(
+      handle,
+      ORG,
+      {
+        environment: 'prod',
+        kind: 'policy',
+        resourceId: 'gold',
+      },
+      'viewer',
+    );
     expect(history.map((h) => [h.action, h.definition, h.actorEmail])).toEqual([
       ['update', p2, 'ada@example.com'],
       ['baseline', p1, null],
     ]);
     expect(typeof history[0].createdAt).toBe('string');
     expect(new Date(history[0].createdAt).toISOString()).toBe(history[0].createdAt);
+  });
+
+  it('masks a stored definition’s secrets for a role that cannot write it (ADR-0010)', async () => {
+    const handle = await sqliteMemory();
+    const v1 = { api_id: 'billing', auth: { mode: 'jwt', secret: 'old-secret' } };
+    const v2 = { api_id: 'billing', auth: { mode: 'jwt', secret: 'new-secret' } };
+    await recordVersion(handle, ORG, {
+      environment: 'prod',
+      kind: 'api',
+      resourceId: 'billing',
+      actor,
+      action: 'update',
+      before: v1,
+      after: v2,
+      auditId: 'a1',
+    });
+    const resource = { environment: 'prod', kind: 'api' as const, resourceId: 'billing' };
+    const masked = { api_id: 'billing', auth: { mode: 'jwt', secret: SECRET_MASK } };
+    const read = await loadHistory(handle, ORG, resource, 'viewer');
+    expect(read.map((h) => h.definition)).toEqual([masked, masked]);
+    expect(JSON.stringify(read)).not.toMatch(/old-secret|new-secret/);
+    const written = await loadHistory(handle, ORG, resource, 'editor');
+    expect(written.map((h) => h.definition)).toEqual([v2, v1]);
+  });
+
+  it('keeps a delete’s null definition at the seam', () => {
+    const entry = toHistoryEntry(
+      {
+        id: 'v1',
+        orgId: ORG,
+        environment: 'prod',
+        kind: 'api',
+        resourceId: 'x',
+        action: 'delete',
+        definition: null,
+        actorId: null,
+        actorEmail: null,
+        auditId: null,
+        createdAt: new Date(0),
+      },
+      'viewer',
+    );
+    expect(entry.definition).toBeNull();
   });
 
   it('is the only way pages read versions (the redaction seam)', () => {

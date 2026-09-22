@@ -89,7 +89,9 @@ describe('loadKeyPage', () => {
 describe('loadKey and loadPolicyChoices', () => {
   it('reads one key by hash', async () => {
     const gw = gateway();
-    expect((await loadKey('dev', hashes[3], { registry, fetch: gw.fetch })).session).toEqual({
+    expect(
+      (await loadKey('dev', hashes[3], 'admin', { registry, fetch: gw.fetch })).session,
+    ).toEqual({
       ok: true,
       value: { alias: 'k3' },
     });

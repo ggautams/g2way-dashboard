@@ -51,7 +51,7 @@ describe('loadApi', () => {
   it('fetches one definition by id, path-encoded and org-scoped', async () => {
     const api = { api_id: 'a b', name: 'A', listen_path: '/a/', target_url: 'http://a' };
     const gw = gateway(() => Response.json(api));
-    expect((await loadApi('dev', 'a b', { registry, fetch: gw.fetch })).api).toEqual({
+    expect((await loadApi('dev', 'a b', 'editor', { registry, fetch: gw.fetch })).api).toEqual({
       ok: true,
       value: api,
     });
@@ -60,7 +60,7 @@ describe('loadApi', () => {
 
   it('settles a 404 with its status, for the page to turn into not-found', async () => {
     const gw = gateway(() => Response.json({ error: 'api not found' }, { status: 404 }));
-    expect((await loadApi('dev', 'x', { registry, fetch: gw.fetch })).api).toEqual({
+    expect((await loadApi('dev', 'x', 'editor', { registry, fetch: gw.fetch })).api).toEqual({
       ok: false,
       error: 'api not found',
       status: 404,

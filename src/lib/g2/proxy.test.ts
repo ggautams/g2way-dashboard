@@ -11,6 +11,7 @@ import {
   recordAudit,
   type AuditRecord,
 } from '@/lib/db/audit';
+import { SECRET_MASK } from '@/lib/secrets/redact';
 import { hashKey, type AuditSink } from './audit-trail';
 import { parseEnvironments } from './environments';
 import {
@@ -1039,5 +1040,90 @@ describe('audit redaction (ADR-0006 §4)', () => {
     expect(row).toMatchObject({ target: 'h1', outcome: 'success' });
     expect(row.note).toContain('after-state unavailable: GET answered 503 storage unavailable');
     await database.close();
+  });
+});
+
+describe('secret visibility (ADR-0010)', () => {
+  const api = {
+    api_id: 'billing',
+    name: 'Billing',
+    auth: { mode: 'jwt', signing_method: 'hs256', secret: 'jwt-shared-secret' },
+  };
+  const session = { alias: 'batch', hmac: { secret: 'hmac-shared-secret' }, active: true };
+  const json = (body: unknown) => () => Response.json(body);
+
+  it('masks an API definition’s secrets for a viewer, on one record and on the list', async () => {
+    for (const [path, body] of [
+      ['apis/billing', api],
+      ['apis', [api, api]],
+    ] as const) {
+      const { response } = await proxy(path, {}, json(body), 'viewer');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(response.headers.get(ENVIRONMENT_HEADER)).toBe('dev');
+      const text = await response.text();
+      expect(text).not.toContain('jwt-shared-secret');
+      expect(text).toContain(SECRET_MASK);
+    }
+  });
+
+  it('shows the real values to roles that may write the kind', async () => {
+    for (const role of ['editor', 'admin', 'owner'] as const) {
+      const { response } = await proxy('apis/billing', {}, json(api), role);
+      expect(await response.json()).toEqual(api);
+    }
+    const { response } = await proxy('keys/abc?hashed=true', {}, json(session), 'admin');
+    expect(await response.json()).toEqual(session);
+  });
+
+  it('masks a key’s hmac secret for every role without keys:write, editors included', async () => {
+    for (const role of ['viewer', 'editor'] as const) {
+      const { response } = await proxy('keys/abc?hashed=true', {}, json(session), role);
+      expect(await response.json()).toEqual({ ...session, hmac: { secret: SECRET_MASK } });
+    }
+  });
+
+  it('passes gateway errors through untouched, and fails closed on a non-JSON success', async () => {
+    const refused = await proxy(
+      'apis/nope',
+      {},
+      () => Response.json({ error: 'api not found' }, { status: 404 }),
+      'viewer',
+    );
+    expect(refused.response.status).toBe(404);
+    expect(await refused.response.json()).toEqual({ error: 'api not found' });
+    const odd = await proxy('apis/billing', {}, () => new Response('secret: plain'), 'viewer');
+    expect(odd.response.status).toBe(502);
+    expect(await odd.response.text()).not.toContain('plain');
+  });
+
+  it('refuses a write carrying the mask, audited as denied, never sent', async () => {
+    const { response, calls, audit } = await proxy('keys/abc?hashed=true', {
+      method: 'PUT',
+      body: JSON.stringify({ ...session, hmac: { secret: SECRET_MASK } }),
+    });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: expect.stringMatching(
+        /^refused: the body carries the redaction mask .* at hmac\.secret;/,
+      ),
+    });
+    expect(calls).toEqual([]);
+    expect(audit).toEqual([
+      expect.objectContaining({
+        action: 'key.update',
+        outcome: 'denied',
+        error: expect.stringContaining('hmac.secret'),
+      }),
+    ]);
+  });
+
+  it('lets an ordinary write through', async () => {
+    const { response, calls } = await proxy('apis/billing', {
+      method: 'PUT',
+      body: JSON.stringify(api),
+    });
+    expect(response.status).toBe(200);
+    expect(calls.length).toBeGreaterThan(0);
   });
 });

@@ -80,7 +80,8 @@ export async function saveKeyMetadata(
   if (!parsed.ok) return { error: `Not saved: ${parsed.error}.` };
 
   const readKey =
-    deps.readKey ?? (async (env: string, key: string) => (await loadKey(env, key)).session);
+    deps.readKey ??
+    (async (env: string, key: string) => (await loadKey(env, key, 'viewer')).session);
   const read = await readKey(environmentId, hash);
   if (!read.ok) {
     return {

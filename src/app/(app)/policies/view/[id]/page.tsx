@@ -43,7 +43,7 @@ export default async function PolicyPage({
   let apis: ApiChoices = { ok: false, error: 'not loaded' };
   let environment = { id: '', label: '' };
   try {
-    const item = await loadPolicy(await selectedEnvironmentId(), id);
+    const item = await loadPolicy(await selectedEnvironmentId(), id, user.role);
     policy = item.policy;
     environment = {
       id: item.environment,
@@ -65,11 +65,16 @@ export default async function PolicyPage({
   const canWrite = can(user.role, 'policies:write');
   // Every `policies:read` role sees history (ADR-0008 §6); only writers can load a version.
   const history = policy.ok
-    ? await loadHistory(getDatabase(), getOrgId(), {
-        environment: environment.id,
-        kind: 'policy',
-        resourceId: id,
-      })
+    ? await loadHistory(
+        getDatabase(),
+        getOrgId(),
+        {
+          environment: environment.id,
+          kind: 'policy',
+          resourceId: id,
+        },
+        user.role,
+      )
     : [];
 
   return (
