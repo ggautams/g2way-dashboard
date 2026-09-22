@@ -86,7 +86,17 @@ const namedForm = {
 // A seeded audit entry, so the detail page renders a real before/after diff.
 const AUDIT_ENTRY_ID = randomUUID();
 const PAGES = {
-  single: ['/', '/gateway', '/users', '/audit', `/audit/${AUDIT_ENTRY_ID}`, '/account', '/apis'],
+  single: [
+    '/',
+    '/gateway',
+    '/users',
+    '/audit',
+    `/audit/${AUDIT_ENTRY_ID}`,
+    '/account',
+    '/apis',
+    '/apis/new',
+    '/apis/any-api',
+  ],
   named: [
     '/',
     '/gateway',
@@ -98,6 +108,8 @@ const PAGES = {
     '/account',
     '/apis',
     '/apis?q=x&state=inactive&auth=jwt',
+    '/apis/new',
+    '/apis/any-api',
   ],
 };
 
@@ -372,6 +384,9 @@ async function checkRoles(base) {
   await expectStatus('viewer', viewer, '/gateway', 200);
   await expectStatus('viewer', viewer, '/users', 403);
   await expectStatus('viewer', viewer, '/audit', 403);
+  await expectStatus('viewer', viewer, '/apis', 200);
+  await expectStatus('viewer', viewer, '/apis/any-api', 200);
+  await expectStatus('viewer', viewer, '/apis/new', 403);
   await expectStatus('viewer', viewer, `/audit/${AUDIT_ENTRY_ID}`, 403);
   // A read reaches the (dead) gateway; a write is refused before it.
   await expectStatus('viewer', viewer, '/api/g2/version', 502);
@@ -380,6 +395,7 @@ async function checkRoles(base) {
   const portal = await signIn(base, 'portal-dev', PORTAL_DEV);
   await expectStatus('portal-dev', portal, '/', 200);
   await expectStatus('portal-dev', portal, '/gateway', 403);
+  await expectStatus('portal-dev', portal, '/apis', 403);
   await expectStatus('portal-dev', portal, '/api/g2/version', 403);
   return fetched;
 }

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import {
   AUTH_MODES,
@@ -27,7 +28,8 @@ export const metadata: Metadata = { title: 'APIs' };
  * live in the query string (a plain GET form), so a filtered view is a link.
  */
 export default async function ApisPage({ searchParams }: PageProps<'/apis'>) {
-  await requirePermission('apis:read');
+  const user = await requirePermission('apis:read');
+  const canWrite = can(user.role, 'apis:write');
   const filter = parseApiFilter(await searchParams);
 
   let list: ApiList;
@@ -50,7 +52,7 @@ export default async function ApisPage({ searchParams }: PageProps<'/apis'>) {
 
   if (!list.apis.ok) {
     return (
-      <Page environment={label}>
+      <Page environment={label} canWrite={canWrite}>
         <Problem title="GET /g2/apis failed">
           <p className="font-mono text-xs break-all">
             {list.apis.error}
@@ -66,7 +68,7 @@ export default async function ApisPage({ searchParams }: PageProps<'/apis'>) {
   const inactive = all.filter((api) => !api.active).length;
 
   return (
-    <Page environment={label}>
+    <Page environment={label} canWrite={canWrite}>
       <FilterForm filter={filter} />
       <p className="text-xs text-muted" aria-live="polite">
         {shown.length === all.length
@@ -91,21 +93,36 @@ export default async function ApisPage({ searchParams }: PageProps<'/apis'>) {
   );
 }
 
-function Page({ environment, children }: { environment?: string; children: React.ReactNode }) {
+function Page({
+  environment,
+  canWrite = false,
+  children,
+}: {
+  environment?: string;
+  canWrite?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-4">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">APIs</h1>
-        <p className="mt-1 text-sm text-muted">
-          API definitions
-          {environment && (
-            <>
-              {' '}
-              in <span className="font-medium text-foreground">{environment}</span>
-            </>
-          )}
-          .
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">APIs</h1>
+          <p className="mt-1 text-sm text-muted">
+            API definitions
+            {environment && (
+              <>
+                {' '}
+                in <span className="font-medium text-foreground">{environment}</span>
+              </>
+            )}
+            .
+          </p>
+        </div>
+        {canWrite && (
+          <Button asChild>
+            <Link href="/apis/new">New API</Link>
+          </Button>
+        )}
       </header>
       {children}
     </div>
@@ -171,7 +188,12 @@ function ApiTable({ apis }: { apis: readonly ApiSummary[] }) {
           {apis.map((api) => (
             <tr key={api.apiId} className="border-t border-border align-top">
               <td className="px-3 py-2">
-                <p className="font-medium">{api.name}</p>
+                <Link
+                  href={`/apis/${encodeURIComponent(api.apiId)}`}
+                  className="font-medium hover:underline"
+                >
+                  {api.name}
+                </Link>
                 <p className="font-mono text-xs text-muted">{api.apiId}</p>
               </td>
               <td className="px-3 py-2 font-mono text-xs">{api.listenPath}</td>

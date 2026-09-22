@@ -78,7 +78,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] API list with search, filter, and active/inactive state
 - [x] Decide form primitives before the designer: adopt shadcn/ui as ADR-0001
       says, or record an ADR for the hand-rolled components the shell uses
-- [ ] API designer: structured form over `ApiDefinition`
+- [x] API designer: structured form over `ApiDefinition`
 - [ ] Raw JSON/YAML editor (Monaco) validated live against the OpenAPI schema,
       kept in sync with the form both ways
 - [ ] Diff preview before save; create/update/delete via `/g2/apis`
@@ -663,3 +663,26 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
     colour and grey text, so a rewrite script and a guard test handle those
     two. All other shadcn tokens are plain aliases.
     Next: the API designer.
+
+- feat(M3): API designer, the structured form.
+  - Pages: `/apis/new` (needs `apis:write`) and `/apis/[id]`, which is
+    read-only without `apis:write`. List rows link to it, and writers get a
+    "New API" button.
+  - The draft is the whole `ApiDefinition` (`src/lib/apis/draft.ts`). The form
+    edits it field by field with `withField`, so fields it doesn't show (CORS,
+    transforms, plugins…) round-trip untouched and are named under the form.
+  - Covered: name (suggests the id while creating), id (fixed once stored),
+    listen path + strip, upstream URL + load-balanced list, active, auth mode,
+    preserve-host, timeout, retries.
+  - Auth: switching back to the loaded mode restores its full config. Other
+    modes start from their required shape with a warning to fill in their
+    settings. Token auth is written as no `auth`, g2way's default.
+  - Help text under each field is g2way's own rustdoc, from `openapi.json` on
+    the server (`fieldHelp()`), so the spec never ships to the browser.
+  - Client-side checks cover only what the contract states; the gateway's 400
+    stays the authority.
+  - The bundle scan covers both pages: a viewer gets 403 on `/apis/new` and
+    200 elsewhere, a portal-dev 403 on `/apis`.
+  - There is no save yet; that is the diff-preview task.
+    Per-mode auth editors are M5's auth-mode editor. Next: the raw JSON/YAML
+    editor.

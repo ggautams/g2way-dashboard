@@ -27,3 +27,21 @@ export async function loadApis(
   const client = gatewayClient(id, deps);
   return { environment: id, apis: await settle(() => unwrap(client.GET('/g2/apis'))) };
 }
+
+export type ApiItem = { environment: string; api: Outcome<ApiDefinition> };
+
+/** One definition by id (`GET /g2/apis/{id}`); a 404 settles with `status: 404`. */
+export async function loadApi(
+  environmentId: string | undefined,
+  apiId: string,
+  deps: GatewayClientDeps = {},
+): Promise<ApiItem> {
+  const { id } = resolveEnvironment(environmentId, deps.registry);
+  const client = gatewayClient(id, deps);
+  return {
+    environment: id,
+    api: await settle(() =>
+      unwrap(client.GET('/g2/apis/{id}', { params: { path: { id: apiId } } })),
+    ),
+  };
+}

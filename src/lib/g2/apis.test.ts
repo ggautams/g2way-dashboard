@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadApis } from './apis';
+import { loadApi, loadApis } from './apis';
 import { UnknownEnvironmentError, parseEnvironments } from './environments';
 
 const registry = parseEnvironments({
@@ -44,5 +44,26 @@ describe('loadApis', () => {
     const gw = gateway(() => Promise.reject(new TypeError('fetch failed')));
     expect((await loadApis('dev', { registry, fetch: gw.fetch })).apis.ok).toBe(false);
     await expect(loadApis('nope', { registry })).rejects.toBeInstanceOf(UnknownEnvironmentError);
+  });
+});
+
+describe('loadApi', () => {
+  it('fetches one definition by id, path-encoded and org-scoped', async () => {
+    const api = { api_id: 'a b', name: 'A', listen_path: '/a/', target_url: 'http://a' };
+    const gw = gateway(() => Response.json(api));
+    expect((await loadApi('dev', 'a b', { registry, fetch: gw.fetch })).api).toEqual({
+      ok: true,
+      value: api,
+    });
+    expect(gw.urls).toEqual(['http://gw-dev:9696/g2/apis/a%20b?org_id=acme']);
+  });
+
+  it('settles a 404 with its status, for the page to turn into not-found', async () => {
+    const gw = gateway(() => Response.json({ error: 'api not found' }, { status: 404 }));
+    expect((await loadApi('dev', 'x', { registry, fetch: gw.fetch })).api).toEqual({
+      ok: false,
+      error: 'api not found',
+      status: 404,
+    });
   });
 });
