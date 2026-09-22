@@ -98,7 +98,8 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Per-API access matrix, rate and quota editors
 - [x] Dashboard-side key metadata (label, owner, notes) — the gateway lists
       hashes only, so inventory lives here
-- [ ] Live quota and rate-limit usage per key
+- [ ] Live quota and rate-limit usage per key — **blocked**: g2way has no usage endpoint
+      (`UPSTREAM.md`); `/keys/view/[hash]` shows the configured limits in effect meanwhile
 - [ ] "What does this key allow" resolver that folds `apply_policies`
 - [ ] Bulk operations and search by alias
 - [ ] Search and filter `/keys` by dashboard label and owner (today they only
@@ -957,3 +958,15 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - Follow-up filed: M4 search/filter by label and owner, and pruning rows
     orphaned by deletes made outside the dashboard.
   - Next: live quota and rate-limit usage per key (M4).
+
+- feat(M4): Usage panel on `/keys/view/[hash]`; live usage blocked upstream.
+  - g2way exposes no per-key counters: no usage path in `contracts/openapi.json`,
+    the `Quota` rustdoc keeps the counter and reset in storage, and `/g2/stats`
+    is per API and per pod. Reading g2way's Redis directly was ruled out.
+  - The panel (a Server Component) shows the limits in effect, the applied
+    policy's (which replace the key's own) or the key's, quotes a failed policy
+    read verbatim, and says plainly that live counters are unavailable. No
+    numbers are invented. `effectiveLimits()` in `src/lib/keys/usage.ts`.
+  - UPSTREAM.md asks for `GET /g2/keys/{key}/usage?hashed=true`; the task stays
+    unchecked and marked blocked, and `usage.test.ts` fails once the spec has it.
+  - Next: the "What does this key allow" resolver (M4).

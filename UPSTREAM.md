@@ -99,6 +99,22 @@ commit this project is waiting on.
       definition (file or storage). Then `danglingApis()` in
       `src/lib/designer/access.ts` can be exact. _Not a blocker._
 
+- [ ] **No per-key usage endpoint.** _Found 2026-09-23 (M4)._ A key's live
+      quota counter, its reset time and its current rate-window count live only
+      in g2way's storage (the `Quota` rustdoc says so); the admin API has no path
+      that reads them, and `/g2/stats` is per API and process-local. The
+      dashboard will not read g2way's Redis directly, so M4's live usage task is
+      blocked. Ask for a read-only `GET /g2/keys/{key}/usage` (honouring
+      `?hashed=true`, admin-authenticated) answering, for the limits in effect
+      (the applied policy's when there is one), a `quota` object with `max`,
+      `used`, `remaining` and `resets_at`, and a `rate` object with `requests`,
+      `per_seconds` and `current`, each `null` when unlimited, with a typed body
+      in the OpenAPI. Then the BFF proxies it and the Usage panel on
+      `/keys/view/[hash]` (`src/components/keys/key-usage.tsx`), which today
+      shows only the configured limits, adds the live numbers and a reset
+      countdown; `src/lib/keys/usage.test.ts` fails as soon as the spec gains a
+      `usage` path. _Blocks one task in M4._
+
 - [ ] **`/g2/stats` is process-local** and resets on restart, so with more than
       one replica it is a per-pod sample rather than a cluster total. Cluster-wide
       numbers must come from the analytics feed or Prometheus. Shapes M6; not a

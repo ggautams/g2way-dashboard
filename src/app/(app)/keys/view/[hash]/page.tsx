@@ -5,6 +5,7 @@ import { DeleteButton } from '@/components/designer/save-bar';
 import { RevokeButton, RotateButton } from '@/components/keys/key-actions';
 import { KeyDesigner } from '@/components/keys/key-designer';
 import { KeyMetadataEditor } from '@/components/keys/key-metadata';
+import { KeyUsage } from '@/components/keys/key-usage';
 import { Badge } from '@/components/ui/badge';
 import { Notice } from '@/components/users/controls';
 import { can } from '@/lib/auth/rbac';
@@ -20,13 +21,17 @@ import {
   getOrgId,
   listEnvironments,
 } from '@/lib/g2/environments';
+import type { Outcome } from '@/lib/g2/gateway-status';
 import { loadKey, loadPolicyChoices, type KeyItem, type PolicyChoices } from '@/lib/g2/keys';
+import { loadPolicy } from '@/lib/g2/policies';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 import { keyFieldHelp } from '@/lib/keys/field-help';
 import type { KeyMetadataFields } from '@/lib/keys/metadata';
 import { saveKeyMetadataAction } from '@/lib/keys/metadata-actions';
 import { keySchema } from '@/lib/keys/schema';
 import { shortHash } from '@/lib/keys/session';
+import { effectiveLimits } from '@/lib/keys/usage';
+import type { Policy } from '@/lib/policies/list';
 
 export async function generateMetadata({
   params,
@@ -46,6 +51,8 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
   let session: KeyItem['session'];
   let policies: PolicyChoices = { ok: false, error: 'not loaded' };
   let apis: ApiChoices = { ok: false, error: 'not loaded' };
+  // The applied policy, whose rate and quota replace the key's own (Usage panel).
+  let applied: Outcome<Policy> | null = null;
   let environment = { id: '', label: '' };
   try {
     const selected = await selectedEnvironmentId();
@@ -57,7 +64,13 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
         listEnvironments().find((env) => env.id === item.environment)?.label ?? item.environment,
     };
     if (session.ok) {
-      policies = await loadPolicyChoices(item.environment);
+      const policyId = session.value.apply_policies?.[0];
+      [policies, applied] = await Promise.all([
+        loadPolicyChoices(item.environment),
+        policyId === undefined
+          ? null
+          : loadPolicy(item.environment, policyId).then((result) => result.policy),
+      ]);
       apis = can(user.role, 'apis:read')
         ? await loadApiChoices(item.environment)
         : { ok: false, error: 'Your role cannot read API definitions.' };
@@ -175,6 +188,7 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
             Dashboard metadata unavailable: {metadata.error}
           </p>
         ))}
+      {session.ok && <KeyUsage limits={effectiveLimits(session.value, applied)} />}
       {session.ok ? (
         <KeyDesigner
           // A save refreshes the page with the stored session: start a fresh draft.
