@@ -16,7 +16,9 @@ import { DeleteApiButton, NotLiveNote } from '@/components/apis/save-bar';
 import { Notice } from '@/components/users/controls';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 
-export async function generateMetadata({ params }: PageProps<'/apis/[id]'>): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: PageProps<'/apis/view/[id]'>): Promise<Metadata> {
   return { title: `API ${decodeURIComponent((await params).id)}` };
 }
 
@@ -24,7 +26,7 @@ export async function generateMetadata({ params }: PageProps<'/apis/[id]'>): Pro
  * One stored definition in the designer: editable with `apis:write`, read-only
  * otherwise. A gateway failure is quoted verbatim; a 404 is the not-found page.
  */
-export default async function ApiPage({ params, searchParams }: PageProps<'/apis/[id]'>) {
+export default async function ApiPage({ params, searchParams }: PageProps<'/apis/view/[id]'>) {
   const user = await requirePermission('apis:read');
   const id = decodeURIComponent((await params).id);
   const { saved } = await searchParams;

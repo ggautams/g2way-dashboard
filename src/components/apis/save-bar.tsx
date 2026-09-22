@@ -88,7 +88,7 @@ export function SaveBar({
       return;
     }
     setReview(null);
-    router.replace(`/apis/${encodeURIComponent(draft.api_id)}?saved=1`);
+    router.replace(`/apis/view/${encodeURIComponent(draft.api_id)}?saved=1`);
     router.refresh();
   };
 

@@ -86,7 +86,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Diff preview before save; create/update/delete via `/g2/apis`
 - [x] **Reload-required** as a first-class UI concept: writes are staged until
       `POST /g2/reload`, with a visible pending-changes affordance
-- [ ] Import an OpenAPI/Swagger document → `ApiDefinition`
+- [x] Import an OpenAPI/Swagger document → `ApiDefinition`
 - [ ] Config version history with rollback (dashboard-side)
 - [ ] Export a definition bundle for `--apps-dir` / GitOps
 
@@ -758,3 +758,27 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - M11's retention box now carries the constraint that pruning must keep
     staged rows.
   - Next: OpenAPI/Swagger import.
+
+- feat(M3): OpenAPI/Swagger import.
+  - `/apis/import` (needs `apis:write`) takes a pasted or chosen OpenAPI 3.x
+    or Swagger 2.0 document in JSON or YAML. It is parsed in the browser and
+    never uploaded, then opens in the designer as an unsaved draft, with notes
+    on what was mapped.
+  - `importOpenApi` (`src/lib/apis/import.ts`) maps:
+    - `info.title` to the name, and a slug to the id and listen path;
+    - the first server (variables at their defaults) or Swagger's
+      scheme+host+basePath (https preferred) to the upstream;
+    - the first required (else declared) security scheme to the nearest auth
+      mode: apiKey header/query/cookie → token auth, basic → basic_auth,
+      bearer → jwt, openIdConnect → oidc with the issuer taken from the
+      discovery URL, mutualTLS → mtls.
+  - A document with no security keeps g2way's default token auth, with a note.
+    An import never makes an API keyless, just as g2way never does unasked.
+  - Path allow/block lists are not generated. That fits with M5's path
+    editors.
+  - **Fix on the way:** `/apis/new` and `/apis/import` beside `/apis/[id]`
+    made an API whose id is `new` or `import` unreachable, since static
+    segments win and ids come from the gateway, so anything is possible. The
+    definition page is now `/apis/view/[id]`, and `pages.test.ts` fails on any
+    dynamic segment with static siblings.
+  - Next: config version history with rollback.

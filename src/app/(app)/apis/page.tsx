@@ -132,9 +132,14 @@ function Page({
           </p>
         </div>
         {canWrite && (
-          <Button asChild>
-            <Link href="/apis/new">New API</Link>
-          </Button>
+          <div className="flex gap-2">
+            <Button asChild variant="outline">
+              <Link href="/apis/import">Import OpenAPI</Link>
+            </Button>
+            <Button asChild>
+              <Link href="/apis/new">New API</Link>
+            </Button>
+          </div>
         )}
       </header>
       {children}
@@ -209,7 +214,7 @@ function ApiTable({
             <tr key={api.apiId} className="border-t border-border align-top">
               <td className="px-3 py-2">
                 <Link
-                  href={`/apis/${encodeURIComponent(api.apiId)}`}
+                  href={`/apis/view/${encodeURIComponent(api.apiId)}`}
                   className="font-medium hover:underline"
                 >
                   {api.name}

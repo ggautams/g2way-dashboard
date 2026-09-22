@@ -95,7 +95,8 @@ const PAGES = {
     '/account',
     '/apis',
     '/apis/new',
-    '/apis/any-api',
+    '/apis/import',
+    '/apis/view/any-api',
   ],
   named: [
     '/',
@@ -109,7 +110,8 @@ const PAGES = {
     '/apis',
     '/apis?q=x&state=inactive&auth=jwt',
     '/apis/new',
-    '/apis/any-api',
+    '/apis/import',
+    '/apis/view/any-api',
   ],
 };
 
@@ -385,8 +387,9 @@ async function checkRoles(base) {
   await expectStatus('viewer', viewer, '/users', 403);
   await expectStatus('viewer', viewer, '/audit', 403);
   await expectStatus('viewer', viewer, '/apis', 200);
-  await expectStatus('viewer', viewer, '/apis/any-api', 200);
+  await expectStatus('viewer', viewer, '/apis/view/any-api', 200);
   await expectStatus('viewer', viewer, '/apis/new', 403);
+  await expectStatus('viewer', viewer, '/apis/import', 403);
   await expectStatus('viewer', viewer, `/audit/${AUDIT_ENTRY_ID}`, 403);
   // A read reaches the (dead) gateway; a write is refused before it.
   await expectStatus('viewer', viewer, '/api/g2/version', 502);

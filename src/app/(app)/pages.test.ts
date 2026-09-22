@@ -46,6 +46,20 @@ describe('(app) pages', () => {
     expect(source).toContain(`await requirePermission('${permission}')`);
   });
 
+  // `/apis/new` beside `/apis/[id]` would make an API whose id is "new"
+  // unreachable: a static segment always wins. Ids come from the gateway, so
+  // any value is possible; a dynamic segment must have no static siblings.
+  it('never puts a dynamic segment beside static routes, where they would shadow ids', () => {
+    const walk = (dir: string): string[] => {
+      const children = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory());
+      const dynamic = children.some((e) => e.name.startsWith('['));
+      const statics = children.filter((e) => !e.name.startsWith('[') && !e.name.startsWith('('));
+      const clash = dynamic && statics.length > 0 ? [relative(GROUP, dir) || '.'] : [];
+      return [...clash, ...children.flatMap((e) => walk(join(dir, e.name)))];
+    };
+    expect(walk(GROUP)).toEqual([]);
+  });
+
   it('has no route handlers (they would bypass the page check)', () => {
     const walk = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
