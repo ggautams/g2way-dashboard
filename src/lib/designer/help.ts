@@ -34,3 +34,17 @@ export function firstParagraph(description: string): string {
     .replace(/\[`([^\]`]+)`\]/g, '$1')
     .trim();
 }
+
+/**
+ * A schema's own description, every paragraph, each unwrapped like
+ * {@link firstParagraph}, joined into one. For types whose first paragraph is
+ * only a title (`ApiAccess`: "Access granted to a single API.").
+ */
+export function schemaHelp(schema: string): string {
+  const schemas = spec.components.schemas as Record<string, { description?: string }>;
+  return (schemas[schema]?.description ?? '')
+    .split(/\n\s*\n/)
+    .map(firstParagraph)
+    .filter((paragraph) => paragraph !== '' && !paragraph.startsWith('#'))
+    .join(' ');
+}

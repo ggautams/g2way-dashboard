@@ -21,7 +21,8 @@ export type LimitField<K extends string> = {
 
 /**
  * A nullable limit: off is `null` (unlimited, which the draft writes as no
- * field at all); on, every field is a whole number of at least 1. Switching on
+ * field at all, and the editor says so in words); on, every field is a whole
+ * number of at least 1. Switching on
  * starts from the loaded policy's limit, or the contract's example.
  */
 export function LimitEditor<K extends string>({
@@ -52,7 +53,14 @@ export function LimitEditor<K extends string>({
         checked={value !== null}
         onChange={(on) => onChange(on ? start : null)}
       />
-      {value !== null && (
+      {value === null ? (
+        <p role="status" className="pl-12 text-sm">
+          <strong>Unlimited</strong>: no {label.toLowerCase()} applies.{' '}
+          <span className="text-xs text-muted">
+            g2way reads a missing or null limit as none; zero is refused, never unlimited.
+          </span>
+        </p>
+      ) : (
         <div className="flex flex-wrap gap-4 pl-12">
           {fields.map((field) => (
             <LimitInput

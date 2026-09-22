@@ -136,7 +136,7 @@ describe('the draft', () => {
       apply_policies: ['gold'],
     });
     expect(withKeyField(draft, 'alias', undefined)).toEqual({ hmac: { secret: 's' } });
-    expect(otherKeyFields({ ...draft, org_id: 'x', access: {} })).toEqual(['hmac', 'access']);
+    expect(otherKeyFields({ ...draft, org_id: 'x', access: {} })).toEqual(['hmac']);
   });
 
   it('finds what KeySession::validate would refuse, and the one-policy limit', () => {

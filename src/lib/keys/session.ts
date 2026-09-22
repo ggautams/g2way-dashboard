@@ -1,8 +1,9 @@
 /**
  * The key designer's model: a draft is a whole `KeySession`, edited field by
- * field, so everything the form does not show (`access`, `basic_auth`, `hmac`)
- * survives an edit untouched. Plus the two key response bodies the OpenAPI
- * document leaves untyped, parsed at runtime. Universal and pure.
+ * field, so everything the form does not show (`basic_auth`, `hmac`, unknown
+ * `access` entry fields) survives an edit untouched. Plus the two key response
+ * bodies the OpenAPI document leaves untyped, parsed at runtime. Universal and
+ * pure.
  *
  * g2way's serde defaults (`crates/g2-core/src/session.rs`, absent from the
  * OpenAPI): `active` is `true`; an absent `rate`/`quota`/`expires_at` means
@@ -12,6 +13,7 @@
  */
 
 import type { components } from '../../../contracts/g2way.d.ts';
+import { accessProblem } from '@/lib/designer/access';
 import { PayloadShapeError } from '@/lib/g2/node';
 import type { Quota, RateLimit } from '@/lib/policies/list';
 
@@ -25,18 +27,14 @@ export const KEY_FORM_FIELDS = [
   'apply_policies',
   'rate',
   'quota',
+  'access',
 ] as const satisfies readonly (keyof KeySession)[];
 
 export type KeyFormField = (typeof KEY_FORM_FIELDS)[number];
 
-/** Help text keys: the form fields, the limits' own fields, and `access` (raw only for now). */
+/** Help text keys: the form fields and the limits' own fields. */
 export type KeyHelpKey =
-  | KeyFormField
-  | 'access'
-  | 'rate.requests'
-  | 'rate.per_seconds'
-  | 'quota.max'
-  | 'quota.renewal_rate_secs';
+  KeyFormField | 'rate.requests' | 'rate.per_seconds' | 'quota.max' | 'quota.renewal_rate_secs';
 
 // ---- the two untyped responses ----------------------------------------------
 
@@ -164,7 +162,7 @@ export function isKeyShape(value: unknown): value is KeySession {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-export type KeyProblems = Partial<Record<KeyFormField | 'access', string>>;
+export type KeyProblems = Partial<Record<KeyFormField, string>>;
 
 const positive = (value: unknown) => Number.isInteger(value) && (value as number) > 0;
 
@@ -188,9 +186,8 @@ export function keyProblems(draft: KeySession): KeyProblems {
   if (draft.expires_at != null && !(Number.isInteger(draft.expires_at) && draft.expires_at > 0)) {
     problems.expires_at = 'Not a valid time.';
   }
-  if (Object.keys(draft.access ?? {}).some((apiId) => apiId.trim() === '')) {
-    problems.access = 'An access entry has an empty api_id.';
-  }
+  const access = accessProblem(draft.access);
+  if (access) problems.access = access;
   return problems;
 }
 

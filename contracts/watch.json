@@ -33,8 +33,11 @@
     {
       "id": "session-policy",
       "paths": ["crates/g2-core/src/session.rs", "crates/g2-core/src/policy.rs"],
-      "surfaces": ["Keys and policies (M4)"],
-      "onChange": "Rate/quota/access shape changes ripple into the key editor and the 'what does this key allow' resolver."
+      "surfaces": [
+        "Keys and policies (M4)",
+        "Access matrix (M4): src/lib/designer/access.ts, src/components/designer/access-matrix.tsx"
+      ],
+      "onChange": "Rate/quota/access shape changes ripple into the key editor, the shared access matrix (ApiAccess/TypeFields fields and their help) and the 'what does this key allow' resolver."
     },
     {
       "id": "middleware-chain",

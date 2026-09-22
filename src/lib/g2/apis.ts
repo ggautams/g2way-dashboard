@@ -1,6 +1,7 @@
 import 'server-only';
 
 import type { ApiDefinition } from '@/lib/apis/list';
+import { apiChoice, type ApiChoices } from '@/lib/designer/access';
 import { unwrap } from './client';
 import { resolveEnvironment } from './environments';
 import { settle, type Outcome } from './gateway-status';
@@ -44,4 +45,23 @@ export async function loadApi(
       unwrap(client.GET('/g2/apis/{id}', { params: { path: { id: apiId } } })),
     ),
   };
+}
+
+/**
+ * The environment's APIs as the access matrix offers them: id, name and
+ * whether GraphQL is configured, never the definitions themselves, which stay
+ * on the server. A gateway failure is quoted, with its status.
+ */
+export async function loadApiChoices(
+  environmentId: string | undefined,
+  deps: GatewayClientDeps = {},
+): Promise<ApiChoices> {
+  const { apis } = await loadApis(environmentId, deps);
+  if (!apis.ok) {
+    return {
+      ok: false,
+      error: apis.status === undefined ? apis.error : `${apis.error} (HTTP ${apis.status})`,
+    };
+  }
+  return { ok: true, value: apis.value.map(apiChoice) };
 }

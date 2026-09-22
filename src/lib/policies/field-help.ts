@@ -9,7 +9,6 @@ export function policyFieldHelp(): Record<PolicyHelpKey, string> {
     ...(Object.fromEntries(
       POLICY_FORM_FIELDS.map((field) => [field, propertyHelp('Policy', field)]),
     ) as Record<(typeof POLICY_FORM_FIELDS)[number], string>),
-    access: propertyHelp('Policy', 'access'),
     'rate.requests': propertyHelp('RateLimit', 'requests'),
     'rate.per_seconds': propertyHelp('RateLimit', 'per_seconds'),
     'quota.max': propertyHelp('Quota', 'max'),

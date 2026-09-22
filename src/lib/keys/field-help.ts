@@ -21,7 +21,6 @@ export function keyFieldHelp(): Record<KeyHelpKey, string> {
         propertyHelp('KeySession', field) || (FALLBACK[field] ?? ''),
       ]),
     ) as Record<(typeof KEY_FORM_FIELDS)[number], string>),
-    access: propertyHelp('KeySession', 'access'),
     'rate.requests': propertyHelp('RateLimit', 'requests'),
     'rate.per_seconds': propertyHelp('RateLimit', 'per_seconds'),
     'quota.max': propertyHelp('Quota', 'max'),

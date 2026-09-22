@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { AccessHelp, ApiChoices } from '@/lib/designer/access';
 import { RAW_FORMATS, schemaValidator } from '@/lib/designer/raw';
 import { describeFailure, saveDiff } from '@/lib/designer/write';
 import { bffClient } from '@/lib/g2/client';
@@ -39,6 +40,9 @@ type Props = {
   /** Whether the role holds `keys:write`; otherwise the designer is read-only. */
   canWrite: boolean;
   environment: DesignerEnvironment;
+  /** The environment's APIs for the access matrix (`loadApiChoices`). */
+  apis: ApiChoices;
+  accessHelp: AccessHelp;
 };
 
 /**
@@ -55,6 +59,8 @@ export function KeyDesigner({
   policies,
   canWrite,
   environment,
+  apis,
+  accessHelp,
 }: Props) {
   const [draft, setDraft] = useState(initial);
   const { view, text, unapplied, open, edit } = useRawView<KeySession, 'form'>({
@@ -74,9 +80,7 @@ export function KeyDesigner({
     unapplied !== null
       ? 'The raw text has errors; fix them or switch back to the form.'
       : Object.keys(problems).length > 0
-        ? problems.access && Object.keys(problems).length === 1
-          ? `${problems.access} Fix it in the JSON or YAML view.`
-          : 'Fix the fields marked in the form first.'
+        ? 'Fix the fields marked in the form first.'
         : null;
 
   return (
@@ -100,6 +104,8 @@ export function KeyDesigner({
             help={help}
             problems={problems}
             policies={policies}
+            apis={apis}
+            accessHelp={accessHelp}
             readOnly={!canWrite}
           />
           {others.length > 0 && (

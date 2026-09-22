@@ -8,6 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { Notice } from '@/components/users/controls';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
+import type { ApiChoices } from '@/lib/designer/access';
+import { accessFieldHelp } from '@/lib/designer/access-help';
+import { loadApiChoices } from '@/lib/g2/apis';
 import {
   RegistryConfigError,
   UnknownEnvironmentError,
@@ -36,6 +39,7 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
   const query = await searchParams;
   let session: KeyItem['session'];
   let policies: PolicyChoices = { ok: false, error: 'not loaded' };
+  let apis: ApiChoices = { ok: false, error: 'not loaded' };
   let environment = { id: '', label: '' };
   try {
     const selected = await selectedEnvironmentId();
@@ -46,7 +50,12 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
       label:
         listEnvironments().find((env) => env.id === item.environment)?.label ?? item.environment,
     };
-    if (session.ok) policies = await loadPolicyChoices(item.environment);
+    if (session.ok) {
+      policies = await loadPolicyChoices(item.environment);
+      apis = can(user.role, 'apis:read')
+        ? await loadApiChoices(item.environment)
+        : { ok: false, error: 'Your role cannot read API definitions.' };
+    }
   } catch (error) {
     if (!(error instanceof RegistryConfigError || error instanceof UnknownEnvironmentError)) {
       throw error;
@@ -131,6 +140,8 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
           policies={policies}
           canWrite={canWrite}
           environment={environment}
+          apis={apis}
+          accessHelp={accessFieldHelp('KeySession')}
         />
       ) : (
         <section

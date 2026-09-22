@@ -1,13 +1,14 @@
 'use client';
 
 import { Field, Section, Toggle } from '@/components/designer/fields';
+import { AccessMatrix } from '@/components/designer/access-matrix';
 import { LimitEditor } from '@/components/designer/limits';
 import { Input } from '@/components/ui/input';
 import { slugify } from '@/lib/apis/draft';
+import type { AccessHelp, ApiChoices } from '@/lib/designer/access';
 import {
   DEFAULT_QUOTA,
   DEFAULT_RATE,
-  grantsEveryApi,
   withPolicyField,
   type PolicyHelpKey,
   type PolicyProblems,
@@ -22,20 +23,30 @@ type Props = {
   /** g2way's own description of each field (`policyFieldHelp()`). */
   help: Record<PolicyHelpKey, string>;
   problems: PolicyProblems;
+  /** The environment's APIs for the access matrix, or why they could not be listed. */
+  apis: ApiChoices;
+  accessHelp: AccessHelp;
   readOnly: boolean;
 };
 
 /**
- * The structured half of the policy designer: identity, the active switch and
- * the two limits, each editing the draft in place so `access` and anything
- * else survive. `access` is shown, not edited: the raw view edits it until the
- * access matrix lands.
+ * The structured half of the policy designer: identity, the active switch, the
+ * two limits and the per-API access matrix, each editing the draft in place so
+ * anything the form does not show survives.
  */
-export function PolicyForm({ draft, onChange, original, help, problems, readOnly }: Props) {
+export function PolicyForm({
+  draft,
+  onChange,
+  original,
+  help,
+  problems,
+  apis,
+  accessHelp,
+  readOnly,
+}: Props) {
   const creating = original === null;
   const set = <K extends keyof Policy>(key: K, value: Policy[K] | undefined) =>
     onChange(withPolicyField(draft, key, value));
-  const apis = Object.keys(draft.access ?? {});
 
   return (
     <fieldset disabled={readOnly} className="flex flex-col gap-8 disabled:opacity-90">
@@ -110,30 +121,16 @@ export function PolicyForm({ draft, onChange, original, help, problems, readOnly
         />
       </Section>
 
-      <section className="flex flex-col gap-2" aria-labelledby="policy-access">
-        <h2 id="policy-access" className="text-sm font-semibold uppercase tracking-wide text-muted">
-          API access
-        </h2>
-        {grantsEveryApi(draft) ? (
-          <p role="status" className="text-sm text-warning">
-            No access entries: keys applying this policy may call{' '}
-            <strong>every API in the organisation</strong>.
-          </p>
-        ) : (
-          <p className="text-sm">
-            {apis.length} API{apis.length === 1 ? '' : 's'}:{' '}
-            <span className="font-mono text-xs">{apis.join(', ')}</span>
-          </p>
-        )}
-        {problems.access && (
-          <p role="alert" className="text-xs text-danger">
-            {problems.access}
-          </p>
-        )}
-        <p className="text-xs text-muted">
-          {help.access} Edit <span className="font-mono">access</span> in the JSON or YAML view.
-        </p>
-      </section>
+      <AccessMatrix
+        id="access"
+        access={draft.access}
+        onChange={(access) => set('access', access)}
+        apis={apis}
+        help={accessHelp}
+        subject="keys applying this policy"
+        replaceNote="A key that applies this policy uses this access, rate and quota instead of its own, replaced entirely rather than merged."
+        problem={problems.access}
+      />
     </fieldset>
   );
 }

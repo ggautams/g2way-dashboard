@@ -36,7 +36,7 @@ describe('the draft', () => {
   });
 
   it('lists what only the raw view edits, never org_id', () => {
-    expect(otherPolicyFields(gold)).toEqual(['access']);
+    expect(otherPolicyFields(gold)).toEqual([]);
     expect(grantsEveryApi(gold)).toBe(false);
     expect(grantsEveryApi({ ...gold, access: {} })).toBe(true);
   });

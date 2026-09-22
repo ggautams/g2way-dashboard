@@ -1,11 +1,11 @@
 /**
  * The policy designer's model: a draft is a whole `Policy`, edited field by
- * field, so everything the form does not show (the `access` map above all)
- * survives an edit byte for byte. Universal: the client designer and the tests
+ * field, so everything the form does not show survives an edit byte for byte. Universal: the client designer and the tests
  * share it.
  */
 
 import { parseWholeNumber } from '@/lib/apis/draft';
+import { accessProblem } from '@/lib/designer/access';
 import type { Policy, Quota, RateLimit } from './list';
 
 /** The fields the structured form edits; the raw editor covers the rest. */
@@ -15,18 +15,14 @@ export const POLICY_FORM_FIELDS = [
   'active',
   'rate',
   'quota',
+  'access',
 ] as const satisfies readonly (keyof Policy)[];
 
 export type PolicyFormField = (typeof POLICY_FORM_FIELDS)[number];
 
-/** Help text keys: the form fields, the limits' own fields, and `access` (raw only for now). */
+/** Help text keys: the form fields and the limits' own fields. */
 export type PolicyHelpKey =
-  | PolicyFormField
-  | 'access'
-  | 'rate.requests'
-  | 'rate.per_seconds'
-  | 'quota.max'
-  | 'quota.renewal_rate_secs';
+  PolicyFormField | 'rate.requests' | 'rate.per_seconds' | 'quota.max' | 'quota.renewal_rate_secs';
 
 /** Where a newly enabled limit starts: the contract's own example policy. */
 export const DEFAULT_RATE: RateLimit = { requests: 10, per_seconds: 60 };
@@ -90,13 +86,14 @@ export function isPolicyShape(value: unknown): value is Policy {
   return typeof record.policy_id === 'string' && typeof record.name === 'string';
 }
 
-export type PolicyProblems = Partial<Record<PolicyFormField | 'access', string>>;
+export type PolicyProblems = Partial<Record<PolicyFormField, string>>;
 
 const positive = (value: unknown) => Number.isInteger(value) && (value as number) > 0;
 
 /**
  * What the form can tell before the gateway does: `Policy::validate`'s rules
- * (non-empty id and name, no zero in a limit, no empty `access` key). The
+ * (non-empty id and name, no zero in a limit, no empty `access` key) and the
+ * access matrix's own checks (`accessProblem`). The
  * gateway's own 400 message is shown verbatim on save.
  */
 export function policyProblems(draft: Policy): PolicyProblems {
@@ -111,8 +108,7 @@ export function policyProblems(draft: Policy): PolicyProblems {
   if (quota && !(positive(quota.max) && positive(quota.renewal_rate_secs))) {
     problems.quota = 'Maximum and period must both be whole numbers of at least 1.';
   }
-  if (Object.keys(draft.access ?? {}).some((apiId) => apiId.trim() === '')) {
-    problems.access = 'An access entry has an empty api_id.';
-  }
+  const access = accessProblem(draft.access);
+  if (access) problems.access = access;
   return problems;
 }

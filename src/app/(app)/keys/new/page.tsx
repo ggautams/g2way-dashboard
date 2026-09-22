@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { KeyDesigner } from '@/components/keys/key-designer';
+import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
+import { accessFieldHelp } from '@/lib/designer/access-help';
+import { loadApiChoices } from '@/lib/g2/apis';
 import { listEnvironments } from '@/lib/g2/environments';
 import { loadPolicyChoices } from '@/lib/g2/keys';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
@@ -13,7 +16,7 @@ export const metadata: Metadata = { title: 'New key' };
 
 /** A new key's session. The gateway mints the key itself and returns it once. */
 export default async function NewKeyPage() {
-  await requirePermission('keys:write');
+  const user = await requirePermission('keys:write');
   const id = await selectedEnvironmentId();
   const label = listEnvironments().find((env) => env.id === id)?.label ?? id;
   return (
@@ -35,6 +38,12 @@ export default async function NewKeyPage() {
         policies={await loadPolicyChoices(id)}
         canWrite
         environment={{ id, label }}
+        apis={
+          can(user.role, 'apis:read')
+            ? await loadApiChoices(id)
+            : { ok: false, error: 'Your role cannot read API definitions.' }
+        }
+        accessHelp={accessFieldHelp('KeySession')}
       />
     </div>
   );

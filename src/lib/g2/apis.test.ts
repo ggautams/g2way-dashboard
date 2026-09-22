@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadApi, loadApis } from './apis';
+import { loadApi, loadApiChoices, loadApis } from './apis';
 import { UnknownEnvironmentError, parseEnvironments } from './environments';
 
 const registry = parseEnvironments({
@@ -64,6 +64,35 @@ describe('loadApi', () => {
       ok: false,
       error: 'api not found',
       status: 404,
+    });
+  });
+});
+
+describe('loadApiChoices', () => {
+  it('passes only id, name and GraphQL-ness, never the definition', async () => {
+    const rest = {
+      api_id: 'orders',
+      name: 'Orders',
+      listen_path: '/o/',
+      target_url: 'http://o',
+      auth: { mode: 'basic_auth' },
+    };
+    const gql = { api_id: 'graph', name: 'Graph', listen_path: '/g/', target_url: 'http://g' };
+    const gw = gateway(() => Response.json([rest, { ...gql, graphql: { mode: 'proxy' } }]));
+    expect(await loadApiChoices('dev', { registry, fetch: gw.fetch })).toEqual({
+      ok: true,
+      value: [
+        { id: 'orders', name: 'Orders', graphql: false },
+        { id: 'graph', name: 'Graph', graphql: true },
+      ],
+    });
+  });
+
+  it('quotes the gateway’s error with its status', async () => {
+    const gw = gateway(() => Response.json({ error: 'storage unavailable' }, { status: 503 }));
+    expect(await loadApiChoices('dev', { registry, fetch: gw.fetch })).toEqual({
+      ok: false,
+      error: 'storage unavailable (HTTP 503)',
     });
   });
 });

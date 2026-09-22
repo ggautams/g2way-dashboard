@@ -95,7 +95,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 - [x] Policy CRUD over `/g2/policies`
 - [x] Key create / list / rotate / revoke; raw key shown once, on creation
-- [ ] Per-API access matrix, rate and quota editors
+- [x] Per-API access matrix, rate and quota editors
 - [ ] Dashboard-side key metadata (label, owner, notes) — the gateway lists
       hashes only, so inventory lives here
 - [ ] Live quota and rate-limit usage per key
@@ -146,6 +146,9 @@ the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
 - [ ] Schema viewer and explorer
 - [ ] Schema sync trigger + status (`POST /g2/graphql/sync`)
 - [ ] Depth limit, introspection control, per-key field permission editors
+- [ ] Access matrix: pick GraphQL types and fields from the API's synced schema
+      (typed by hand today, `src/components/designer/access-matrix.tsx`), and
+      mark an API as GraphQL when only a version carries `graphql`
 - [ ] Persisted GraphQL-as-REST endpoint editor
 - [ ] Universal Data Graph data-source designer
 - [ ] Federation view: subgraphs, composition status, supergraph SDL
@@ -904,3 +907,25 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     `/api/g2/keys/[hash]/rotate` side by side. The browser pass is still open,
     and now covers keys.
   - Next: per-API access matrix for keys (M4).
+
+- feat(M4): per-API access matrix, shared by the policy and key
+  designers (`components/designer/access-matrix.tsx`, pure helpers in
+  `lib/designer/access.ts`), replacing the raw-only `access` note.
+  - Rows are granted `api_id`s. Add from `loadApiChoices` (new in
+    `lib/g2/apis.ts`), which sends only id, name and GraphQL-ness to the browser,
+    or add by id. Each row edits `disable_introspection`, `max_query_depth`
+    (blank inherits, -1 lifts) and the allow/block `TypeFields` lists. Help
+    comes from the `ApiAccess`/`TypeFields` rustdoc (`accessFieldHelp`,
+    `schemaHelp`). Every edit keeps unknown fields, and removing the last API
+    drops `access`. Both forms say that an empty map grants every API and that
+    a policy replaces a key's access, rate and quota entirely.
+  - When a key applies a policy, its own limits and access are disabled and
+    marked "not in use". `LimitEditor` now says "Unlimited" in words when off.
+  - `access` joined the form fields, and `accessProblem` blocks empty ids,
+    unnamed GraphQL types and fractional depths.
+  - Surprise: `GET /g2/apis` lists stored definitions only, so a file-loaded
+    API shows as "not found". The row says it may be file-loaded, and add-by-id
+    covers it. Filed in `UPSTREAM.md`.
+  - Not run in a browser (the open M2 browser pass now covers the matrix too).
+  - Follow-up filed: M8 schema-aware type/field pickers.
+  - Next: dashboard-side key metadata (M4).

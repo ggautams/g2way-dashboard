@@ -91,6 +91,14 @@ commit this project is waiting on.
       error-envelope item: `GET /g2/keys` and the `POST /g2/keys` 201 declare no
       body, so `src/lib/keys/session.ts` parses both at runtime. _Not a blocker._
 
+- [ ] **`GET /g2/apis` lists stored definitions only.** _Found 2026-09-23 (M4)._
+      Definitions loaded from `--apps-dir` files (ADR-0002) never appear in it,
+      so the access matrix cannot tell a file-loaded `api_id` from a deleted
+      one: both show as "not found", with a note, and can be added by id. Ask
+      for a listing of the live route table, or a `source` field on each
+      definition (file or storage). Then `danglingApis()` in
+      `src/lib/designer/access.ts` can be exact. _Not a blocker._
+
 - [ ] **`/g2/stats` is process-local** and resets on restart, so with more than
       one replica it is a per-pod sample rather than a cluster total. Cluster-wide
       numbers must come from the analytics feed or Prometheus. Shapes M6; not a

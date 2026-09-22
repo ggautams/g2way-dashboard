@@ -1,11 +1,12 @@
 'use client';
 
 import { Field, Section, Toggle, useSyncedText } from '@/components/designer/fields';
+import { AccessMatrix } from '@/components/designer/access-matrix';
 import { LimitEditor } from '@/components/designer/limits';
 import { Input } from '@/components/ui/input';
+import type { AccessHelp, ApiChoices } from '@/lib/designer/access';
 import {
   fromDateTimeLocal,
-  grantsEveryApi,
   toDateTimeLocal,
   withKeyField,
   type KeyHelpKey,
@@ -26,6 +27,9 @@ type Props = {
   problems: KeyProblems;
   /** The environment's policies, or why they could not be listed. */
   policies: { ok: true; value: readonly PolicyChoice[] } | { ok: false; error: string };
+  /** The environment's APIs for the access matrix, or why they could not be listed. */
+  apis: ApiChoices;
+  accessHelp: AccessHelp;
   readOnly: boolean;
 };
 
@@ -33,17 +37,28 @@ const NO_POLICY = '';
 
 /**
  * The structured half of the key designer: alias, the active switch (the soft
- * revoke), expiry, the one policy g2way applies, and the key's own limits,
- * each editing the draft in place so `access`, `hmac` and the rest survive.
- * The per-API access matrix is a later M4 task; `access` is raw-only until then.
+ * revoke), expiry, the one policy g2way applies, and the key's own limits and
+ * per-API access, each editing the draft in place so `hmac`, `basic_auth` and
+ * the rest survive. While a policy is applied, the key's own limits and access
+ * are ignored at auth time, so they are shown read-only and marked.
  */
-export function KeyForm({ draft, onChange, original, help, problems, policies, readOnly }: Props) {
+export function KeyForm({
+  draft,
+  onChange,
+  original,
+  help,
+  problems,
+  policies,
+  apis,
+  accessHelp,
+  readOnly,
+}: Props) {
   const set = <K extends keyof KeySession>(key: K, value: KeySession[K] | undefined) =>
     onChange(withKeyField(draft, key, value));
   const applied = draft.apply_policies?.[0] ?? NO_POLICY;
   const choices = policies.ok ? policies.value : [];
   const unknownPolicy = applied !== NO_POLICY && !choices.some((p) => p.id === applied);
-  const apis = Object.keys(draft.access ?? {});
+  const policyApplied = applied !== NO_POLICY;
 
   return (
     <fieldset disabled={readOnly} className="flex flex-col gap-8 disabled:opacity-90">
@@ -102,80 +117,75 @@ export function KeyForm({ draft, onChange, original, help, problems, policies, r
             ))}
           </select>
         </Field>
-        {applied !== NO_POLICY && (
+        {policyApplied && (
           <p role="status" className="self-center text-sm text-warning">
-            While a policy is applied, its rate, quota and access replace the key&apos;s own at auth
-            time; the limits below are kept but not used.
+            While a policy is applied, its rate, quota and access replace the key&apos;s own
+            entirely at auth time. The key&apos;s own limits and access below are kept but not used,
+            so they are read-only until the policy is removed.
           </p>
         )}
       </Section>
 
-      <Section title="Limits">
-        <LimitEditor
-          id="rate"
-          label="Rate limit"
-          help={help.rate}
-          problem={problems.rate}
-          value={draft.rate ?? null}
-          start={original?.rate ?? DEFAULT_RATE}
-          onChange={(rate) => set('rate', rate ?? undefined)}
-          fields={[
-            { key: 'requests', label: 'Requests', help: help['rate.requests'] },
-            {
-              key: 'per_seconds',
-              label: 'Window (seconds)',
-              help: help['rate.per_seconds'],
-              seconds: true,
-            },
-          ]}
-        />
-        <LimitEditor
-          id="quota"
-          label="Quota"
-          help={help.quota}
-          problem={problems.quota}
-          value={draft.quota ?? null}
-          start={original?.quota ?? DEFAULT_QUOTA}
-          onChange={(quota) => set('quota', quota ?? undefined)}
-          fields={[
-            { key: 'max', label: 'Maximum requests', help: help['quota.max'] },
-            {
-              key: 'renewal_rate_secs',
-              label: 'Period (seconds)',
-              help: help['quota.renewal_rate_secs'],
-              seconds: true,
-            },
-          ]}
-        />
-      </Section>
-
-      <section className="flex flex-col gap-2" aria-labelledby="key-access">
-        <h2 id="key-access" className="text-sm font-semibold uppercase tracking-wide text-muted">
-          API access
-        </h2>
-        {applied !== NO_POLICY ? (
-          <p className="text-sm">
-            From the policy <span className="font-mono">{applied}</span>.
-          </p>
-        ) : grantsEveryApi(draft) ? (
+      <fieldset disabled={policyApplied} className="flex flex-col gap-3">
+        {policyApplied && (
           <p role="status" className="text-sm text-warning">
-            No access entries: this key may call <strong>every API in the organisation</strong>.
-          </p>
-        ) : (
-          <p className="text-sm">
-            {apis.length} API{apis.length === 1 ? '' : 's'}:{' '}
-            <span className="font-mono text-xs">{apis.join(', ')}</span>
+            Not in use: the limits of the policy <span className="font-mono">{applied}</span> apply
+            instead.
           </p>
         )}
-        {problems.access && (
-          <p role="alert" className="text-xs text-danger">
-            {problems.access}
-          </p>
-        )}
-        <p className="text-xs text-muted">
-          {help.access} Edit <span className="font-mono">access</span> in the JSON or YAML view.
-        </p>
-      </section>
+        <div className={policyApplied ? 'opacity-60' : undefined}>
+          <Section title="Limits">
+            <LimitEditor
+              id="rate"
+              label="Rate limit"
+              help={help.rate}
+              problem={problems.rate}
+              value={draft.rate ?? null}
+              start={original?.rate ?? DEFAULT_RATE}
+              onChange={(rate) => set('rate', rate ?? undefined)}
+              fields={[
+                { key: 'requests', label: 'Requests', help: help['rate.requests'] },
+                {
+                  key: 'per_seconds',
+                  label: 'Window (seconds)',
+                  help: help['rate.per_seconds'],
+                  seconds: true,
+                },
+              ]}
+            />
+            <LimitEditor
+              id="quota"
+              label="Quota"
+              help={help.quota}
+              problem={problems.quota}
+              value={draft.quota ?? null}
+              start={original?.quota ?? DEFAULT_QUOTA}
+              onChange={(quota) => set('quota', quota ?? undefined)}
+              fields={[
+                { key: 'max', label: 'Maximum requests', help: help['quota.max'] },
+                {
+                  key: 'renewal_rate_secs',
+                  label: 'Period (seconds)',
+                  help: help['quota.renewal_rate_secs'],
+                  seconds: true,
+                },
+              ]}
+            />
+          </Section>
+        </div>
+      </fieldset>
+
+      <AccessMatrix
+        id="access"
+        access={draft.access}
+        onChange={(access) => set('access', access)}
+        apis={apis}
+        help={accessHelp}
+        subject="this key"
+        replaceNote="When the key applies a policy, the policy's access, rate and quota replace the key's own entirely; nothing is merged."
+        problem={problems.access}
+        overriddenBy={policyApplied ? applied : null}
+      />
     </fieldset>
   );
 }

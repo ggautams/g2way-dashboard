@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { RawPanel, SchemaProblems, useRawView } from '@/components/designer/raw-view';
 import { SaveBar, type DesignerEnvironment } from '@/components/designer/save-bar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { AccessHelp, ApiChoices } from '@/lib/designer/access';
 import { RAW_FORMATS, schemaValidator } from '@/lib/designer/raw';
 import {
   isPolicyShape,
@@ -27,14 +28,26 @@ type Props = {
   canWrite: boolean;
   /** The environment the policy was loaded from, and is saved back to. */
   environment: DesignerEnvironment;
+  /** The environment's APIs for the access matrix (`loadApiChoices`). */
+  apis: ApiChoices;
+  accessHelp: AccessHelp;
 };
 
 /**
  * The policy designer: one draft `Policy`, edited through the structured form
- * or as raw JSON/YAML, exactly as the API designer works. The `access` map is
- * raw-only for now. A History tab (ADR-0008 versions) joins the tabs later.
+ * or as raw JSON/YAML, exactly as the API designer works. A History tab
+ * (ADR-0008 versions) joins the tabs later.
  */
-export function PolicyDesigner({ original, initial, help, schema, canWrite, environment }: Props) {
+export function PolicyDesigner({
+  original,
+  initial,
+  help,
+  schema,
+  canWrite,
+  environment,
+  apis,
+  accessHelp,
+}: Props) {
   const [draft, setDraft] = useState(initial);
   const { view, text, unapplied, open, edit } = useRawView<Policy, 'form'>({
     draft,
@@ -53,9 +66,7 @@ export function PolicyDesigner({ original, initial, help, schema, canWrite, envi
     (unapplied !== null
       ? 'The raw text has errors; fix them or switch back to the form.'
       : Object.keys(problems).length > 0
-        ? problems.access && Object.keys(problems).length === 1
-          ? `${problems.access} Fix it in the JSON or YAML view.`
-          : 'Fix the fields marked in the form first.'
+        ? 'Fix the fields marked in the form first.'
         : null);
 
   return (
@@ -78,6 +89,8 @@ export function PolicyDesigner({ original, initial, help, schema, canWrite, envi
             original={original}
             help={help}
             problems={problems}
+            apis={apis}
+            accessHelp={accessHelp}
             readOnly={!canWrite}
           />
           {others.length > 0 && (

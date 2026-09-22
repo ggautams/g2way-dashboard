@@ -6,6 +6,9 @@ import { PolicyDesigner } from '@/components/policies/policy-designer';
 import { Notice } from '@/components/users/controls';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
+import type { ApiChoices } from '@/lib/designer/access';
+import { accessFieldHelp } from '@/lib/designer/access-help';
+import { loadApiChoices } from '@/lib/g2/apis';
 import {
   RegistryConfigError,
   UnknownEnvironmentError,
@@ -34,6 +37,7 @@ export default async function PolicyPage({
   const id = decodeURIComponent((await params).id);
   const { saved } = await searchParams;
   let policy: PolicyItem['policy'];
+  let apis: ApiChoices = { ok: false, error: 'not loaded' };
   let environment = { id: '', label: '' };
   try {
     const item = await loadPolicy(await selectedEnvironmentId(), id);
@@ -43,6 +47,11 @@ export default async function PolicyPage({
       label:
         listEnvironments().find((env) => env.id === item.environment)?.label ?? item.environment,
     };
+    if (policy.ok) {
+      apis = can(user.role, 'apis:read')
+        ? await loadApiChoices(item.environment)
+        : { ok: false, error: 'Your role cannot read API definitions.' };
+    }
   } catch (error) {
     if (!(error instanceof RegistryConfigError || error instanceof UnknownEnvironmentError)) {
       throw error;
@@ -86,6 +95,8 @@ export default async function PolicyPage({
           help={policyFieldHelp()}
           schema={policySchema()}
           canWrite={canWrite}
+          apis={apis}
+          accessHelp={accessFieldHelp('Policy')}
         />
       ) : (
         <section

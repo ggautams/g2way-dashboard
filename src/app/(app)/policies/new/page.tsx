@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { PolicyDesigner } from '@/components/policies/policy-designer';
+import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
+import { accessFieldHelp } from '@/lib/designer/access-help';
+import { loadApiChoices } from '@/lib/g2/apis';
 import { listEnvironments } from '@/lib/g2/environments';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 import { newPolicyDraft } from '@/lib/policies/draft';
@@ -11,7 +14,7 @@ import { policySchema } from '@/lib/policies/schema';
 export const metadata: Metadata = { title: 'New policy' };
 
 export default async function NewPolicyPage() {
-  await requirePermission('policies:write');
+  const user = await requirePermission('policies:write');
   const id = await selectedEnvironmentId();
   const label = listEnvironments().find((env) => env.id === id)?.label ?? id;
   return (
@@ -32,6 +35,12 @@ export default async function NewPolicyPage() {
         schema={policySchema()}
         canWrite
         environment={{ id, label }}
+        apis={
+          can(user.role, 'apis:read')
+            ? await loadApiChoices(id)
+            : { ok: false, error: 'Your role cannot read API definitions.' }
+        }
+        accessHelp={accessFieldHelp('Policy')}
       />
     </div>
   );
