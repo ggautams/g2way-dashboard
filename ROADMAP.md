@@ -831,3 +831,8 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
       M11 (restore deleted from history, history retention, Postgres
       end-to-end boot).
   - Next: M4, policy CRUD over `/g2/policies`.
+
+- fix(drift): `sync:g2way` exited "Already in sync" when
+  nothing had drifted, even with an area newly added to `watch.json`, so a new
+  area could never be locked and `check:g2way` warned about it forever. It now
+  records first fingerprints for new areas; `file-loader` is locked.
