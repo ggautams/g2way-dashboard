@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { ApiDesigner } from '@/components/apis/api-designer';
 import { newDraft } from '@/lib/apis/draft';
 import { fieldHelp } from '@/lib/apis/field-help';
+import { apiDefinitionSchema } from '@/lib/apis/schema';
 import { requirePermission } from '@/lib/auth/session';
 
 export const metadata: Metadata = { title: 'New API' };
@@ -20,7 +21,13 @@ export default async function NewApiPage() {
         </p>
         <h1 className="text-2xl font-semibold tracking-tight">New API</h1>
       </header>
-      <ApiDesigner original={null} initial={newDraft()} help={fieldHelp()} canWrite />
+      <ApiDesigner
+        original={null}
+        initial={newDraft()}
+        help={fieldHelp()}
+        schema={apiDefinitionSchema()}
+        canWrite
+      />
     </div>
   );
 }

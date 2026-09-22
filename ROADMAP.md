@@ -60,7 +60,9 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Run `make test-pg` against a live Postgres (never run yet; only PGlite has
       exercised the pg path, and only real pg races concurrent connections)
 - [ ] Browser pass over `/setup`, `/login`, `/users` (now including password
-      reset and the row-error fix), `/account`, `/audit` and sign-out (M1 and M2
+      reset and the row-error fix), `/account`, `/audit` and sign-out — and M3's
+      `/apis` designer: Monaco has only been built, never run (workers, theme,
+      inline schema markers) (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23 either — run `next build && next start -p 3100` with a scratch
       `DATABASE_URL`, since `next dev` refuses a second server per checkout)
@@ -79,7 +81,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Decide form primitives before the designer: adopt shadcn/ui as ADR-0001
       says, or record an ADR for the hand-rolled components the shell uses
 - [x] API designer: structured form over `ApiDefinition`
-- [ ] Raw JSON/YAML editor (Monaco) validated live against the OpenAPI schema,
+- [x] Raw JSON/YAML editor (Monaco) validated live against the OpenAPI schema,
       kept in sync with the form both ways
 - [ ] Diff preview before save; create/update/delete via `/g2/apis`
 - [ ] **Reload-required** as a first-class UI concept: writes are staged until
@@ -686,3 +688,29 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   - There is no save yet; that is the diff-preview task.
     Per-mode auth editors are M5's auth-mode editor. Next: the raw JSON/YAML
     editor.
+
+- feat(M3): raw JSON/YAML editor.
+  - The designer now has Form, JSON and YAML tabs over one draft.
+    - Opening a raw tab renders the draft.
+    - Raw text is applied to the draft on every change that parses into
+      something with the four required fields as strings. Anything else is
+      shown as "Not applied to the draft: <parser message>".
+    - The form reads the same draft, so edits flow both ways.
+  - Schema: `apiDefinitionSchema()` (`src/lib/apis/schema.ts`) cuts
+    `ApiDefinition` and its 33 referenced schemas out of `openapi.json` (about
+    60 KB, only on designer pages).
+    - Monaco uses it for inline JSON diagnostics and completion.
+    - Ajv 2020 validates the draft in both formats and lists problems by path
+      under the editor, so YAML gets the same checks.
+  - Monaco is bundled rather than taken from `@monaco-editor/react`'s jsDelivr
+    default: a self-hosted dashboard may be offline.
+    - `monaco/setup.ts` loads only the editor core, the JSON service and YAML
+      highlighting.
+    - Workers are local entry files (`new URL('./json.worker.ts',
+import.meta.url)`), which Turbopack emits under `.next/static/media/`.
+    - The editor is `next/dynamic` with `ssr: false`, so other pages don't pay
+      for it.
+  - **Not verified in a browser:** the extension is still disconnected. The
+    build emits the workers, and the loader's CDN URL remains only as dead
+    default config. Folded into the open browser-pass box.
+  - Next: diff preview and save.

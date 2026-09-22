@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ApiDesigner } from '@/components/apis/api-designer';
 import { fieldHelp } from '@/lib/apis/field-help';
+import { apiDefinitionSchema } from '@/lib/apis/schema';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import { loadApi, type ApiItem } from '@/lib/g2/apis';
@@ -47,6 +48,7 @@ export default async function ApiPage({ params }: PageProps<'/apis/[id]'>) {
           original={api.value}
           initial={api.value}
           help={fieldHelp()}
+          schema={apiDefinitionSchema()}
           canWrite={can(user.role, 'apis:write')}
         />
       ) : (
