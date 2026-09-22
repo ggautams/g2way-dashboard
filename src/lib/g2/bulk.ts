@@ -91,7 +91,12 @@ export async function runBulkOperation(
     actor,
     action: BULK_ACTIONS[bulk.collection],
     target: null,
-    request: { op: bulk.op, ids: bulk.ids, ...(policy === undefined ? {} : { policy }) },
+    request: {
+      op: bulk.op,
+      ids: bulk.ids,
+      ...(policy === undefined ? {} : { policy }),
+      ...(bulk.part === undefined ? {} : { part: bulk.part }),
+    },
     outcome: 'pending',
   };
 
@@ -122,6 +127,11 @@ export async function runBulkOperation(
 
   const notes = [
     `bulk ${summary} of ${bulk.ids.length} ${bulk.collection}: one gateway call per item, each audited on its own`,
+    ...(bulk.part === undefined
+      ? []
+      : [
+          `part ${bulk.part.index} of ${bulk.part.of}: one selection larger than a single bulk request, sent in parts`,
+        ]),
   ];
   const record: AuditRecord = { ...base, environment, notes };
   let auditId: string;

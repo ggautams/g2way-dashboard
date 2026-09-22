@@ -170,6 +170,20 @@ describe('bulk key operations', () => {
     expect(summary?.notes).toContain('1 done, 1 unchanged, 1 failed');
   });
 
+  it('marks each part of a chunked selection in its summary audit row', async () => {
+    const { response, summary } = await bulk({
+      collection: 'keys',
+      op: 'revoke',
+      ids: [A],
+      part: { index: 2, of: 3 },
+    });
+    expect(response.status).toBe(200);
+    expect(summary).toMatchObject({
+      request: { op: 'revoke', ids: [A], part: { index: 2, of: 3 } },
+    });
+    expect(summary?.notes?.some((note) => note.startsWith('part 2 of 3'))).toBe(true);
+  });
+
   it('deletes by hash and drops each deleted key’s metadata, as the single delete does', async () => {
     const { body, gateway, rows, forgotten, summary } = await bulk({
       collection: 'keys',

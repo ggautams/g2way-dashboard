@@ -105,8 +105,10 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Search and filter `/keys` by dashboard label and owner (today they only
       show on the page being viewed), and prune `key_metadata` rows orphaned by
       key deletes made outside the dashboard (ADR-0009 §7)
-- [ ] Bulk selection across pages ("select every match"): today a bulk action
-      covers the rows on screen (25 at most; the BFF takes up to 100)
+- [x] Bulk selection across pages ("select every match"): a filtered `/keys`
+      resolves the filter's whole match set server-side (the search loader's
+      scan, same 200-read cap), never includes a key whose read failed, and
+      runs it in requests of at most 100
 - [ ] Complete alias/policy/state search past 200 keys: needs g2way to list
       sessions, or at least aliases, in one call (`UPSTREAM.md`, hashes-only
       listing); until then `/keys` says when a search stopped short
@@ -1113,3 +1115,30 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - Also masked beyond the four named fields: `target_list` and
     `service_discovery.endpoint`, which follow `target_url`'s rules.
   - Next: cross-page bulk selection, or start M5.
+
+- feat(M4): "select every match" on a filtered `/keys`.
+  - `loadKeySearch` and the new `loadKeyMatches` share one scan (`scanKeys` in
+    `lib/g2/keys.ts`), so the match set has the same `KEY_SCAN_LIMIT` = 200
+    cap, scan order and `scan` report as the page. `loadKeyMatches` is unpaged
+    and keeps only matches whose session was read. A failed read is counted in
+    `unreadable`, never selected. That covers "unchecked" keys and also a
+    label/owner match whose read failed, which `matchKey` calls a match.
+  - `resolveKeyMatches` (`lib/g2/key-matches.ts`, `keys:write`) is behind
+    `resolveKeyMatchesAction`, passed to the table as a prop. It returns
+    `toKeyListRow` display rows only, since sessions can hold hmac secrets.
+    It is a read and not audited; the bulk run that follows is.
+  - In the bulk toolbar of a filtered list, "Select every match" swaps the
+    on-screen selection for the resolved set. The toolbar and the review
+    dialog say when the set was read, how many keys among how many read, that
+    unreadable keys are left out, and, when the scan stopped at the cap, that
+    the selection covers only the keys that were read. Touching a row
+    checkbox drops back to the on-screen selection.
+  - `runBulkChunked` (`lib/bulk/ops.ts`) sends at most `BULK_MAX` = 100 per
+    request, one request after another. Each request carries
+    `part: {index, of}`, which the BFF validates and writes into the
+    `key.bulk` summary row and its notes. A request refused whole stops the
+    run: the first one returns the refusal itself, a later one returns the
+    results so far and `halted.notSent`, which the report dialog shows.
+    Today the cap means at most two requests.
+  - Not run in a browser (the open M2 browser pass covers this too).
+  - Next: close out M4 (the rest is blocked upstream), then M5.

@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import type { BulkCallResult, BulkItemResult } from '@/lib/bulk/ops';
+import type { BulkCallResult, BulkHalt, BulkItemResult } from '@/lib/bulk/ops';
 
 export type BulkItem = { id: string; label: string; detail?: string };
 
@@ -19,7 +19,7 @@ type Phase =
   | { state: 'review' }
   | { state: 'running' }
   | { state: 'failed'; error: string }
-  | { state: 'done'; results: BulkItemResult[] };
+  | { state: 'done'; results: BulkItemResult[]; halted?: BulkHalt };
 
 /**
  * The review-then-report dialog every bulk action goes through: it lists the
@@ -59,7 +59,7 @@ export function BulkReview({
       });
       return;
     }
-    setPhase({ state: 'done', results: result.results });
+    setPhase({ state: 'done', results: result.results, halted: result.halted });
   };
 
   const close = () => {
@@ -141,6 +141,14 @@ export function BulkReview({
                 </li>
               ))}
             </ul>
+            {phase.halted !== undefined && (
+              <p role="alert" className="font-mono text-xs break-all text-danger">
+                Stopped: {phase.halted.notSent.length} item
+                {phase.halted.notSent.length === 1 ? ' was' : 's were'} never sent, because the next
+                request was refused: {phase.halted.error}
+                {phase.halted.status !== undefined && ` (HTTP ${phase.halted.status})`}
+              </p>
+            )}
           </>
         )}
 

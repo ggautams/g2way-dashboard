@@ -27,9 +27,15 @@ export type KeyBulkOp = (typeof KEY_BULK_OPS)[number];
 export const POLICY_BULK_OPS = ['delete'] as const;
 export type PolicyBulkOp = (typeof POLICY_BULK_OPS)[number];
 
+/**
+ * Which request of a selection larger than {@link BULK_MAX} this is (1-based),
+ * sent by {@link runBulkChunked} so each summary audit row says it is a part.
+ */
+export type BulkPart = { index: number; of: number };
+
 export type BulkRequest =
-  | { collection: 'keys'; op: KeyBulkOp; ids: string[]; policy?: string }
-  | { collection: 'policies'; op: PolicyBulkOp; ids: string[] };
+  | { collection: 'keys'; op: KeyBulkOp; ids: string[]; policy?: string; part?: BulkPart }
+  | { collection: 'policies'; op: PolicyBulkOp; ids: string[]; part?: BulkPart };
 
 export type BulkItemResult =
   | { id: string; outcome: 'done'; status: number }
@@ -48,6 +54,9 @@ export type BulkAnswer = {
   results: BulkItemResult[];
 };
 
+/** A chunked run that stopped: a later request was refused whole, after earlier ones ran. */
+export type BulkHalt = { error: string; status?: number; notSent: string[] };
+
 export type ParsedBulk = { ok: true; value: BulkRequest } | { ok: false; error: string };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -57,6 +66,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export function parseBulkRequest(body: unknown): ParsedBulk {
   if (!isRecord(body)) return { ok: false, error: 'invalid bulk request: not a JSON object' };
   const { collection, op, ids, policy } = body;
+  const part = parsePart(body.part);
+  if (part === null) {
+    return {
+      ok: false,
+      error: 'invalid bulk request: `part` must be {index, of} with 1 ≤ index ≤ of',
+    };
+  }
+  const withPart = part === undefined ? {} : { part };
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {
     return { ok: false, error: 'invalid bulk request: `ids` must be an array of strings' };
   }
@@ -75,7 +92,7 @@ export function parseBulkRequest(body: unknown): ParsedBulk {
         error: `invalid bulk request: policies support ${POLICY_BULK_OPS.join(', ')}`,
       };
     }
-    return { ok: true, value: { collection, op: op as PolicyBulkOp, ids: unique } };
+    return { ok: true, value: { collection, op: op as PolicyBulkOp, ids: unique, ...withPart } };
   }
   if (collection !== 'keys') {
     return { ok: false, error: 'invalid bulk request: `collection` must be keys or policies' };
@@ -88,9 +105,22 @@ export function parseBulkRequest(body: unknown): ParsedBulk {
     if (typeof policy !== 'string' || policy.trim() === '') {
       return { ok: false, error: `invalid bulk request: ${keyOp} needs a \`policy\`` };
     }
-    return { ok: true, value: { collection, op: keyOp, ids: unique, policy: policy.trim() } };
+    return {
+      ok: true,
+      value: { collection, op: keyOp, ids: unique, policy: policy.trim(), ...withPart },
+    };
   }
-  return { ok: true, value: { collection, op: keyOp, ids: unique } };
+  return { ok: true, value: { collection, op: keyOp, ids: unique, ...withPart } };
+}
+
+/** `undefined` when absent, `null` when malformed. */
+function parsePart(value: unknown): BulkPart | undefined | null {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return null;
+  const { index, of } = value;
+  if (!Number.isInteger(index) || !Number.isInteger(of)) return null;
+  const [i, n] = [index as number, of as number];
+  return i >= 1 && i <= n && n <= 1000 ? { index: i, of: n } : null;
 }
 
 export type SessionChange = { next: KeySession } | { unchanged: string };
@@ -151,7 +181,7 @@ export function describeBulkOp(
 }
 
 export type BulkCallResult =
-  ({ ok: true } & BulkAnswer) | { ok: false; error: string; status?: number };
+  ({ ok: true; halted?: BulkHalt } & BulkAnswer) | { ok: false; error: string; status?: number };
 
 /** Sends `request` for environment `environmentId` through the BFF. */
 export async function runBulk(
@@ -184,4 +214,56 @@ export async function runBulk(
     return { ok: false, error: `bulk answered ${response.status} without per-item results` };
   }
   return { ok: true, ...(body as BulkAnswer) };
+}
+
+/** `ids` in order, in runs of at most `size` (the BFF's {@link BULK_MAX}). */
+export function chunkIds<T>(ids: readonly T[], size: number = BULK_MAX): T[][] {
+  if (!Number.isInteger(size) || size < 1) throw new RangeError(`chunk size ${size}`);
+  const chunks: T[][] = [];
+  for (let i = 0; i < ids.length; i += size) chunks.push(ids.slice(i, i + size));
+  return chunks;
+}
+
+/**
+ * {@link runBulk} for any number of items: one BFF request per
+ * {@link BULK_MAX} items, one after another, each marked with its `part` so
+ * its summary audit row says so. A selection that fits in one request is sent
+ * unmarked, exactly as {@link runBulk} would.
+ *
+ * Per-item failures never stop the run (the BFF reports them). A request
+ * refused whole (400, 403, 503) stops it: before anything ran, the answer is
+ * that refusal; after, it is the results so far with `halted` naming what was
+ * never sent.
+ */
+export async function runBulkChunked(
+  environmentId: string,
+  request: BulkRequest,
+  options: { baseUrl?: string; fetch?: typeof fetch; size?: number } = {},
+): Promise<BulkCallResult> {
+  const chunks = chunkIds([...new Set(request.ids)], options.size ?? BULK_MAX);
+  if (chunks.length <= 1) return runBulk(environmentId, request, options);
+  const results: BulkItemResult[] = [];
+  for (const [i, ids] of chunks.entries()) {
+    const answer = await runBulk(
+      environmentId,
+      { ...request, ids, part: { index: i + 1, of: chunks.length } },
+      options,
+    );
+    if (!answer.ok) {
+      if (i === 0) return answer;
+      return {
+        ok: true,
+        collection: request.collection,
+        op: request.op,
+        results,
+        halted: {
+          error: answer.error,
+          ...(answer.status === undefined ? {} : { status: answer.status }),
+          notSent: chunks.slice(i).flat(),
+        },
+      };
+    }
+    results.push(...answer.results);
+  }
+  return { ok: true, collection: request.collection, op: request.op, results };
 }

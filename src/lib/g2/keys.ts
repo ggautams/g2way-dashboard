@@ -117,6 +117,61 @@ export type KeySearch = {
   fetchedAt: number;
 };
 
+type SearchDeps = GatewayClientDeps & {
+  now?: () => number;
+  labelsFor: (environment: string, hashes: readonly string[]) => Promise<Map<string, KeyLabels>>;
+};
+
+type ScannedRow = KeyRow & { verdict: 'match' | 'unknown' };
+
+/**
+ * The search both {@link loadKeySearch} and {@link loadKeyMatches} run: the
+ * hash list, labels for every hash (settled into `labels`), then session reads
+ * in {@link scanOrder}, at most {@link KEY_SCAN_LIMIT}. Keeps every row that
+ * matches or whose match is unknown, with the verdict, in scan order.
+ */
+async function scanKeys(
+  client: ReturnType<typeof gatewayClient>,
+  environment: string,
+  filter: KeyFilter,
+  nowSecs: number,
+  deps: SearchDeps,
+  setLabels: (labels: Outcome<Map<string, KeyLabels>>) => void,
+): Promise<{ hashes: string[]; rows: ScannedRow[]; scan: KeySearchScan }> {
+  const hashes = parseKeyList(await unwrap(client.GET('/g2/keys')));
+  let known = new Map<string, KeyLabels>();
+  try {
+    known = await deps.labelsFor(environment, hashes);
+    setLabels({ ok: true, value: known });
+  } catch (error) {
+    setLabels({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  }
+  const order = scanOrder(hashes, known, filter.q).slice(0, KEY_SCAN_LIMIT);
+  const read = await mapLimit(order, READ_CONCURRENCY, async (hash) => ({
+    hash,
+    session: await readSession(client, hash),
+  }));
+  let matched = 0;
+  let unchecked = 0;
+  const rows: ScannedRow[] = [];
+  for (const row of read) {
+    const verdict = matchKey(
+      {
+        hash: row.hash,
+        labels: known.get(row.hash),
+        summary: row.session.ok ? summariseKey(row.hash, row.session.value) : null,
+      },
+      filter,
+      nowSecs,
+    );
+    if (verdict === 'no') continue;
+    if (verdict === 'match') matched += 1;
+    else unchecked += 1;
+    rows.push({ ...row, verdict });
+  }
+  return { hashes, rows, scan: { total: hashes.length, scanned: read.length, matched, unchecked } };
+}
+
 /**
  * Searches environment `environmentId`'s keys with `filter` and returns page
  * `page` of the matches. Label and owner come from `labelsFor` (the dashboard
@@ -129,50 +184,76 @@ export async function loadKeySearch(
   environmentId: string | undefined,
   filter: KeyFilter,
   page: number,
-  deps: GatewayClientDeps & {
-    now?: () => number;
-    labelsFor: (environment: string, hashes: readonly string[]) => Promise<Map<string, KeyLabels>>;
-  },
+  deps: SearchDeps,
 ): Promise<KeySearch> {
   const { id } = resolveEnvironment(environmentId, deps.registry);
   const client = gatewayClient(id, deps);
   const fetchedAt = (deps.now ?? Date.now)();
-  const nowSecs = Math.floor(fetchedAt / 1000);
   let labels: Outcome<Map<string, KeyLabels>> = { ok: true, value: new Map() };
   const keys = await settle(async () => {
-    const hashes = parseKeyList(await unwrap(client.GET('/g2/keys')));
-    try {
-      labels = { ok: true, value: await deps.labelsFor(id, hashes) };
-    } catch (error) {
-      labels = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    const { hashes, rows, scan } = await scanKeys(
+      client,
+      id,
+      filter,
+      Math.floor(fetchedAt / 1000),
+      deps,
+      (outcome) => (labels = outcome),
+    );
+    const shown = rows.map(({ hash, session }) => ({ hash, session }));
+    return { ...pageOf(shown, page, KEY_PAGE_SIZE), hashes, scan };
+  });
+  return { environment: id, keys, labels, fetchedAt };
+}
+
+export type KeyMatches = {
+  environment: string;
+  keys: Outcome<{
+    /** Every match among the keys read, in scan order, each with a session read. */
+    matches: { hash: string; session: KeySession }[];
+    /**
+     * Keys left out because their session read failed: the scan's unchecked
+     * keys, plus label/owner matches whose session could not be read.
+     */
+    unreadable: number;
+    scan: KeySearchScan;
+  }>;
+  labels: Outcome<Map<string, KeyLabels>>;
+  fetchedAt: number;
+};
+
+/**
+ * Every key {@link loadKeySearch} would list for `filter`, unpaged, for "select
+ * every match": the same scan, with the same {@link KEY_SCAN_LIMIT} cap and
+ * `scan` report, but only keys whose session was read and that match. A key
+ * whose read failed is never included, whatever its verdict: it is counted in
+ * `unreadable` instead.
+ */
+export async function loadKeyMatches(
+  environmentId: string | undefined,
+  filter: KeyFilter,
+  deps: SearchDeps,
+): Promise<KeyMatches> {
+  const { id } = resolveEnvironment(environmentId, deps.registry);
+  const client = gatewayClient(id, deps);
+  const fetchedAt = (deps.now ?? Date.now)();
+  let labels: Outcome<Map<string, KeyLabels>> = { ok: true, value: new Map() };
+  const keys = await settle(async () => {
+    const { rows, scan } = await scanKeys(
+      client,
+      id,
+      filter,
+      Math.floor(fetchedAt / 1000),
+      deps,
+      (outcome) => (labels = outcome),
+    );
+    const matches: { hash: string; session: KeySession }[] = [];
+    let unreadable = 0;
+    for (const row of rows) {
+      if (row.verdict === 'match' && row.session.ok) {
+        matches.push({ hash: row.hash, session: row.session.value });
+      } else unreadable += 1;
     }
-    const known = labels.ok ? labels.value : new Map<string, KeyLabels>();
-    const order = scanOrder(hashes, known, filter.q).slice(0, KEY_SCAN_LIMIT);
-    const rows = await mapLimit(order, READ_CONCURRENCY, async (hash) => ({
-      hash,
-      session: await readSession(client, hash),
-    }));
-    let matched = 0;
-    let unchecked = 0;
-    const shown = rows.filter((row) => {
-      const verdict = matchKey(
-        {
-          hash: row.hash,
-          labels: known.get(row.hash),
-          summary: row.session.ok ? summariseKey(row.hash, row.session.value) : null,
-        },
-        filter,
-        nowSecs,
-      );
-      if (verdict === 'match') matched += 1;
-      if (verdict === 'unknown') unchecked += 1;
-      return verdict !== 'no';
-    });
-    return {
-      ...pageOf(shown, page, KEY_PAGE_SIZE),
-      hashes,
-      scan: { total: hashes.length, scanned: rows.length, matched, unchecked },
-    };
+    return { matches, unreadable, scan };
   });
   return { environment: id, keys, labels, fetchedAt };
 }

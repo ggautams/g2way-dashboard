@@ -6,10 +6,17 @@ import { useState } from 'react';
 import { BulkReview, useSelection, type BulkItem } from '@/components/bulk/bulk-review';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { describeBulkOp, runBulk, type KeyBulkOp } from '@/lib/bulk/ops';
+import { BULK_MAX, chunkIds, describeBulkOp, runBulkChunked, type KeyBulkOp } from '@/lib/bulk/ops';
+import type { KeyFilter } from '@/lib/keys/filter';
 import type { KeyListRow } from '@/lib/keys/list-row';
+import type { KeyMatchSelection } from '@/lib/keys/matches';
 
 type PolicyChoice = { id: string; name: string; active: boolean };
+type ResolvedMatches = Extract<KeyMatchSelection, { ok: true }>;
+type EveryMatch =
+  | { state: 'loading' }
+  | { state: 'error'; error: string }
+  | { state: 'ready'; selection: ResolvedMatches };
 
 const CONTROL =
   'h-8 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
@@ -18,6 +25,12 @@ const CONTROL =
  * The `/keys` table. With `keys:write` (`bulk` set) rows can be selected and
  * revoked, reactivated, deleted, or given or relieved of one policy in bulk:
  * reviewed first, then one audited gateway call per key, reported per key.
+ *
+ * On a filtered list (`bulk.everyMatch` set), "Select every match" swaps the
+ * on-screen selection for the filter's whole match set, resolved server-side
+ * by the search loader at that moment (capped, and never including a key whose
+ * session could not be read); the review dialog lists it all, and it is sent
+ * in requests of at most {@link BULK_MAX}.
  */
 export function KeyTable({
   rows,
@@ -27,13 +40,38 @@ export function KeyTable({
   bulk?: {
     environment: { id: string; label: string };
     policies: { ok: true; value: PolicyChoice[] } | { ok: false; error: string };
+    everyMatch?: {
+      filter: KeyFilter;
+      resolve: (environmentId: string, filter: KeyFilter) => Promise<KeyMatchSelection>;
+    };
   };
 }) {
   const router = useRouter();
   const selection = useSelection(rows.map((row) => row.hash));
   const [policy, setPolicy] = useState('');
   const [op, setOp] = useState<KeyBulkOp | null>(null);
-  const chosen = rows.filter((row) => selection.selected.has(row.hash));
+  const [every, setEvery] = useState<EveryMatch | null>(null);
+  const matches = every?.state === 'ready' ? every.selection : null;
+  const chosen = matches?.items ?? rows.filter((row) => selection.selected.has(row.hash));
+  const checked = matches === null ? selection.selected : new Set(chosen.map((row) => row.hash));
+  const selectedCount = matches === null ? selection.selected.size : matches.items.length;
+
+  const selectEveryMatch = async () => {
+    if (bulk?.everyMatch === undefined) return;
+    setEvery({ state: 'loading' });
+    try {
+      const answer = await bulk.everyMatch.resolve(bulk.environment.id, bulk.everyMatch.filter);
+      setEvery(
+        answer.ok ? { state: 'ready', selection: answer } : { state: 'error', error: answer.error },
+      );
+    } catch (error) {
+      setEvery({ state: 'error', error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  const clearAll = () => {
+    setEvery(null);
+    selection.clear();
+  };
 
   const items: BulkItem[] = chosen.map((row) => ({
     id: row.hash,
@@ -51,13 +89,29 @@ export function KeyTable({
 
   return (
     <div className="flex flex-col gap-2">
-      {bulk !== undefined && selection.selected.size > 0 && (
+      {bulk !== undefined && (selection.selected.size > 0 || every !== null) && (
         <div
           role="toolbar"
           aria-label="Bulk actions"
           className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-subtle px-3 py-2 text-sm"
         >
-          <span className="font-medium">{selection.selected.size} selected</span>
+          <span className="font-medium">
+            {selectedCount} selected
+            {matches !== null && (
+              <span className="font-normal text-muted"> · every readable match, all pages</span>
+            )}
+          </span>
+          {bulk.everyMatch !== undefined && every?.state !== 'ready' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={every?.state === 'loading'}
+              onClick={selectEveryMatch}
+              title="Read the whole match set of this filter now, across every page"
+            >
+              {every?.state === 'loading' ? 'Finding every match…' : 'Select every match'}
+            </Button>
+          )}
           <Button size="sm" variant="outline" onClick={() => setOp('revoke')}>
             Revoke
           </Button>
@@ -105,9 +159,15 @@ export function KeyTable({
               Policies unavailable: {bulk.policies.error}
             </span>
           )}
-          <Button size="sm" variant="ghost" onClick={selection.clear}>
+          <Button size="sm" variant="ghost" onClick={clearAll}>
             Clear
           </Button>
+          {every?.state === 'error' && (
+            <p role="alert" className="w-full font-mono text-xs break-all text-danger">
+              Could not select every match: {every.error}
+            </p>
+          )}
+          {matches !== null && <MatchSetNotes matches={matches} />}
         </div>
       )}
 
@@ -120,8 +180,11 @@ export function KeyTable({
                   <input
                     type="checkbox"
                     aria-label="Select every key on this page"
-                    checked={rows.length > 0 && selection.selected.size === rows.length}
-                    onChange={selection.toggleAll}
+                    checked={rows.length > 0 && rows.every((row) => checked.has(row.hash))}
+                    onChange={() => {
+                      setEvery(null);
+                      selection.toggleAll();
+                    }}
                   />
                 </th>
               )}
@@ -140,8 +203,11 @@ export function KeyTable({
                 key={row.hash}
                 row={row}
                 selectable={bulk !== undefined}
-                selected={selection.selected.has(row.hash)}
-                onToggle={() => selection.toggle(row.hash)}
+                selected={checked.has(row.hash)}
+                onToggle={() => {
+                  setEvery(null);
+                  selection.toggle(row.hash);
+                }}
               />
             ))}
           </tbody>
@@ -151,12 +217,17 @@ export function KeyTable({
       {bulk !== undefined && op !== null && (!needsPolicy || policy !== '') && (
         <BulkReview
           title={`${verb(op, policy)} ${items.length} key${items.length === 1 ? '' : 's'}?`}
-          description={<KeyOpNotes op={op} policy={policy} environment={bulk.environment.label} />}
+          description={
+            <>
+              <KeyOpNotes op={op} policy={policy} environment={bulk.environment.label} />
+              {matches !== null && <MatchSetNotes matches={matches} review />}
+            </>
+          }
           items={items}
           confirmLabel={verb(op, policy)}
           destructive={op === 'delete' || op === 'revoke'}
           run={() =>
-            runBulk(bulk.environment.id, {
+            runBulkChunked(bulk.environment.id, {
               collection: 'keys',
               op,
               ids: items.map((item) => item.id),
@@ -165,12 +236,64 @@ export function KeyTable({
           }
           onClose={() => setOp(null)}
           onFinished={() => {
-            selection.clear();
+            clearAll();
             router.refresh();
           }}
         />
       )}
     </div>
+  );
+}
+
+/**
+ * What "every match" covers, said plainly: when it was read, what it left out
+ * (keys that could not be read), where it stopped (the scan cap), and, in the
+ * review dialog, how many requests it will take.
+ */
+function MatchSetNotes({
+  matches,
+  review = false,
+}: {
+  matches: ResolvedMatches;
+  review?: boolean;
+}) {
+  const { items, scan, unreadable, truncatedAt, labelsError, resolvedAt } = matches;
+  const requests = chunkIds(items).length;
+  const s = (n: number, one = '', many = 's') => (n === 1 ? one : many);
+  return (
+    <span className="flex w-full flex-col gap-1 text-xs">
+      <span className={review ? undefined : 'text-muted'}>
+        Every match of this filter, read at{' '}
+        <time dateTime={new Date(resolvedAt).toISOString()}>
+          {new Date(resolvedAt).toISOString().slice(11, 19)} UTC
+        </time>
+        : {items.length} key{s(items.length)} among {scan.scanned} of {scan.total} read.
+        {review &&
+          requests > 1 &&
+          ` Sent as ${requests} requests of at most ${BULK_MAX} keys, one after another; a request refused whole stops the rest.`}
+      </span>
+      {truncatedAt !== null && (
+        <span className="rounded-md border border-warning/40 bg-warning/5 px-2 py-1 text-warning">
+          Incomplete: the search stops after {truncatedAt} session reads, so this selection covers
+          only the keys that were read. {scan.total - scan.scanned} key
+          {s(scan.total - scan.scanned, ' was', 's were')} not read, and any matches among them are
+          not included.
+        </span>
+      )}
+      {unreadable > 0 && (
+        <span className="text-danger">
+          {unreadable} key{s(unreadable)} could not be read and {s(unreadable, 'is', 'are')} not
+          included: {s(unreadable, 'its', 'their')} session read failed, so whether{' '}
+          {s(unreadable, 'it matches', 'they match')} is unchecked. Act on{' '}
+          {s(unreadable, 'it', 'them')} one at a time.
+        </span>
+      )}
+      {labelsError !== null && (
+        <span className="text-danger">
+          Labels and owners were unavailable, so they were not searched: {labelsError}
+        </span>
+      )}
+    </span>
   );
 }
 

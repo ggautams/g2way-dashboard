@@ -5,6 +5,7 @@ import {
   KEY_SCAN_LIMIT,
   loadKey,
   loadKeyHashes,
+  loadKeyMatches,
   loadKeyPage,
   loadKeySearch,
   loadPolicyChoices,
@@ -225,6 +226,48 @@ describe('loadKeySearch', () => {
     expect(labels).toEqual({ ok: false, error: 'database locked' });
     if (!keys.ok) throw new Error(keys.error);
     expect(keys.value.items.map((row) => row.hash)).toContain(many[7]);
+  });
+
+  it('loadKeyMatches: every match unpaged, never an unreadable key, with the same cap', async () => {
+    const gw = big();
+    const { keys } = await loadKeyMatches('dev', filter({ policy: 'gold' }), {
+      registry,
+      fetch: gw.fetch,
+      labelsFor,
+    });
+    if (!keys.ok) throw new Error(keys.error);
+    expect(gw.reads).toHaveLength(KEY_SCAN_LIMIT);
+    // All 100 even keys among the 200 read, well past one page; key 3 (unchecked) left out.
+    expect(keys.value.matches).toHaveLength(KEY_SCAN_LIMIT / 2);
+    expect(keys.value.matches.map((m) => m.hash)).not.toContain(many[3]);
+    expect(keys.value.matches.every((m) => m.session.apply_policies?.[0] === 'gold')).toBe(true);
+    expect(keys.value.unreadable).toBe(1);
+    // The same scan report the paged search gives.
+    const paged = await loadKeySearch('dev', filter({ policy: 'gold' }), 1, {
+      registry,
+      fetch: big().fetch,
+      labelsFor,
+    });
+    if (!paged.keys.ok) throw new Error(paged.keys.error);
+    expect(keys.value.scan).toEqual(paged.keys.value.scan);
+    expect(keys.value.scan.scanned).toBeLessThan(keys.value.scan.total);
+  });
+
+  it('loadKeyMatches: leaves out a label match whose session read failed', async () => {
+    const { keys } = await loadKeyMatches('dev', filter({ q: 'billing' }), {
+      registry,
+      fetch: big().fetch,
+      labelsFor: async () =>
+        new Map([
+          [many[3], { label: 'Billing A', owner: null }],
+          [many[5], { label: 'Billing B', owner: null }],
+        ]),
+    });
+    if (!keys.ok) throw new Error(keys.error);
+    // matchKey calls key 3 a match on its label alone, but its read failed.
+    expect(keys.value.scan.matched).toBe(2);
+    expect(keys.value.matches.map((m) => m.hash)).toEqual([many[5]]);
+    expect(keys.value.unreadable).toBe(1);
   });
 
   it('settles a failed list with the gateway’s message', async () => {

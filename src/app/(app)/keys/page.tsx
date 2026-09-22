@@ -36,6 +36,7 @@ import {
   type KeyLabels,
 } from '@/lib/keys/filter';
 import { toKeyListRow } from '@/lib/keys/list-row';
+import { resolveKeyMatchesAction } from '@/lib/keys/match-actions';
 import { pruneKeyOrphansAction } from '@/lib/keys/orphan-actions';
 import { findOrphans } from '@/lib/keys/orphans';
 import { shortHash, type Paged } from '@/lib/keys/session';
@@ -202,6 +203,7 @@ export default async function KeysPage({ searchParams }: PageProps<'/keys'>) {
                   policies: policies.ok
                     ? { ok: true, value: policies.value }
                     : { ok: false, error: policies.error },
+                  everyMatch: filtering ? { filter, resolve: resolveKeyMatchesAction } : undefined,
                 }
               : undefined
           }
