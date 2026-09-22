@@ -1,5 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { requirePermission } from '@/lib/auth/session';
 import {
   AUTH_MODES,
@@ -109,20 +112,20 @@ function Page({ environment, children }: { environment?: string; children: React
   );
 }
 
+/** Native selects, so the filter stays a plain GET form that works without JS. */
 const CONTROL =
-  'rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent';
+  'h-9 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 function FilterForm({ filter }: { filter: ApiFilter }) {
   return (
     <form role="search" className="flex flex-wrap items-end gap-2" action="/apis">
       <label className="flex min-w-48 flex-1 flex-col gap-1 text-xs text-muted">
         Search
-        <input
+        <Input
           type="search"
           name="q"
           defaultValue={filter.q}
           placeholder="Name, id, listen path or target"
-          className={CONTROL}
         />
       </label>
       <label className="flex flex-col gap-1 text-xs text-muted">
@@ -144,12 +147,9 @@ function FilterForm({ filter }: { filter: ApiFilter }) {
           ))}
         </select>
       </label>
-      <button
-        type="submit"
-        className="rounded-md border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-subtle"
-      >
+      <Button type="submit" variant="outline">
         Filter
-      </button>
+      </Button>
     </form>
   );
 }
@@ -186,11 +186,13 @@ function ApiTable({ apis }: { apis: readonly ApiSummary[] }) {
               <td className="px-3 py-2 font-mono text-xs">{api.authMode}</td>
               <td className="px-3 py-2">
                 {api.active ? (
-                  <span className="text-xs text-success">active</span>
+                  <Badge variant="outline" className="border-success/40 text-success">
+                    active
+                  </Badge>
                 ) : (
-                  <span className="text-xs text-muted" title="Loaded and listed, never routed to">
+                  <Badge variant="secondary" title="Loaded and listed, never routed to">
                     inactive
-                  </span>
+                  </Badge>
                 )}
               </td>
             </tr>

@@ -43,6 +43,20 @@
   --color-danger: var(--danger);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  /* shadcn/ui's names for the same palette (ADR-0001 §5). Its `accent` and
+     `muted` mean something else there; scripts/shadcn-tokens.mjs rewrites
+     those in src/components/ui/ rather than aliasing them here. */
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-foreground);
+  --color-secondary: var(--subtle);
+  --color-secondary-foreground: var(--foreground);
+  --color-destructive: var(--danger);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

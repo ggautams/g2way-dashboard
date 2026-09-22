@@ -52,9 +52,9 @@ commit this project is waiting on.
       `ApiDefinition.active` is `#[serde(default = "default_true")]`, but the
       schema has no `"default": true`, so the generated type reads as "absent =
       falsy". The dashboard hard-codes the defaults it relies on in `summarise()`
-      (`src/lib/apis/list.ts`), and the map lists them. Needs `#[schema(default
-    = …)]` on defaulted fields in `crates/g2-core`; then derive the defaults
-      from `contracts/openapi.json`. _Shapes the M3 designer; not a blocker._
+      (`src/lib/apis/list.ts`), and the map lists them. Needs a schema default
+      on each defaulted field in `crates/g2-core` (`#[schema(default = …)]`);
+      then derive the defaults from `contracts/openapi.json`. _Shapes the M3 designer; not a blocker._
 
 - [ ] **`/g2/node`, `/g2/version` and `/g2/health` have no response schema.**
       `/g2/node` is an untyped `serde_json::json!` in

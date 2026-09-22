@@ -48,6 +48,17 @@ infrastructure.
    dependency, and a design system that survives being extended over many
    sessions.
 
+   _Adopted 2026-09-23 (M3), before the first write UI._ The shell predates it
+   and stays hand-rolled until a change touches it. New UI uses the primitives
+   in `src/components/ui/` (`components.json`, style `new-york`, Radix via
+   `radix-ui`, `cn` from shadcn's own `cn` package). Add components with
+   `npm run ui:add -- <name>`, which uses the pinned `shadcn` devDependency. We
+   never run `shadcn init`, because it would replace our theme. shadcn's tokens
+   map onto ours as aliases in `globals.css` (`primary` → `accent`, and so on).
+   Its `accent` and `muted` mean backgrounds, which collide with our brand and
+   secondary-text tokens, so `scripts/shadcn-tokens.mjs` rewrites those classes
+   in `src/components/ui/`, and `tokens.test.ts` keeps it that way.
+
 6. **A `Makefile` is the entry point, not bare npm scripts.** `make check` is the
    gate, exactly as in g2way. Same muscle memory across both repos, and it gives
    the drift check somewhere natural to live.

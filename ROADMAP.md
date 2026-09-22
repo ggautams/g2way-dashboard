@@ -76,7 +76,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Environment switcher in the shell (the BFF already honours
       `X-G2-Environment`; only `/gateway` has a picker today)
 - [x] API list with search, filter, and active/inactive state
-- [ ] Decide form primitives before the designer: adopt shadcn/ui as ADR-0001
+- [x] Decide form primitives before the designer: adopt shadcn/ui as ADR-0001
       says, or record an ADR for the hand-rolled components the shell uses
 - [ ] API designer: structured form over `ApiDefinition`
 - [ ] Raw JSON/YAML editor (Monaco) validated live against the OpenAPI schema,
@@ -644,3 +644,22 @@ IMMEDIATE`, Postgres `pg_advisory_xact_lock`), tested with 5 concurrent
   without the field as inactive. Recorded as an invariant in
   `docs/g2way-map.md`; `summarise()` applies the defaults. Rows don't link
   anywhere yet: the designer adds that. Next: the shadcn/ui adoption.
+
+- feat(M3): shadcn/ui adopted as ADR-0001 §5 says (amended
+  with the details). Added: button, input, label, textarea, select, dialog,
+  tabs, switch, badge and table, under `src/components/ui/`. `components.json`
+  is hand-written, because `shadcn init` would overwrite `globals.css`.
+  `npm run ui:add -- <name>` runs the pinned CLI, then
+  `scripts/shadcn-tokens.mjs`, then prettier. `/apis` uses Button, Input and
+  Badge (native selects keep the GET filter form JS-free). The shell is
+  unchanged for now.
+  **Surprises:**
+  - With no `src/lib/utils.ts`, CLI 4.x imports `cn` from shadcn's own `cn`
+    npm package. It is first-party (maintainer `shadcn`, repo `shadcn-ui/cn`),
+    so it stays.
+  - The CLI did not install `class-variance-authority` or `lucide-react`,
+    although its components import both; they were added by hand.
+  - shadcn's `accent` and `muted` are backgrounds, while ours are the brand
+    colour and grey text, so a rewrite script and a guard test handle those
+    two. All other shadcn tokens are plain aliases.
+    Next: the API designer.
