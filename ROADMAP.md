@@ -96,11 +96,14 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Policy CRUD over `/g2/policies`
 - [x] Key create / list / rotate / revoke; raw key shown once, on creation
 - [x] Per-API access matrix, rate and quota editors
-- [ ] Dashboard-side key metadata (label, owner, notes) — the gateway lists
+- [x] Dashboard-side key metadata (label, owner, notes) — the gateway lists
       hashes only, so inventory lives here
 - [ ] Live quota and rate-limit usage per key
 - [ ] "What does this key allow" resolver that folds `apply_policies`
 - [ ] Bulk operations and search by alias
+- [ ] Search and filter `/keys` by dashboard label and owner (today they only
+      show on the page being viewed), and prune `key_metadata` rows orphaned by
+      key deletes made outside the dashboard (ADR-0009 §7)
 - [ ] Policy history tab and rollback (versions are already kept, ADR-0008)
 - [ ] Replace the BFF rotate orchestration with g2way's native atomic rotate once it
       exists (`UPSTREAM.md`, ADR-0009); blocked upstream
@@ -929,3 +932,28 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - Not run in a browser (the open M2 browser pass now covers the matrix too).
   - Follow-up filed: M8 schema-aware type/field pickers.
   - Next: dashboard-side key metadata (M4).
+
+- feat(M4): dashboard-side key metadata (ADR-0009 §7 addendum).
+  - New table `key_metadata` (migration `0005_key_metadata`, both dialects):
+    label, owner, notes, `created_by`, unique on
+    `(org_id, environment, key_hash)`. Owner is free text, because a key's
+    owner is a consumer, not a dashboard account.
+  - `lib/db/key-metadata.ts` has get, list-for-hashes, upsert, delete and
+    rekey. Each write is audited in its own transaction
+    (`key.metadata.update|delete|rekey`). Tested on SQLite and PGlite. None
+    of them is in `STAGED_ACTIONS`, and a test checks that.
+  - `/keys/new` takes the three fields. After the gateway answers, the
+    `saveKeyMetadataAction` server action saves them by `key_hash`. That
+    action (also the editor on `/keys/view/[hash]`) needs `keys:write`,
+    audits a refusal and confirms the hash with the gateway first. A failure
+    shows in the one-time dialog and does not undo the key.
+  - Rotate copies the row to the new hash before the delete. The proxy drops a
+    key's row after a successful hard delete, with no tombstone: the
+    `key.metadata.delete` audit row keeps the old values. So a full rotation
+    is a move, and a partial one leaves both keys described.
+  - `/keys` shows the label (alias as fallback) and an Owner column. The key
+    view's title prefers the label.
+  - Not run in a browser (the open M2 browser pass now covers this too).
+  - Follow-up filed: M4 search/filter by label and owner, and pruning rows
+    orphaned by deletes made outside the dashboard.
+  - Next: live quota and rate-limit usage per key (M4).

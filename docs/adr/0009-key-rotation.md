@@ -66,6 +66,38 @@ old key. That takes three admin calls, and the gateway cannot make them atomic.
    navigates by hash. The key is never put in a URL, stored or logged. A static
    test (`src/lib/keys/raw-key-guard.test.ts`) checks the modules that hold it.
 
+7. **Addendum (2026-09-23): key inventory lives in the dashboard.** g2way lists
+   keys by hash only and has no field for a human label, so the label, owner
+   and notes live in the dashboard's `key_metadata` table (migration
+   `0005_key_metadata`), unique on `(org_id, environment, key_hash)`. Never
+   the raw key.
+   - **Owner is free text**, not a user reference. A key's owner is usually a
+     consumer (a team, a customer, a service), not a dashboard operator, and a
+     foreign key would dangle once that account is deleted. `created_by` is the
+     writer's email, snapshotted like the audit actor.
+   - **Create**: the new-key form takes the three fields. After the gateway
+     answers, the browser calls a server action with the returned `key_hash`.
+     The raw key never leaves the one-time dialog. That action (also the key
+     view's editor) needs `keys:write`, confirms the hash with
+     `GET /g2/keys/{hash}?hashed=true` and upserts. A failure does not undo
+     the key: the dialog says so, and the key view can retry.
+   - **Rotate**: after the create and before the delete, the orchestration
+     _copies_ the row to the new hash (`key.metadata.rekey`). The delete then
+     drops the old row, so a full rotation is a move and a partial one leaves
+     both keys described. The delete happens only once the copy is done. A
+     failed copy is a note on the `key.rotate` row and never fails the
+     rotation.
+   - **Hard delete**: after a successful `DELETE /g2/keys/{key}` the proxy
+     deletes the row. There is no tombstone. The `key.metadata.delete` audit
+     row keeps what was removed as `before`, so the inventory of a deleted key
+     can still be read there. A soft revoke (`active: false`) leaves it alone.
+   - Every change is audited in the same transaction as the row
+     (`key.metadata.update` / `.rekey` / `.delete`, before and after, ADR-0006).
+     None of them calls the gateway, so none needs a reload. None is in
+     `STAGED_ACTIONS`.
+   - A key deleted outside the dashboard leaves an orphan row. Nothing lists it,
+     because rows are only read for hashes the gateway returns.
+
 ## Consequences
 
 - Rotation is not atomic, and clients using the old key fail as soon as it is

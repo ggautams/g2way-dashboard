@@ -4,21 +4,27 @@ import { notFound } from 'next/navigation';
 import { DeleteButton } from '@/components/designer/save-bar';
 import { RevokeButton, RotateButton } from '@/components/keys/key-actions';
 import { KeyDesigner } from '@/components/keys/key-designer';
+import { KeyMetadataEditor } from '@/components/keys/key-metadata';
 import { Badge } from '@/components/ui/badge';
 import { Notice } from '@/components/users/controls';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
+import { getDatabase } from '@/lib/db';
+import { getKeyMetadata } from '@/lib/db/key-metadata';
 import type { ApiChoices } from '@/lib/designer/access';
 import { accessFieldHelp } from '@/lib/designer/access-help';
 import { loadApiChoices } from '@/lib/g2/apis';
 import {
   RegistryConfigError,
   UnknownEnvironmentError,
+  getOrgId,
   listEnvironments,
 } from '@/lib/g2/environments';
 import { loadKey, loadPolicyChoices, type KeyItem, type PolicyChoices } from '@/lib/g2/keys';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 import { keyFieldHelp } from '@/lib/keys/field-help';
+import type { KeyMetadataFields } from '@/lib/keys/metadata';
+import { saveKeyMetadataAction } from '@/lib/keys/metadata-actions';
 import { keySchema } from '@/lib/keys/schema';
 import { shortHash } from '@/lib/keys/session';
 
@@ -64,6 +70,26 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
   }
   if (!session.ok && session.status === 404) notFound();
   const canWrite = can(user.role, 'keys:write');
+  // The dashboard's own label, owner and notes (ADR-0009 §7).
+  let metadata: { ok: true; value: KeyMetadataFields | null } | { ok: false; error: string } = {
+    ok: true,
+    value: null,
+  };
+  if (session.ok) {
+    try {
+      const row = await getKeyMetadata(getDatabase(), getOrgId(), {
+        environment: environment.id,
+        keyHash: hash,
+      });
+      metadata = {
+        ok: true,
+        value: row === undefined ? null : { label: row.label, owner: row.owner, notes: row.notes },
+      };
+    } catch (error) {
+      metadata = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  const label = metadata.ok ? (metadata.value?.label ?? null) : null;
   const alias = session.ok ? (session.value.alias ?? null) : null;
   const active = session.ok ? (session.value.active ?? true) : true;
   const old = typeof query.old === 'string' ? query.old : null;
@@ -79,9 +105,14 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
             / <span className="font-mono">{shortHash(hash)}</span>
           </p>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            {alias ?? 'Key'}
+            {label ?? alias ?? 'Key'}
             {session.ok && !active && <Badge variant="secondary">revoked</Badge>}
           </h1>
+          {label !== null && alias !== null && (
+            <p className="text-sm text-muted">
+              Alias <span className="text-foreground">{alias}</span>
+            </p>
+          )}
           <p className="mt-1 font-mono text-xs break-all text-muted">{hash}</p>
         </div>
         {session.ok && canWrite && (
@@ -91,7 +122,7 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
             <DeleteButton
               kind="key"
               id={hash}
-              name={alias ?? `key ${shortHash(hash)}`}
+              name={label ?? alias ?? `key ${shortHash(hash)}`}
               environment={environment}
             />
           </div>
@@ -102,7 +133,7 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
         <Notice message="Key created and live. Its raw value is not shown again." />
       )}
       {query.rotated === '1' && (
-        <Notice message="Key rotated: this is the new key, and the old one is deleted." />
+        <Notice message="Key rotated: this is the new key, and the old one is deleted. Any dashboard metadata moved with it." />
       )}
       {query.rotated === 'partial' && (
         <section
@@ -125,10 +156,25 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
                 could not be deleted
               </>
             )}{' '}
-            and still works. Delete it once its clients have moved.
+            and still works. Both carry the same dashboard metadata. Delete the old key once its
+            clients have moved.
           </p>
         </section>
       )}
+      {session.ok &&
+        (metadata.ok ? (
+          <KeyMetadataEditor
+            hash={hash}
+            environment={environment.id}
+            stored={metadata.value}
+            canWrite={canWrite}
+            action={saveKeyMetadataAction}
+          />
+        ) : (
+          <p role="alert" className="font-mono text-xs break-all text-danger">
+            Dashboard metadata unavailable: {metadata.error}
+          </p>
+        ))}
       {session.ok ? (
         <KeyDesigner
           // A save refreshes the page with the stored session: start a fresh draft.

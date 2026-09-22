@@ -680,6 +680,58 @@ describe('config history (ADR-0008)', () => {
   });
 });
 
+describe('key inventory upkeep (ADR-0009 §7)', () => {
+  async function deleteKey(path: string, reply: () => Response, fail = false) {
+    const forgotten: string[] = [];
+    const sink: AuditSink = {
+      ...memoryAudit(),
+      async forgetKey({ keyHash, environment, actor }) {
+        if (fail) throw new Error('disk full');
+        forgotten.push(`${environment} ${keyHash} ${actor.email}`);
+      },
+    };
+    const gateway = fakeGateway(reply);
+    const response = await proxyToGateway(
+      request(path, { method: 'DELETE' }),
+      segmentsOf(path),
+      actorFor('admin'),
+      { fetch: gateway.fetch, registry, audit: sink },
+    );
+    return { response, forgotten };
+  }
+  const HASH = 'c'.repeat(64);
+
+  it('drops the metadata of a key the gateway deleted, by hash', async () => {
+    const { forgotten } = await deleteKey(`keys/${HASH}?hashed=true`, () =>
+      Response.json({ id: HASH, action: 'deleted' }),
+    );
+    expect(forgotten).toEqual([`dev ${HASH} admin@example.com`]);
+    const raw = await deleteKey('keys/raw-key-value', () => Response.json({ ok: true }));
+    expect(raw.forgotten).toEqual([`dev ${hashKey('raw-key-value')} admin@example.com`]);
+  });
+
+  it('keeps it when the gateway refused, and on any other delete', async () => {
+    const refused = await deleteKey(`keys/${HASH}?hashed=true`, () =>
+      Response.json({ error: 'nope' }, { status: 500 }),
+    );
+    expect(refused.forgotten).toEqual([]);
+    const policy = await deleteKey('policies/gold', () => Response.json({ ok: true }));
+    expect(policy.forgotten).toEqual([]);
+  });
+
+  it('never fails a delete the gateway accepted', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { response } = await deleteKey(
+      `keys/${HASH}?hashed=true`,
+      () => Response.json({ ok: true }),
+      true,
+    );
+    expect(response.status).toBe(200);
+    expect(String(logged.mock.calls[0][0])).toContain('[inventory] FAILED');
+    logged.mockRestore();
+  });
+});
+
 describe('audited writes (ADR-0006)', () => {
   it('records an API update with before, after, request and the gateway call', async () => {
     const gateway = statefulGateway();

@@ -5,9 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Notice } from '@/components/users/controls';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
+import { getDatabase } from '@/lib/db';
+import { listKeyMetadata, type KeyMetadata } from '@/lib/db/key-metadata';
 import {
   RegistryConfigError,
   UnknownEnvironmentError,
+  getOrgId,
   listEnvironments,
 } from '@/lib/g2/environments';
 import { KEY_PAGE_SIZE, loadKeyPage, type KeyPage, type KeyRow } from '@/lib/g2/keys';
@@ -63,6 +66,19 @@ export default async function KeysPage({ searchParams }: PageProps<'/keys'>) {
   const { items, total, pages, page: current } = list.keys.value;
   const first = (current - 1) * KEY_PAGE_SIZE + 1;
   const nowSecs = Math.floor(list.fetchedAt / 1000);
+  // Label and owner live in the dashboard database (ADR-0009 §7), by hash.
+  let metadata = new Map<string, KeyMetadata>();
+  let metadataError: string | null = null;
+  try {
+    metadata = await listKeyMetadata(
+      getDatabase(),
+      getOrgId(),
+      list.environment,
+      items.map(({ hash }) => hash),
+    );
+  } catch (error) {
+    metadataError = error instanceof Error ? error.message : String(error);
+  }
 
   return (
     <Page environment={label} canWrite={canWrite}>
@@ -81,7 +97,14 @@ export default async function KeysPage({ searchParams }: PageProps<'/keys'>) {
           No keys in this environment yet.
         </p>
       ) : (
-        <KeyTable rows={items} nowSecs={nowSecs} />
+        <>
+          {metadataError !== null && (
+            <p role="alert" className="font-mono text-xs break-all text-danger">
+              Labels and owners unavailable: {metadataError}
+            </p>
+          )}
+          <KeyTable rows={items} nowSecs={nowSecs} metadata={metadata} />
+        </>
       )}
       {pages > 1 && <Pager page={current} pages={pages} />}
     </Page>
@@ -124,13 +147,22 @@ function Page({
   );
 }
 
-function KeyTable({ rows, nowSecs }: { rows: readonly KeyRow[]; nowSecs: number }) {
+function KeyTable({
+  rows,
+  nowSecs,
+  metadata,
+}: {
+  rows: readonly KeyRow[];
+  nowSecs: number;
+  metadata: ReadonlyMap<string, KeyMetadata>;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm">
         <thead className="bg-subtle text-left text-xs uppercase tracking-wide text-muted">
           <tr>
             <th className="px-3 py-2 font-medium">Key</th>
+            <th className="px-3 py-2 font-medium">Owner</th>
             <th className="px-3 py-2 font-medium">Policy</th>
             <th className="px-3 py-2 font-medium">Rate</th>
             <th className="px-3 py-2 font-medium">Quota</th>
@@ -141,14 +173,21 @@ function KeyTable({ rows, nowSecs }: { rows: readonly KeyRow[]; nowSecs: number 
         <tbody>
           {rows.map(({ hash, session }) => {
             const href = `/keys/view/${encodeURIComponent(hash)}`;
+            const meta = metadata.get(hash);
+            const owner = (
+              <td className="px-3 py-2 text-xs">
+                {meta?.owner ?? <span className="text-muted">—</span>}
+              </td>
+            );
             if (!session.ok) {
               return (
                 <tr key={hash} className="border-t border-border align-top">
                   <td className="px-3 py-2">
                     <Link href={href} className="font-mono text-xs hover:underline">
-                      {shortHash(hash)}
+                      {meta?.label ?? shortHash(hash)}
                     </Link>
                   </td>
+                  {owner}
                   <td colSpan={5} className="px-3 py-2 font-mono text-xs text-danger">
                     {session.error}
                     {session.status !== undefined && ` (HTTP ${session.status})`}
@@ -162,12 +201,18 @@ function KeyTable({ rows, nowSecs }: { rows: readonly KeyRow[]; nowSecs: number 
               <tr key={hash} className="border-t border-border align-top">
                 <td className="px-3 py-2">
                   <Link href={href} className="font-medium hover:underline">
-                    {key.alias ?? <span className="text-muted italic">no alias</span>}
+                    {meta?.label ?? key.alias ?? (
+                      <span className="text-muted italic">no label or alias</span>
+                    )}
                   </Link>
+                  {meta?.label != null && key.alias !== null && (
+                    <p className="text-xs text-muted">alias {key.alias}</p>
+                  )}
                   <p className="font-mono text-xs text-muted" title={hash}>
                     {shortHash(hash)}
                   </p>
                 </td>
+                {owner}
                 <td className="px-3 py-2 font-mono text-xs">{key.policy ?? '—'}</td>
                 <td className="px-3 py-2 font-mono text-xs">
                   {key.policy ? 'from policy' : describeRate(key.rate)}

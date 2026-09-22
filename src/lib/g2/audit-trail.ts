@@ -3,8 +3,9 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import { REDACTED_RAW_KEY } from '@/lib/audit/redact';
 import { getDatabase } from '@/lib/db';
-import { completeAudit, recordAudit, type AuditRecord } from '@/lib/db/audit';
+import { completeAudit, recordAudit, type AuditActor, type AuditRecord } from '@/lib/db/audit';
 import { recordVersion, type VersionWrite } from '@/lib/db/config-versions';
+import { deleteKeyMetadata, rekeyKeyMetadata } from '@/lib/db/key-metadata';
 import type { JsonValue } from '@/lib/db/schema/shared';
 import { getOrgId } from './environments';
 
@@ -147,6 +148,24 @@ export type AuditSink = {
    * (ADR-0008). Best effort: the write has already happened by then.
    */
   version?(write: VersionWrite): Promise<void>;
+  /**
+   * Drops the dashboard's metadata for a key the gateway just hard-deleted
+   * (ADR-0009 §7), with its own audit row. Best effort, like `version`.
+   */
+  forgetKey?(key: KeyInventoryRef): Promise<void>;
+  /**
+   * Copies a key's metadata to the key a rotation just created (ADR-0009 §7).
+   * Resolves `true` when there was metadata to carry.
+   */
+  carryKey?(change: KeyInventoryCarry): Promise<boolean>;
+};
+
+export type KeyInventoryRef = { environment: string; keyHash: string; actor: AuditActor };
+export type KeyInventoryCarry = {
+  environment: string;
+  from: string;
+  to: string;
+  actor: AuditActor;
 };
 
 /** The dashboard database, scoped to the configured org. */
@@ -155,6 +174,14 @@ export function databaseAuditSink(): AuditSink {
     record: (record) => recordAudit(getDatabase(), getOrgId(), record),
     complete: (id, record) => completeAudit(getDatabase(), getOrgId(), id, record),
     version: (write) => recordVersion(getDatabase(), getOrgId(), write),
+    forgetKey: async (key) => {
+      await deleteKeyMetadata(getDatabase(), getOrgId(), {
+        ...key,
+        note: 'the key was hard-deleted from the gateway',
+      });
+    },
+    carryKey: async (change) =>
+      (await rekeyKeyMetadata(getDatabase(), getOrgId(), { ...change, keepSource: true })) !== null,
   };
 }
 

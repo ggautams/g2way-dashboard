@@ -9,6 +9,7 @@ import { listEnvironments } from '@/lib/g2/environments';
 import { loadPolicyChoices } from '@/lib/g2/keys';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 import { keyFieldHelp } from '@/lib/keys/field-help';
+import { saveKeyMetadataAction } from '@/lib/keys/metadata-actions';
 import { keySchema } from '@/lib/keys/schema';
 import { newKeyDraft } from '@/lib/keys/session';
 
@@ -44,6 +45,7 @@ export default async function NewKeyPage() {
             : { ok: false, error: 'Your role cannot read API definitions.' }
         }
         accessHelp={accessFieldHelp('KeySession')}
+        saveMetadata={saveKeyMetadataAction}
       />
     </div>
   );

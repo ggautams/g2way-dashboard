@@ -196,6 +196,27 @@ export async function rotateKey(
   const after: JsonValue = { key_hash: newKey.key_hash, session };
   notes.push(`new key ${newKey.key_hash}`);
 
+  // The dashboard's label, owner and notes follow the key (ADR-0009 §7). Copied,
+  // not moved: step 3's delete drops the old row, so a completed rotation moves
+  // it and a partial one leaves both keys described.
+  if (audit.carryKey !== undefined) {
+    try {
+      const carried = await audit.carryKey({
+        environment,
+        from: oldHash,
+        to: newKey.key_hash,
+        actor,
+      });
+      if (carried) notes.push('key metadata (label, owner, notes) carried to the new key');
+    } catch (error) {
+      console.error(
+        `[audit] FAILED to carry key metadata from ${oldHash} to ${newKey.key_hash} (key.metadata.rekey):`,
+        error,
+      );
+      notes.push('key metadata could not be carried to the new key (see the server log)');
+    }
+  }
+
   // 3. Retire the old key.
   const removed = await call('DELETE', `${hashPath}?hashed=true`);
   const deleteCall = gatewayCall('DELETE', hashPath, removed.status);

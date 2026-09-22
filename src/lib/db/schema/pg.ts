@@ -111,3 +111,20 @@ export const configVersions = pgTable(
     ),
   ],
 );
+
+export const keyMetadata = pgTable(
+  'key_metadata',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    keyHash: text('key_hash').notNull(),
+    label: text('label'),
+    owner: text('owner'),
+    notes: text('notes'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at'),
+    updatedAt: timestamp('updated_at').$onUpdateFn(() => new Date()),
+  },
+  (t) => [uniqueIndex('key_metadata_key_unique').on(t.orgId, t.environment, t.keyHash)],
+);

@@ -618,6 +618,22 @@ async function auditedWrite(options: AuditedWrite): Promise<Response> {
         );
       }
     }
+    if (
+      collection === 'keys' &&
+      method === 'DELETE' &&
+      finalTarget !== null &&
+      audit.forgetKey !== undefined
+    ) {
+      // The key is gone, so is its dashboard inventory row (ADR-0009 §7).
+      try {
+        await audit.forgetKey({ environment: target.id, keyHash: finalTarget, actor });
+      } catch (error) {
+        console.error(
+          `[inventory] FAILED to drop the metadata of deleted key ${finalTarget} (audit ${auditId}):`,
+          error,
+        );
+      }
+    }
   }
 
   const responseHeaders = new Headers({

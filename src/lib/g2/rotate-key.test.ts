@@ -9,6 +9,12 @@ import {
   recordAudit,
   type AuditRecord,
 } from '@/lib/db/audit';
+import {
+  deleteKeyMetadata,
+  getKeyMetadata,
+  rekeyKeyMetadata,
+  upsertKeyMetadata,
+} from '@/lib/db/key-metadata';
 import { hashKey, type AuditSink } from './audit-trail';
 import { parseEnvironments } from './environments';
 import { ROTATE_ACTION, rotateKey } from './rotate-key';
@@ -321,6 +327,73 @@ describe('the raw key is never persisted', () => {
       expect(printed).not.toContain(secret);
     }
     expect(stored).toContain(NEW);
+  });
+});
+
+describe('key metadata follows a rotation (ADR-0009 §7)', () => {
+  async function withInventory(fail: Fail = {}) {
+    const database = openDatabase({ dialect: 'sqlite', path: ':memory:' });
+    await migrateDatabase(database);
+    const actor = actorFor('admin');
+    const fields = { label: 'Billing', owner: 'finance', notes: null };
+    await upsertKeyMetadata(database, ORG, { environment: 'dev', keyHash: OLD, fields, actor });
+    const order: string[] = [];
+    const gateway = fakeGateway(fail);
+    const response = await rotateKey(rotateRequest(), OLD, actor, {
+      fetch: gateway.fetch,
+      registry,
+      audit: {
+        record: (record) => recordAudit(database, ORG, record),
+        complete: (id, record) => completeAudit(database, ORG, id, record),
+        carryKey: async (change) => {
+          order.push(`carry ${change.from === OLD} ${change.to === NEW}`);
+          return (await rekeyKeyMetadata(database, ORG, { ...change, keepSource: true })) !== null;
+        },
+        forgetKey: async (key) => {
+          order.push(`forget ${key.keyHash === OLD}`);
+          await deleteKeyMetadata(database, ORG, key);
+        },
+      },
+    });
+    const meta = async (keyHash: string) =>
+      (await getKeyMetadata(database, ORG, { environment: 'dev', keyHash }))?.label;
+    const result = {
+      status: response.status,
+      order,
+      old: await meta(OLD),
+      new: await meta(NEW),
+      actions: (await listAudit(database, ORG)).entries.map((e) => e.action),
+    };
+    await database.close();
+    return result;
+  }
+
+  it('is carried before the old key is deleted, so a completed rotation moves it', async () => {
+    const result = await withInventory();
+    expect(result.status).toBe(201);
+    expect(result.order).toEqual(['carry true true', 'forget true']);
+    expect(result.new).toBe('Billing');
+    expect(result.old).toBeUndefined();
+    expect(result.actions).toEqual(
+      expect.arrayContaining(['key.metadata.rekey', 'key.metadata.delete']),
+    );
+  });
+
+  it('describes both keys when the old one could not be deleted', async () => {
+    const result = await withInventory({
+      DELETE: () => Response.json({ error: 'storage down' }, { status: 503 }),
+    });
+    expect(result.status).toBe(201);
+    expect(result.order).toEqual(['carry true true']);
+    expect([result.old, result.new]).toEqual(['Billing', 'Billing']);
+  });
+
+  it('is not touched when the create fails', async () => {
+    const result = await withInventory({
+      POST: () => Response.json({ error: 'nope' }, { status: 400 }),
+    });
+    expect(result.order).toEqual([]);
+    expect([result.old, result.new]).toEqual(['Billing', undefined]);
   });
 });
 

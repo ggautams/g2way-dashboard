@@ -134,3 +134,30 @@ export const configVersions = sqliteTable(
     ),
   ],
 );
+
+/**
+ * The dashboard's own inventory of gateway keys (ADR-0009 §7). g2way lists keys
+ * by hash only and has nowhere to put a human label, so the label, owner and
+ * notes live here, one row per key per environment, keyed by the gateway's
+ * `key_hash` (never the raw key). `owner` is free text: a key's owner is
+ * usually a consumer (a team, a customer, a service), not a dashboard account.
+ * `created_by` is the email of the account that first wrote the row,
+ * snapshotted like the audit log's actor. The row is removed when the key is
+ * hard-deleted through the dashboard and carried to the new hash on rotate.
+ */
+export const keyMetadata = sqliteTable(
+  'key_metadata',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    keyHash: text('key_hash').notNull(),
+    label: text('label'),
+    owner: text('owner'),
+    notes: text('notes'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at'),
+    updatedAt: timestamp('updated_at').$onUpdateFn(() => new Date()),
+  },
+  (t) => [uniqueIndex('key_metadata_key_unique').on(t.orgId, t.environment, t.keyHash)],
+);

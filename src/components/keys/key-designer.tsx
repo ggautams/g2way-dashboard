@@ -19,6 +19,12 @@ import type { AccessHelp, ApiChoices } from '@/lib/designer/access';
 import { RAW_FORMATS, schemaValidator } from '@/lib/designer/raw';
 import { describeFailure, saveDiff } from '@/lib/designer/write';
 import { bffClient } from '@/lib/g2/client';
+import {
+  INITIAL_KEY_METADATA_FORM_STATE,
+  isEmptyKeyMetadata,
+  parseKeyMetadata,
+  type ParsedKeyMetadata,
+} from '@/lib/keys/metadata';
 import { createKey } from '@/lib/keys/save';
 import {
   isKeyShape,
@@ -28,6 +34,12 @@ import {
   type KeySession,
 } from '@/lib/keys/session';
 import { KeyForm, type PolicyChoice } from './key-form';
+import {
+  EMPTY_KEY_METADATA_DRAFT,
+  NewKeyMetadata,
+  type KeyMetadataDraft,
+  type SaveKeyMetadata,
+} from './key-metadata';
 import { RawKeyDialog, type MintedKey } from './raw-key-dialog';
 
 type Props = {
@@ -43,6 +55,8 @@ type Props = {
   /** The environment's APIs for the access matrix (`loadApiChoices`). */
   apis: ApiChoices;
   accessHelp: AccessHelp;
+  /** Saves the new key's dashboard metadata once it exists; creating only. */
+  saveMetadata?: SaveKeyMetadata;
 };
 
 /**
@@ -61,8 +75,11 @@ export function KeyDesigner({
   environment,
   apis,
   accessHelp,
+  saveMetadata,
 }: Props) {
   const [draft, setDraft] = useState(initial);
+  const [metadata, setMetadata] = useState<KeyMetadataDraft>(EMPTY_KEY_METADATA_DRAFT);
+  const parsedMetadata = parseKeyMetadata(metadata);
   const { view, text, unapplied, open, edit } = useRawView<KeySession, 'form'>({
     draft,
     setDraft,
@@ -81,7 +98,9 @@ export function KeyDesigner({
       ? 'The raw text has errors; fix them or switch back to the form.'
       : Object.keys(problems).length > 0
         ? 'Fix the fields marked in the form first.'
-        : null;
+        : stored === null && !parsedMetadata.ok
+          ? `Dashboard metadata: ${parsedMetadata.error}.`
+          : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -132,9 +151,18 @@ export function KeyDesigner({
         ))}
       </Tabs>
       <SchemaProblems problems={schemaProblems} />
+      {canWrite && stored === null && saveMetadata !== undefined && (
+        <NewKeyMetadata value={metadata} onChange={setMetadata} />
+      )}
       {canWrite &&
         (stored === null ? (
-          <CreateBar draft={draft} blocker={blocker} environment={environment} />
+          <CreateBar
+            draft={draft}
+            blocker={blocker}
+            environment={environment}
+            metadata={parsedMetadata}
+            saveMetadata={saveMetadata}
+          />
         ) : (
           <SaveBar
             kind="key"
@@ -158,23 +186,54 @@ function CreateBar({
   draft,
   blocker,
   environment,
+  metadata,
+  saveMetadata,
 }: {
   draft: KeySession;
   blocker: string | null;
   environment: DesignerEnvironment;
+  metadata: ParsedKeyMetadata;
+  saveMetadata?: SaveKeyMetadata;
 }) {
   const router = useRouter();
   const [reviewing, setReviewing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [minted, setMinted] = useState<MintedKey | null>(null);
+  const [metadataProblem, setMetadataProblem] = useState<string | null>(null);
+
+  /**
+   * The dashboard's label, owner and notes, saved by the new key's hash (never
+   * the raw key) once the gateway has created it. A failure here does not undo
+   * the key: it is reported in the one-time dialog, and the key view can retry.
+   */
+  const saveMetadataFor = async (hash: string): Promise<string | null> => {
+    if (saveMetadata === undefined || !metadata.ok || isEmptyKeyMetadata(metadata.value)) {
+      return null;
+    }
+    const form = new FormData();
+    form.set('environment', environment.id);
+    form.set('hash', hash);
+    form.set('label', metadata.value.label ?? '');
+    form.set('owner', metadata.value.owner ?? '');
+    form.set('notes', metadata.value.notes ?? '');
+    try {
+      return (await saveMetadata(INITIAL_KEY_METADATA_FORM_STATE, form)).error;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  };
 
   const create = async () => {
     setCreating(true);
     setError(null);
     const result = await createKey(bffClient(environment.id), draft);
+    if (!result.ok) {
+      setCreating(false);
+      return setError(describeFailure(result));
+    }
+    setMetadataProblem(await saveMetadataFor(result.key_hash));
     setCreating(false);
-    if (!result.ok) return setError(describeFailure(result));
     setReviewing(false);
     setMinted({ key: result.key, hash: result.key_hash });
   };
@@ -182,6 +241,7 @@ function CreateBar({
   const done = () => {
     const hash = minted?.hash;
     setMinted(null);
+    setMetadataProblem(null);
     if (hash !== undefined) {
       router.replace(`/keys/view/${encodeURIComponent(hash)}?created=1`);
       router.refresh();
@@ -209,6 +269,14 @@ function CreateBar({
             </DialogDescription>
           </DialogHeader>
           <DiffTable changes={saveDiff(null, draft)} />
+          {metadata.ok && !isEmptyKeyMetadata(metadata.value) && (
+            <p className="text-xs text-muted">
+              Then saved in the dashboard, not the gateway: label{' '}
+              <span className="text-foreground">{metadata.value.label ?? '—'}</span>, owner{' '}
+              <span className="text-foreground">{metadata.value.owner ?? '—'}</span>
+              {metadata.value.notes !== null && ', and notes'}.
+            </p>
+          )}
           {error && (
             <p role="alert" className="font-mono text-xs break-all text-danger">
               The gateway refused the key: {error}
@@ -225,7 +293,14 @@ function CreateBar({
         </DialogContent>
       </Dialog>
 
-      <RawKeyDialog minted={minted} title="Key created" onDone={done} />
+      <RawKeyDialog minted={minted} title="Key created" onDone={done}>
+        {metadataProblem !== null && (
+          <p role="alert" className="font-mono text-xs break-all text-danger">
+            The key exists, but its dashboard metadata was not saved: {metadataProblem}. Add it
+            again on the key&apos;s page.
+          </p>
+        )}
+      </RawKeyDialog>
     </div>
   );
 }
