@@ -12,6 +12,7 @@ import { saveBlocker } from '@/lib/apis/save';
 import type { HistoryEntry } from '@/lib/designer/history';
 import { RAW_FORMATS, schemaValidator } from '@/lib/designer/raw';
 import { ApiForm } from './api-form';
+import { ChainView } from './chain-view';
 
 type Props = {
   /** The stored definition when editing; `null` when creating. */
@@ -34,7 +35,8 @@ type Props = {
  * form or as raw JSON/YAML. Both views edit the same draft: raw text is
  * applied to it whenever it parses into something the form can show, and is
  * re-rendered from it whenever a raw view is opened. Everything the form does
- * not cover is carried along untouched.
+ * not cover is carried along untouched. The Chain tab shows the middleware
+ * chain g2way would build for the draft.
  */
 export function ApiDesigner({
   original,
@@ -48,7 +50,7 @@ export function ApiDesigner({
   const [draft, setDraft] = useState(initial);
   const { view, setView, text, unapplied, open, edit } = useRawView<
     ApiDefinition,
-    'form' | 'history'
+    'form' | 'chain' | 'history'
   >({
     draft,
     setDraft,
@@ -82,6 +84,7 @@ export function ApiDesigner({
           <TabsTrigger value="form">Form</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
           <TabsTrigger value="yaml">YAML</TabsTrigger>
+          <TabsTrigger value="chain">Chain</TabsTrigger>
           {history !== undefined && <TabsTrigger value="history">History</TabsTrigger>}
         </TabsList>
         {restored !== null && view === 'form' && <RestoredNote from={restored} />}
@@ -116,6 +119,9 @@ export function ApiDesigner({
             />
           </TabsContent>
         ))}
+        <TabsContent value="chain" className="mt-4">
+          <ChainView draft={draft} />
+        </TabsContent>
         {history !== undefined && (
           <TabsContent value="history" className="mt-4">
             <HistoryPanel

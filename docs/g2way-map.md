@@ -35,7 +35,7 @@ otherwise). Vendored copies of everything under `docs/` are in
 | `AnalyticsRecord` fields                                                | `crates/g2-core/src/analytics.rs`                                                                      |
 | GraphQL config (UDG, federation, persisted, cache)                      | `crates/g2-core/src/graphql.rs`, `federation.rs`                                                       |
 | Header/URL transforms, body transforms, path rules, CORS, versioning    | `crates/g2-core/src/transform.rs`, `body_transform.rs`, `endpoints.rs`, `security.rs`, `versioning.rs` |
-| **Middleware slot order (19 slots, and how versioned APIs split it)**   | `crates/g2-middleware/src/chain.rs` — the `ChainBuilder` rustdoc                                       |
+| **Middleware slot order (19 slots, and how versioned APIs split it)**   | `crates/g2-middleware/src/chain.rs` — the `ChainBuilder` rustdoc; mirrored by `src/lib/apis/chain.ts`  |
 | Auth enforcement behaviour, status codes                                | `crates/g2-middleware/src/auth.rs`                                                                     |
 | `Storage` trait, Redis impl, Lua rate/quota scripts                     | `crates/g2-storage/src/lib.rs`, `redis.rs`                                                             |
 | Analytics sinks (incl. the Redis list the ingest worker drains)         | `crates/g2-telemetry/src/analytics.rs`                                                                 |
@@ -110,6 +110,16 @@ These are load-bearing for the dashboard and easy to get wrong:
   `service_discovery` and `graphql_schema_sync` are null — each version keeps
   its own, and none of that is surfaced. Its body is hand-typed in
   `src/lib/g2/node.ts` (see `UPSTREAM.md`).
+- **A versioned API splits its chain.** Slots 1–7 (through CORS) are built
+  once around the version dispatcher; slots 8–19 once per version, from the
+  base with that version's overrides applied (`VersioningConfig::apply` in
+  `crates/g2-core/src/versioning.rs`: present replaces wholesale, absent or
+  `null` inherits, `[]` clears). So IP lists and CORS are shared, and auth and
+  `max_request_body_bytes` cannot be overridden per version. In `udg` (per
+  chain.rs) and `supergraph` (per `g2way-docs/graphql.md`) execution modes the
+  GraphQL slot answers itself and nothing below it, nor the forwarder, runs.
+  URL rewrites and `transform_method` are forwarder behaviour, not slots.
+  `src/lib/apis/chain.ts` encodes all of this.
 
 ## Keeping this file honest
 

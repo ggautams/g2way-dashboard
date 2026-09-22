@@ -67,7 +67,8 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       rotate, revoke, search and filter, bulk actions including "select every
       match", orphan prune), `/keys/view/[hash]` (metadata, Usage, Effective
       access, masked secrets as a viewer/editor) and the History tab with
-      rollback on APIs and policies (M1 and M2
+      rollback on APIs and policies — and M5's Chain tab on the API designer
+      (unversioned, versioned and udg definitions; anchors resolve) (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23, twice. `make serve-scratch` is the one-step way to run the
       pass: a production build on :3100 against a fresh temp-dir SQLite
@@ -139,7 +140,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 ## M5 — Traffic & middleware designer
 
-- [ ] Visual middleware chain reflecting g2way's real slot order
+- [x] Visual middleware chain reflecting g2way's real slot order
       (`crates/g2-middleware/src/chain.rs`), including how versioned APIs split it
 - [ ] Editors: auth mode, header transforms, body transforms, URL rewrites,
       method transform, allow/block/ignore paths, mock responses, CORS,
@@ -1176,3 +1177,37 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     and its rotate item now names the M4 task it blocks. Nothing moved to a
     later milestone.
   - Next: M5, the traffic and middleware designer.
+
+- feat(M5): visual middleware chain.
+  - `src/lib/apis/chain.ts` mirrors chain.rs: `CHAIN_SLOTS` holds the 19
+    slots outermost first (layer, kind gateway/always/configured, scope
+    shared/per-version, enabling fields). `chainFor(def)` says which are on
+    for a definition. `chain.test.ts` pins the count, order and 1–7 / 8–19
+    split.
+  - Versioned APIs: shared slots 1–7, the dispatcher (location, key, default
+    version), then one inner chain per version. `applyVersion` copies
+    `VersioningConfig::apply`: present replaces wholesale, absent or `null`
+    inherits, `[]` clears. Auth, size limit, IP lists and CORS come from the
+    base.
+  - The designer has a Chain tab after YAML, rendered from the live draft by
+    the hook-free `chain-view.tsx`. After slot 19 comes a forwarder node, not
+    a slot: target or round-robin, URL rewrites, `transform_method`.
+  - Anchors for editors and the explain panel: `chainAnchor(slotId)` gives
+    `chain-<id>`. Per-version slots take `chainAnchor(slotId, version)`,
+    which gives `chain-v-<version>-<id>`. The dispatcher is
+    `chain-dispatcher` and the forwarder `chain-forwarder`. Slot ids:
+    `trace`, `metrics`, `stats`, `analytics`, `set-context`, `ip-filter`,
+    `cors`, `path-policy`, `size-limit`, `plugins-pre`, `auth`,
+    `rate-limit`, `plugins-post`, `graphql`, `transform-headers`,
+    `transform-body`, `mock`, `cache`, `api-id-header`.
+  - **Surprise:** chain.rs names only `udg` as the mode where GraphQL answers
+    requests itself, but `graphql.md` says `supergraph` forwards nothing
+    either. Both are treated as short-circuits, so configured slots below 14
+    show as "not reached".
+  - **Assumption:** the rule for "absent when unconfigured" is a non-empty
+    list or a non-null block (`graphql.enabled: false` counts as off). The
+    route-table code that builds each layer isn't in the map, so an empty
+    `transform_headers: {}` shows as on.
+  - Slots 1–4 depend on gateway flags and show as "gateway flag".
+  - Not run in a browser; added to the open M2 browser-pass box.
+  - Next: M5 editors.

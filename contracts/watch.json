@@ -42,7 +42,9 @@
     {
       "id": "middleware-chain",
       "paths": ["crates/g2-middleware/src/chain.rs"],
-      "surfaces": ["Visual chain designer (M5)"],
+      "surfaces": [
+        "Visual chain designer (M5): src/lib/apis/chain.ts (CHAIN_SLOTS, chainFor), src/components/apis/chain-view.tsx"
+      ],
       "onChange": "The slot order/count is the designer's canonical ordering \u2014 re-read the ChainBuilder rustdoc and update it."
     },
     {
@@ -54,8 +56,11 @@
         "crates/g2-core/src/security.rs",
         "crates/g2-core/src/versioning.rs"
       ],
-      "surfaces": ["Middleware designer (M5)"],
-      "onChange": "New transform or rule kinds need editors; check whether validation rules changed."
+      "surfaces": [
+        "Middleware designer (M5)",
+        "Chain view (M5): applyVersion in src/lib/apis/chain.ts mirrors VersioningConfig::apply"
+      ],
+      "onChange": "New transform or rule kinds need editors; check whether validation rules changed. A new VersionOverrides field, or a change to which fields apply() replaces, must be reflected in applyVersion."
     },
     {
       "id": "graphql",
