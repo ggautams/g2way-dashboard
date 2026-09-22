@@ -9,6 +9,9 @@
     "api-definition": {
       "oid": "crates/g2-core/src/api_definition.rs=459a16061166cfc70db139f6c09b824894628412"
     },
+    "file-loader": {
+      "oid": "crates/g2-core/src/loader.rs=38ef0f7aed0d68a13c6bd9e43547b484fc2c7df1"
+    },
     "auth-modes": {
       "oid": "crates/g2-middleware/src/auth.rs=ddd22defa4180baa5768ebacf2f780fce444e014 crates/g2-middleware/src/jwks.rs=c71af866331cc658311583e44525b3959af4e619 crates/g2-middleware/src/hmac.rs=d921f7256a3beb25e0eb52258306e3bf13f6be0a"
     },

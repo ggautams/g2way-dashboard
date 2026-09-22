@@ -89,3 +89,7 @@ Watched areas changed: **admin-api**
 - Action: Re-copy the spec and regenerate types; check the BFF proxy allowlist for new or removed endpoints.
 - [x] TODO: Re-copy the spec and regenerate types; check the BFF proxy allowlist for new or removed endpoints.
       _Done 2026-09-23: only `info.license` changed (MPL-2.0 → MIT); no endpoints moved, and no BFF allowlist exists yet._
+
+## 2026-09-23 — g2way 61a4975 → 61a4975
+
+Newly watched: **file-loader** — first fingerprint recorded; nothing to catch up on.
