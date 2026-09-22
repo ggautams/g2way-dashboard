@@ -11,7 +11,7 @@ import {
   recordAudit,
   type AuditRecord,
 } from '@/lib/db/audit';
-import { SECRET_MASK } from '@/lib/secrets/redact';
+import { SECRET_MASK, redactSecrets } from '@/lib/secrets/redact';
 import { hashKey, type AuditSink } from './audit-trail';
 import { parseEnvironments } from './environments';
 import {
@@ -665,6 +665,35 @@ describe('config history (ADR-0008)', () => {
     ]);
   });
 
+  it('stores audit snapshots redacted but keeps history unredacted for rollback (ADR-0010)', async () => {
+    const { sink: auditSink, rows } = await sqliteAudit();
+    const versions: VersionWrite[] = [];
+    const sink: AuditSink = {
+      ...auditSink,
+      async version(write) {
+        versions.push(write);
+      },
+    };
+    const next = {
+      api_id: 'httpbin',
+      name: 'httpbin',
+      listen_path: '/new/',
+      target_url: 'https://svc:hunter2@up.internal/api?api_key=live-url-key',
+      transform_headers: { request: { add: { 'X-Upstream-Key': 'live-header-key' } } },
+    };
+    const response = await write(statefulGateway(), sink, 'apis/httpbin', {
+      method: 'PUT',
+      body: JSON.stringify(next),
+    });
+    expect(response.status).toBe(200);
+    const stored = JSON.stringify(await rows());
+    for (const secret of ['hunter2', 'live-url-key', 'live-header-key']) {
+      expect(stored).not.toContain(secret);
+    }
+    expect(stored).toContain('up.internal/api');
+    expect(versions).toMatchObject([{ kind: 'api', after: next }]);
+  });
+
   it('keeps no history of keys', async () => {
     const { sink, versions } = historySink();
     await write(statefulGateway(), sink, 'keys', { method: 'POST', body: '{}' });
@@ -1116,6 +1145,33 @@ describe('secret visibility (ADR-0010)', () => {
         error: expect.stringContaining('hmac.secret'),
       }),
     ]);
+  });
+
+  it('refuses a write carrying a masked URL, even re-encoded, and says where', async () => {
+    const masked = redactSecrets('api', {
+      api_id: 'billing',
+      target_url: 'https://svc:pw@billing.internal/api?api_key=k',
+    });
+    const { response, calls, audit } = await proxy('apis/billing', {
+      method: 'PUT',
+      body: JSON.stringify(masked),
+    });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: expect.stringMatching(/redaction mask .* at target_url;/),
+    });
+    expect(calls).toEqual([]);
+    expect(audit).toEqual([expect.objectContaining({ action: 'api.update', outcome: 'denied' })]);
+    // URLSearchParams writes the space as `+`: still caught.
+    const plus = await proxy('apis/billing', {
+      method: 'PUT',
+      body: JSON.stringify({
+        api_id: 'billing',
+        target_url: 'https://h/?token=%5Bsecret+hidden%5D',
+      }),
+    });
+    expect(plus.response.status).toBe(422);
+    expect(plus.calls).toEqual([]);
   });
 
   it('lets an ordinary write through', async () => {

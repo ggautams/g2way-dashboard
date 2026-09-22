@@ -154,5 +154,26 @@ browse.
   - A reload made outside the dashboard is invisible, and the UI says so.
   - Retention (M11) must never prune a write row newer than its environment's
     last reload, or staged changes would silently disappear.
+- _Added 2026-09-23 (M4), amends §4:_ the name rule alone missed upstream
+  credentials whose names are not credential-like, such as an `X-Upstream-Key`
+  in `transform_headers.request.add`, and passwords inside URLs.
+  `redactSnapshot` now applies three rules in one walk
+  (`mapSecrets`, `src/lib/secrets/redact.ts`):
+  - ADR-0010's typed `SECRET_PATHS`, which hide every upstream-bound header
+    map as a whole;
+  - the name rule above, unchanged;
+  - ADR-0010 §3's URL credential masking, where the credential parts become
+    `%5Bredacted%5D`, or `%5Bredacted%3A%20changed%5D` when only they differ
+    from the other snapshot.
+
+  The kind comes from the action prefix (`api.`, `policy.`, `key.`). Any other
+  action is checked against every kind's paths, which is stricter, never
+  looser. Header values such as `X-Env` in those maps are therefore now
+  `[redacted]` in the log too. `config_versions` is deliberately **not**
+  redacted, because rollback must restore the real values (ADR-0008 §2,
+  ADR-0010 §4). A proxy test writes one definition carrying both kinds of
+  secret, and asserts that the audit rows lack them while the history write
+  keeps them.
+
 - Not built: retention or pruning, export, per-row integrity (hash chaining),
   and client IP or user agent.

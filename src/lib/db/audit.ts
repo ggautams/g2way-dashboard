@@ -11,7 +11,7 @@ import {
   type AnyColumn,
   type SQL,
 } from 'drizzle-orm';
-import { capSnapshot, redactSnapshot } from '@/lib/audit/redact';
+import { capSnapshot, redactSnapshot, snapshotKind } from '@/lib/audit/redact';
 import type * as pgSchema from './schema/pg';
 import type { AuditOutcome, JsonValue, Role } from './schema/shared';
 import type * as sqliteSchema from './schema/sqlite';
@@ -76,10 +76,17 @@ export function auditValues(orgId: string, record: AuditRecord): NewAuditRow {
     if (capped.note) notes.push(capped.note);
     return capped.value;
   };
+  const kind = snapshotKind(record.action);
   const rawBefore = record.before ?? null;
-  const before = cap('before', rawBefore === null ? null : redactSnapshot(rawBefore));
-  const after = cap('after', record.after == null ? null : redactSnapshot(record.after, rawBefore));
-  const request = cap('request', record.request == null ? null : redactSnapshot(record.request));
+  const before = cap('before', rawBefore === null ? null : redactSnapshot(rawBefore, null, kind));
+  const after = cap(
+    'after',
+    record.after == null ? null : redactSnapshot(record.after, rawBefore, kind),
+  );
+  const request = cap(
+    'request',
+    record.request == null ? null : redactSnapshot(record.request, null, kind),
+  );
   return {
     orgId,
     actorId: record.actor?.id ?? null,

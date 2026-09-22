@@ -31,7 +31,14 @@ async function pglite(): Promise<DataHandle> {
 }
 
 const actor = { id: 'u1', email: 'ada@example.com', role: 'editor' as const };
-const v1 = { api_id: 'orders', listen_path: '/v1/', auth: { mode: 'jwt', secret: 'shh' } };
+// Every class of secret ADR-0010 masks for readers: history must keep them all, for rollback.
+const v1 = {
+  api_id: 'orders',
+  listen_path: '/v1/',
+  auth: { mode: 'jwt', secret: 'shh' },
+  target_url: 'https://svc:pw@orders.internal/api?api_key=live',
+  transform_headers: { request: { add: { 'X-Upstream-Key': 'upstream-live' } } },
+};
 const v2 = { ...v1, listen_path: '/v2/' };
 
 const write = (over: Partial<VersionWrite>): VersionWrite => ({

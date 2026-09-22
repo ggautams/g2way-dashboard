@@ -120,12 +120,14 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       permission gets API-definition, policy and key secrets masked in BFF `GET`s,
       page loaders and history alike, and the BFF refuses any write carrying the
       mask (ADR-0010)
-- [ ] Credentials embedded in URLs (`target_url`, `schema_sync.url`, UDG/subgraph
-      `url` with `user:pass@` or `?api_key=`) are not masked for read-only roles
-      (ADR-0010 §3)
-- [ ] Move the audit redactor (ADR-0006 §4) onto ADR-0010's typed path list as
-      well as its name rule: an upstream header like `X-Upstream-Key` is stored
-      unredacted in audit snapshots today
+- [x] Credentials embedded in URLs (`target_url`, `target_list`, discovery
+      `endpoint`, `schema_sync.url`, UDG/subgraph `url`, and per version): the
+      userinfo and credential query values are masked for read-only roles, the
+      rest of the URL stays readable, and the write guard refuses the URL form of
+      the mask (ADR-0010 §3)
+- [x] The audit redactor (ADR-0006 §4) walks ADR-0010's typed path list and URL
+      masking as well as its name rule: an upstream header like `X-Upstream-Key`
+      is no longer stored in audit snapshots; config history stays unredacted
 
 ## M5 — Traffic & middleware designer
 
@@ -1087,3 +1089,27 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - Next: M4's remaining boxes are blocked upstream or deferred (cross-page bulk
     selection, complete search, native rotate). Either take cross-page bulk
     selection or start M5.
+
+- feat(M4): URL-embedded credentials and the audit redactor on
+  ADR-0010's paths.
+  - `src/lib/secrets/url.ts`: textual `maskUrlCredentials` (UDG URLs are
+    minijinja templates, so no `new URL()`). It masks the userinfo and the
+    query values on the explicit `CREDENTIAL_QUERY_PARAMS` list. The mask is
+    percent-encoded (`%5Bsecret%20hidden%5D`), so a masked URL still parses.
+    `SECRET_URL_PATHS` is typed like `SECRET_PATHS`. Any other `scheme://`
+    string gets the same treatment as a fallback.
+  - `containsMask` backs `findMasked` and the non-JSON check. It catches the
+    mask inside strings and the URL form in any hex case, with `%20` or `+`
+    for the space. The BFF refuses a body carrying a masked URL with 422.
+  - Both redactors now share one walker, `mapSecrets`. The audit redactor
+    takes the kind from the action prefix, and uses every kind's paths when
+    the action names none. URL credentials read `%5Bredacted%5D`, or
+    `…changed…` when only they changed.
+  - A proxy test pins that audit rows lack the secrets and the history write
+    keeps them.
+  - **Surprise:** non-credential headers in upstream header maps (`X-Env`) now
+    read `[redacted]` in audit too, because the maps are hidden whole, as in
+    ADR-0010.
+  - Also masked beyond the four named fields: `target_list` and
+    `service_discovery.endpoint`, which follow `target_url`'s rules.
+  - Next: cross-page bulk selection, or start M5.

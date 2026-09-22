@@ -1,6 +1,7 @@
 import { can, type Permission, type Role } from '@/lib/auth/rbac';
 import type { JsonValue } from '@/lib/db/schema/shared';
 import type { components } from '../../../contracts/g2way.d.ts';
+import { looksLikeUrl, maskUrlCredentials } from './url';
 
 /**
  * Secret visibility for read-only roles (ADR-0010). Universal and
@@ -103,65 +104,169 @@ export const SECRET_PATHS: {
 export const SECRET_NAME =
   /secret|passw|private[-_]?key|credential|api[-_]?key|authorization|(?:^|[-_])token$/i;
 
-// ---- redaction -----------------------------------------------------------------
+// ---- URLs ------------------------------------------------------------------------
+
+/**
+ * Upstream URLs, top level and per version: their userinfo and credential
+ * query parameters are masked, the rest stays readable ({@link maskUrlCredentials}).
+ * `target_list` and `service_discovery.endpoint` follow `target_url`'s rules
+ * upstream, so they are listed with it.
+ */
+const OVERRIDABLE_URLS = [
+  'target_url',
+  'target_list.[]',
+  'service_discovery.endpoint',
+  'graphql.schema_sync.url',
+  'graphql.data_sources.*.url',
+  'graphql.supergraph.subgraphs.[].url',
+] as const satisfies readonly SecretPath<Schemas['VersionOverrides']>[];
+
+/** The URL-valued fields of each kind whose embedded credentials are masked (ADR-0010 §3). */
+export const SECRET_URL_PATHS: {
+  readonly [K in SecretKind]: readonly SecretPath<Bodies[K]>[];
+} = {
+  api: [
+    ...OVERRIDABLE_URLS,
+    ...OVERRIDABLE_URLS.map((path) => `versioning.versions.*.${path}` as const),
+  ],
+  policy: [],
+  key: [],
+};
+
+/**
+ * {@link SECRET_MASK} as it appears inside a masked URL: percent-encoded, so
+ * the URL still parses (`https://%5Bsecret%20hidden%5D@host/?api_key=%5Bsecret%20hidden%5D`).
+ */
+export const SECRET_URL_MASK = encodeURIComponent(SECRET_MASK);
+
+/** The URL form of the mask, however it was re-encoded (`%5b`, `+` for the space). */
+const URL_MASK_PATTERN = /%5bsecret(?:%20|\+)hidden%5d/i;
+
+/** Whether `text` carries the mask, whole, inside a string, or inside a URL. */
+export function containsMask(text: string): boolean {
+  return text.includes(SECRET_MASK) || URL_MASK_PATTERN.test(text);
+}
+
+// ---- the walk ------------------------------------------------------------------
+
+export const SECRET_KINDS: readonly SecretKind[] = ['api', 'policy', 'key'];
+
+/** Where a value sits: its property name, and whether a typed path ends on it. */
+export type SecretSite = {
+  /** The property holding the value; `null` for an array element or the root. */
+  name: string | null;
+  /** A {@link SECRET_PATHS} entry ends here. */
+  secretPath: boolean;
+  /** A {@link SECRET_URL_PATHS} entry ends here. */
+  urlPath: boolean;
+};
+
+type Segments = readonly (readonly string[])[];
 
 function isRecord(value: JsonValue | undefined): value is { [key: string]: JsonValue } {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function advance(paths: Segments, segment: string, wildcard: string | null): Segments {
+  return paths
+    .filter((path) => path[0] === segment || (wildcard !== null && path[0] === wildcard))
+    .map((path) => path.slice(1));
+}
+
+/**
+ * A copy of `value` where `replace` decides each node, top down: a result
+ * other than `undefined` stands in for the node, `undefined` walks into it.
+ * `counterpart` is the node at the same place in `compareTo` (the audit
+ * redactor's other snapshot). Shared by {@link redactSecrets} and the audit
+ * redactor (ADR-0006 §4), so both follow the same typed path lists.
+ */
+export function mapSecrets(
+  kinds: readonly SecretKind[],
+  value: JsonValue,
+  compareTo: JsonValue | null | undefined,
+  replace: (
+    value: JsonValue,
+    counterpart: JsonValue | undefined,
+    site: SecretSite,
+  ) => JsonValue | undefined,
+): JsonValue {
+  const split = (lists: typeof SECRET_PATHS | typeof SECRET_URL_PATHS): Segments =>
+    kinds.flatMap((kind) => lists[kind].map((path) => path.split('.')));
+  const walk = (
+    node: JsonValue,
+    other: JsonValue | undefined,
+    name: string | null,
+    secrets: Segments,
+    urls: Segments,
+  ): JsonValue => {
+    const site = {
+      name,
+      secretPath: secrets.some((path) => path.length === 0),
+      urlPath: urls.some((path) => path.length === 0),
+    };
+    const replaced = replace(node, other, site);
+    if (replaced !== undefined) return replaced;
+    if (Array.isArray(node)) {
+      return node.map((item, i) =>
+        walk(
+          item,
+          Array.isArray(other) ? other[i] : undefined,
+          null,
+          advance(secrets, '[]', null),
+          advance(urls, '[]', null),
+        ),
+      );
+    }
+    if (!isRecord(node)) return node;
+    return Object.fromEntries(
+      Object.entries(node).map(([key, child]) => [
+        key,
+        walk(
+          child,
+          isRecord(other) && Object.hasOwn(other, key) ? other[key] : undefined,
+          key,
+          advance(secrets, key, '*'),
+          advance(urls, key, '*'),
+        ),
+      ]),
+    );
+  };
+  return walk(value, compareTo ?? undefined, null, split(SECRET_PATHS), split(SECRET_URL_PATHS));
+}
+
+// ---- redaction -----------------------------------------------------------------
+
 function isSecretValue(value: JsonValue | undefined): value is string | number {
   return typeof value === 'string' || typeof value === 'number';
 }
 
-/** Masks, in place, every present scalar `path` reaches inside `node`. */
-function maskPath(node: JsonValue, path: readonly string[]): void {
-  const [head, ...rest] = path;
-  if (head === undefined) return;
-  if (head === '[]') {
-    if (!Array.isArray(node)) return;
-    node.forEach((item, i) => {
-      if (rest.length === 0) {
-        if (isSecretValue(item)) node[i] = SECRET_MASK;
-      } else maskPath(item, rest);
-    });
-    return;
-  }
-  if (!isRecord(node)) return;
-  const names = head === '*' ? Object.keys(node) : Object.hasOwn(node, head) ? [head] : [];
-  for (const name of names) {
-    if (rest.length === 0) {
-      if (isSecretValue(node[name])) node[name] = SECRET_MASK;
-    } else maskPath(node[name], rest);
-  }
-}
-
-/** Masks, in place, every scalar under a {@link SECRET_NAME} property, at any depth. */
-function maskByName(node: JsonValue): void {
-  if (Array.isArray(node)) {
-    for (const item of node) maskByName(item);
-    return;
-  }
-  if (!isRecord(node)) return;
-  for (const [name, value] of Object.entries(node)) {
-    if (isSecretValue(value) && SECRET_NAME.test(name)) node[name] = SECRET_MASK;
-    else maskByName(value);
-  }
-}
-
 /**
  * `body` (one `kind` record) with every present secret replaced by
- * {@link SECRET_MASK}. Pure: `body` is not modified. The shape is kept: no
+ * {@link SECRET_MASK}, and every credential inside a URL by
+ * {@link SECRET_URL_MASK}. Pure: `body` is not modified. The shape is kept: no
  * field is added or removed, `null` and absent stay so, and booleans are never
  * touched. Anything that is not an object comes back as it is.
+ *
+ * URLs: the typed {@link SECRET_URL_PATHS}, plus, like the name fallback, any
+ * string anywhere that reads as `scheme://…` (a plugin config's URL). Only the
+ * credential parts change, so this never hides a host or a path.
  */
 export function redactSecrets<T>(kind: SecretKind, body: T): T {
   // Gateway bodies are parsed JSON; the contract types are narrower views of it.
   const json = body as JsonValue;
   if (!isRecord(json)) return body;
-  const copy = structuredClone(json);
-  for (const path of SECRET_PATHS[kind]) maskPath(copy, path.split('.'));
-  maskByName(copy);
-  return copy as T;
+  return mapSecrets([kind], json, undefined, (value, _counterpart, site) => {
+    if (
+      isSecretValue(value) &&
+      (site.secretPath || (site.name !== null && SECRET_NAME.test(site.name)))
+    ) {
+      return SECRET_MASK;
+    }
+    if (typeof value === 'string' && (site.urlPath || looksLikeUrl(value))) {
+      return maskUrlCredentials(value, SECRET_URL_MASK);
+    }
+    return undefined;
+  }) as T;
 }
 
 /** Whether `role` sees `kind`'s secrets: it holds the kind's write permission. */
@@ -182,12 +287,13 @@ export function redactEachFor<T>(role: Role, kind: SecretKind, body: T): T {
 }
 
 /**
- * The dotted paths in `body` whose value is {@link SECRET_MASK}: a body read
+ * The dotted paths in `body` whose value carries {@link SECRET_MASK}, whole or
+ * inside a masked URL ({@link containsMask}): a body read
  * by a role that could not see its secrets. Writing it back would replace real
  * secrets with the mask, so the BFF refuses it (ADR-0010).
  */
 export function findMasked(body: JsonValue, at = ''): string[] {
-  if (body === SECRET_MASK) return [at === '' ? '(the body)' : at];
+  if (typeof body === 'string' && containsMask(body)) return [at === '' ? '(the body)' : at];
   const join = (key: string | number) => (at === '' ? String(key) : `${at}.${key}`);
   if (Array.isArray(body)) return body.flatMap((item, i) => findMasked(item, join(i)));
   if (isRecord(body)) {

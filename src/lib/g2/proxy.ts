@@ -30,6 +30,7 @@ import { ADMIN_SECRET_HEADER, GATEWAY_TIMEOUT_MS } from './server-client';
 import {
   REVEAL_PERMISSION,
   SECRET_MASK,
+  containsMask,
   findMasked,
   mayReveal,
   redactEachFor,
@@ -442,11 +443,11 @@ async function redactedRead(
   });
 }
 
-/** Where a write body carries {@link SECRET_MASK}: parsed paths, or the body itself if not JSON. */
+/** Where a write body carries {@link SECRET_MASK} (whole or URL-encoded): parsed paths, or the body itself if not JSON. */
 function maskedIn(body: ArrayBuffer): string[] {
   const json = parseJson(body);
   if (json !== null) return findMasked(json);
-  return new TextDecoder().decode(body).includes(SECRET_MASK) ? ['(the body)'] : [];
+  return containsMask(new TextDecoder().decode(body)) ? ['(the body)'] : [];
 }
 
 // ---- audited writes (ADR-0006) ---------------------------------------------

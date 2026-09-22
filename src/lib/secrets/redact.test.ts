@@ -6,6 +6,9 @@ import {
   REVEAL_PERMISSION,
   SECRET_MASK,
   SECRET_PATHS,
+  SECRET_URL_MASK,
+  SECRET_URL_PATHS,
+  containsMask,
   findMasked,
   mayReveal,
   redactEachFor,
@@ -168,6 +171,88 @@ describe('redactSecrets', () => {
     // @ts-expect-error: `auth.secret` exists, `auth.token` does not.
     const alsoWrong: SecretPath<Schemas['ApiDefinition']> = 'auth.token';
     expect([ok, wrong, alsoWrong]).toHaveLength(3);
+  });
+});
+
+describe('credentials embedded in URLs (ADR-0010 §3)', () => {
+  const U = SECRET_URL_MASK;
+
+  /** Every typed URL field, each carrying userinfo and a credential query parameter. */
+  function urlApi() {
+    const upstream = {
+      target_url: 'https://svc:pw@billing.internal:8443/api?region=eu&api_key=k',
+      target_list: ['http://a.internal/?token=t', 'http://b.internal/'],
+      service_discovery: { endpoint: 'http://consul:8500/v1/catalog?token=c' },
+      graphql: {
+        schema_sync: { url: 'https://ops:pw@introspect.internal/graphql' },
+        data_sources: {
+          'Query.user': { kind: 'rest', url: 'http://users/{{ args.id }}?sig=s&fields=all' },
+        },
+        supergraph: { subgraphs: [{ name: 'a', url: 'http://a/graphql?access_token=t' }] },
+      },
+    };
+    return { api_id: 'billing', ...upstream, versioning: { versions: { v2: upstream } } };
+  }
+
+  it('masks only the credential parts of every typed URL field, top level and per version', () => {
+    const upstream = {
+      target_url: `https://${U}@billing.internal:8443/api?region=eu&api_key=${U}`,
+      target_list: [`http://a.internal/?token=${U}`, 'http://b.internal/'],
+      service_discovery: { endpoint: `http://consul:8500/v1/catalog?token=${U}` },
+      graphql: {
+        schema_sync: { url: `https://${U}@introspect.internal/graphql` },
+        data_sources: {
+          'Query.user': { kind: 'rest', url: `http://users/{{ args.id }}?sig=${U}&fields=all` },
+        },
+        supergraph: { subgraphs: [{ name: 'a', url: `http://a/graphql?access_token=${U}` }] },
+      },
+    };
+    expect(redactSecrets('api', urlApi())).toEqual({
+      api_id: 'billing',
+      ...upstream,
+      versioning: { versions: { v2: upstream } },
+    });
+  });
+
+  it('keeps a masked URL parseable and its routing readable', () => {
+    const { target_url } = redactSecrets('api', urlApi());
+    const url = new URL(target_url);
+    expect(url.host).toBe('billing.internal:8443');
+    expect(url.pathname).toBe('/api');
+    expect(url.searchParams.get('region')).toBe('eu');
+    expect(url.searchParams.get('api_key')).toBe(M);
+    expect(decodeURIComponent(url.username)).toBe(M);
+    expect(url.password).toBe('');
+  });
+
+  it('lists the URL paths explicitly, APIs only', () => {
+    expect(SECRET_URL_PATHS.api).toContain('target_url');
+    expect(SECRET_URL_PATHS.api).toContain(
+      'versioning.versions.*.graphql.supergraph.subgraphs.[].url',
+    );
+    expect(SECRET_URL_PATHS.policy).toEqual([]);
+    expect(SECRET_URL_PATHS.key).toEqual([]);
+    // @ts-expect-error: the contract has no `graphql.schema_sync.endpoint`.
+    const wrong: SecretPath<Schemas['ApiDefinition']> = 'graphql.schema_sync.endpoint';
+    expect(wrong).toBeDefined();
+  });
+
+  it('leaves a URL without credentials exactly as it was', () => {
+    const api = { api_id: 'a', target_url: 'http://billing.svc:8000/api?region=eu' };
+    expect(redactSecrets('api', api)).toEqual(api);
+  });
+
+  it('is found by the write guard, however the URL was re-encoded', () => {
+    const masked = redactSecrets('api', urlApi());
+    expect(findMasked(masked)).toContain('target_url');
+    expect(findMasked(masked)).toContain(
+      'versioning.versions.v2.graphql.supergraph.subgraphs.0.url',
+    );
+    expect(findMasked(masked)).not.toContain('target_list.1');
+    expect(containsMask(new URL(masked.target_url).href)).toBe(true);
+    expect(containsMask('http://h/?api_key=%5bsecret+hidden%5d')).toBe(true);
+    expect(containsMask('http://h/?api_key=[secret hidden]')).toBe(true);
+    expect(containsMask('http://h/?api_key=secret-hidden')).toBe(false);
   });
 });
 

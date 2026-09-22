@@ -82,10 +82,37 @@ ADR-0008 §6 left one rule: the BFF and history redact together or not at all.
    say _where_ a credential goes, stay visible. Tests pin both the paths and
    the fallback.
 
-   Not covered: credentials embedded in a URL (`target_url`,
-   `schema_sync.url`, UDG `url` with `user:pass@` or `?api_key=`). Masking a
-   whole URL would hide the routing a viewer is there to read. This is a
-   follow-up on the roadmap.
+   **Credentials embedded in URLs** (_added 2026-09-23_). Masking a whole
+   URL would hide the routing a viewer is there to read, so only the
+   credential parts are replaced, by `SECRET_URL_MASK`: the mask
+   percent-encoded (`%5Bsecret%20hidden%5D`), so the result still parses as a
+   URL.
+   - **Which parts:** the userinfo (`user:pass@`, or a lone token as the
+     user) becomes the mask. So does the value of every query parameter whose
+     name, after decoding, lower-casing and `-` → `_`, is on the explicit
+     `CREDENTIAL_QUERY_PARAMS` list (`src/lib/secrets/url.ts`): `api_key`,
+     `key`, `token`, `access_token`, `secret`, `password`, `sig`, `signature`,
+     the AWS and GCS presigning names, and similar. Every entry is pinned by a
+     test. The list is explicit because a pattern would also catch `keyword`
+     or `token_type`. Scheme, host, port, path, other parameters and the
+     fragment stay as they are. An empty value stays empty.
+   - **Which fields** (`SECRET_URL_PATHS`, typed like `SECRET_PATHS`):
+     `target_url`, `target_list.[]`, `service_discovery.endpoint`,
+     `graphql.schema_sync.url`, `graphql.data_sources.*.url` and
+     `graphql.supergraph.subgraphs.[].url`, again under
+     `versioning.versions.*`. `target_list` and the discovery endpoint follow
+     `target_url`'s rules upstream, so they are listed with it.
+   - **Fallback:** as with the name rule, any other string that reads as
+     `scheme://…` gets the same treatment. That covers a plugin config's URL.
+     It is safe to apply everywhere because it never hides more than the
+     credential parts.
+   - The masking is textual, not `new URL()`. UDG URLs are minijinja
+     templates (`http://users/{{ args.id }}`), which a URL parser would
+     reject or re-encode.
+   - The write guard (§5) finds the URL form too: `findMasked` and the
+     non-JSON check use `containsMask`. It matches the plain mask anywhere
+     inside a string, and the encoded form in any hex case, with `%20` or `+`
+     for the space.
 
 4. **Where redaction is applied.** Every place a gateway body can reach a
    browser:
@@ -137,9 +164,11 @@ ADR-0008 §6 left one rule: the BFF and history redact together or not at all.
    hold every write permission, so no reader of the log is a role this ADR
    hides anything from. If a role ever gets `audit:read` without the write
    permissions, `/audit/[id]` must run `redactFor` over its snapshots too.
-   There is one gap: the audit name rule does not mask upstream header values
-   whose names are not credential-like, such as `X-Upstream-Key: …`. Moving
-   the audit redactor onto this path list is a follow-up.
+   _Amended 2026-09-23:_ the audit redactor now walks this ADR's typed path
+   lists and URL masking as well as its own name rule (ADR-0006 §4
+   addendum). An upstream header like `X-Upstream-Key` and a password in
+   `target_url` are no longer stored in audit snapshots. `config_versions`
+   stays unredacted (§4).
 
 7. **The gateway still holds everything.** This is presentation, enforced
    server-side before a body leaves the dashboard. g2way stores and returns
