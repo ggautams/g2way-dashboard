@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { DeleteButton } from '@/components/designer/save-bar';
 import { RevokeButton, RotateButton } from '@/components/keys/key-actions';
+import { KeyAccessSection } from '@/components/keys/key-access';
 import { KeyDesigner } from '@/components/keys/key-designer';
 import { KeyMetadataEditor } from '@/components/keys/key-metadata';
 import { KeyUsage } from '@/components/keys/key-usage';
@@ -25,6 +26,7 @@ import type { Outcome } from '@/lib/g2/gateway-status';
 import { loadKey, loadPolicyChoices, type KeyItem, type PolicyChoices } from '@/lib/g2/keys';
 import { loadPolicy } from '@/lib/g2/policies';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
+import { resolveKeyAccess } from '@/lib/keys/access';
 import { keyFieldHelp } from '@/lib/keys/field-help';
 import type { KeyMetadataFields } from '@/lib/keys/metadata';
 import { saveKeyMetadataAction } from '@/lib/keys/metadata-actions';
@@ -54,10 +56,13 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
   // The applied policy, whose rate and quota replace the key's own (Usage panel).
   let applied: Outcome<Policy> | null = null;
   let environment = { id: '', label: '' };
+  // When the session was read: the resolver judges expiry against it.
+  let nowSecs = 0;
   try {
     const selected = await selectedEnvironmentId();
     const item = await loadKey(selected, hash);
     session = item.session;
+    nowSecs = Math.floor(item.fetchedAt / 1000);
     environment = {
       id: item.environment,
       label:
@@ -188,7 +193,14 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
             Dashboard metadata unavailable: {metadata.error}
           </p>
         ))}
-      {session.ok && <KeyUsage limits={effectiveLimits(session.value, applied)} />}
+      {session.ok && (
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+          <KeyUsage limits={effectiveLimits(session.value, applied)} />
+          <KeyAccessSection
+            access={resolveKeyAccess({ session: session.value, policy: applied, apis, nowSecs })}
+          />
+        </div>
+      )}
       {session.ok ? (
         <KeyDesigner
           // A save refreshes the page with the stored session: start a fresh draft.

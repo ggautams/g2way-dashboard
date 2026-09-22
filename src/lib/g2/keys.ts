@@ -78,18 +78,25 @@ export async function loadKeyPage(
   return { environment: id, keys, fetchedAt };
 }
 
-export type KeyItem = { environment: string; session: Outcome<KeySession> };
+export type KeyItem = {
+  environment: string;
+  session: Outcome<KeySession>;
+  /** Unix milliseconds when the session was read: expiry is judged against it. */
+  fetchedAt: number;
+};
 
 /** One session by hash (`GET /g2/keys/{hash}?hashed=true`); a 404 settles with `status: 404`. */
 export async function loadKey(
   environmentId: string | undefined,
   hash: string,
-  deps: GatewayClientDeps = {},
+  deps: GatewayClientDeps & { now?: () => number } = {},
 ): Promise<KeyItem> {
   const { id } = resolveEnvironment(environmentId, deps.registry);
   const client = gatewayClient(id, deps);
+  const fetchedAt = (deps.now ?? Date.now)();
   return {
     environment: id,
+    fetchedAt,
     session: await settle(() =>
       unwrap(
         client.GET('/g2/keys/{key}', { params: { path: { key: hash }, query: { hashed: true } } }),

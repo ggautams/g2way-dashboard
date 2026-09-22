@@ -100,7 +100,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       hashes only, so inventory lives here
 - [ ] Live quota and rate-limit usage per key — **blocked**: g2way has no usage endpoint
       (`UPSTREAM.md`); `/keys/view/[hash]` shows the configured limits in effect meanwhile
-- [ ] "What does this key allow" resolver that folds `apply_policies`
+- [x] "What does this key allow" resolver that folds `apply_policies`
 - [ ] Bulk operations and search by alias
 - [ ] Search and filter `/keys` by dashboard label and owner (today they only
       show on the page being viewed), and prune `key_metadata` rows orphaned by
@@ -108,6 +108,10 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [ ] Policy history tab and rollback (versions are already kept, ADR-0008)
 - [ ] Replace the BFF rotate orchestration with g2way's native atomic rotate once it
       exists (`UPSTREAM.md`, ADR-0009); blocked upstream
+- [ ] Keys carry live secrets too: `GET /g2/keys/{key}` returns an hmac session's
+      plaintext `hmac.secret` (vendored `hmac.md`), and `/keys/view/[hash]` hands the
+      whole session to the designer for every `keys:read` role. Effective access
+      reports credentials by presence only; decide redaction with the item below
 - [ ] Decide whether read-only roles see secrets in API definitions and policies.
       Today the BFF passes `GET` bodies through, and history (ADR-0008 §6) shows
       viewers the same; redact both together or neither
@@ -970,3 +974,20 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - UPSTREAM.md asks for `GET /g2/keys/{key}/usage?hashed=true`; the task stays
     unchecked and marked blocked, and `usage.test.ts` fails once the spec has it.
   - Next: the "What does this key allow" resolver (M4).
+
+- feat(M4): "What does this key allow" resolver + Effective access section.
+  - `resolveKeyAccess()` in `src/lib/keys/access.ts` (pure, reuses `effectiveLimits()`):
+    status allowed/denied/unknown with reasons, limits and their source, the key
+    fields a policy replaces, per-API rows (auth fit, GraphQL rules) and which
+    credentials the session holds, by presence only.
+  - Decision: a `404` on the applied policy is a **denial** (the vendored
+    `hmac.md`/`tls.md`/`oidc.md` all list "policy missing or inactive" as a 403);
+    any other read failure makes the verdict **unknown**, never a fallback to the
+    key's own access. No g2way source was read.
+  - `ApiChoice` gained `authMode` and `active`, so rows flag a basic_auth/hmac API
+    the key has no credentials for, keyless APIs, and JWT/OIDC (ephemeral sessions).
+    `loadKey()` now returns `fetchedAt`; expiry is judged against it.
+  - Rendered beside the Usage panel on `/keys/view/[hash]` (Server Component). Not
+    run in a browser (the open M2 browser pass covers it too).
+  - Follow-up filed: M4 hmac-secret exposure on the key view.
+  - Next: bulk operations and search by alias (M4).

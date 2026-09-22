@@ -27,8 +27,8 @@ import {
 } from './access';
 
 const apis: ApiChoice[] = [
-  { id: 'orders', name: 'Orders', graphql: false },
-  { id: 'graph', name: 'Graph', graphql: true },
+  { id: 'orders', name: 'Orders', graphql: false, authMode: 'auth_token', active: true },
+  { id: 'graph', name: 'Graph', graphql: true, authMode: 'auth_token', active: true },
 ];
 
 // `future_field` stands in for anything g2way adds that the matrix does not show.
@@ -84,7 +84,17 @@ describe('dangling and ungranted APIs', () => {
       target_url: 'http://upstream',
       graphql: { mode: 'proxy' },
     } as Parameters<typeof apiChoice>[0];
-    expect(apiChoice(def)).toEqual({ id: 'graph', name: 'Graph', graphql: true });
+    expect(apiChoice(def)).toEqual({
+      id: 'graph',
+      name: 'Graph',
+      graphql: true,
+      authMode: 'auth_token',
+      active: true,
+    });
+    expect(apiChoice({ ...def, active: false, auth: { mode: 'hmac' } })).toMatchObject({
+      authMode: 'hmac',
+      active: false,
+    });
     expect(apiChoice({ ...def, graphql: null }).graphql).toBe(false);
   });
 });

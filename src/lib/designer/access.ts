@@ -16,7 +16,7 @@
  */
 
 import type { components } from '../../../contracts/g2way.d.ts';
-import type { ApiDefinition } from '@/lib/apis/list';
+import { summarise, type ApiDefinition, type AuthMode } from '@/lib/apis/list';
 
 export type ApiAccess = components['schemas']['ApiAccess'];
 export type TypeFields = components['schemas']['TypeFields'];
@@ -25,8 +25,18 @@ export type AccessMap = Record<string, ApiAccess>;
 /** The two GraphQL field lists of an entry. */
 export type TypeListKey = 'allowed_types' | 'restricted_types';
 
-/** What the matrix needs to know about an API: never the whole definition. */
-export type ApiChoice = { id: string; name: string; graphql: boolean };
+/**
+ * What the matrix (and the key view's effective-access resolver) needs to
+ * know about an API: never the whole definition.
+ */
+export type ApiChoice = {
+  id: string;
+  name: string;
+  graphql: boolean;
+  /** g2way's defaults applied: an absent `auth` is `auth_token`, an absent `active` is `true`. */
+  authMode: AuthMode;
+  active: boolean;
+};
 
 export type ApiChoices = { ok: true; value: ApiChoice[] } | { ok: false; error: string };
 
@@ -45,12 +55,13 @@ export type AccessHelpKey =
 export type AccessHelp = Record<AccessHelpKey, string>;
 
 /**
- * An API as the matrix offers it. Only the id, name and whether it is
- * GraphQL-configured cross to the browser, never the definition (which can
- * carry upstream credentials).
+ * An API as the matrix offers it. Only the id, name, whether it is
+ * GraphQL-configured, its auth mode and whether it is active cross to the
+ * browser, never the definition (which can carry upstream credentials).
  */
 export function apiChoice(api: ApiDefinition): ApiChoice {
-  return { id: api.api_id, name: api.name, graphql: api.graphql != null };
+  const { authMode, active } = summarise(api);
+  return { id: api.api_id, name: api.name, graphql: api.graphql != null, authMode, active };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

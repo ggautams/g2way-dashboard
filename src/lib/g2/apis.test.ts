@@ -82,8 +82,8 @@ describe('loadApiChoices', () => {
     expect(await loadApiChoices('dev', { registry, fetch: gw.fetch })).toEqual({
       ok: true,
       value: [
-        { id: 'orders', name: 'Orders', graphql: false },
-        { id: 'graph', name: 'Graph', graphql: true },
+        { id: 'orders', name: 'Orders', graphql: false, authMode: 'basic_auth', active: true },
+        { id: 'graph', name: 'Graph', graphql: true, authMode: 'auth_token', active: true },
       ],
     });
   });
