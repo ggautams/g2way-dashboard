@@ -87,7 +87,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] **Reload-required** as a first-class UI concept: writes are staged until
       `POST /g2/reload`, with a visible pending-changes affordance
 - [x] Import an OpenAPI/Swagger document → `ApiDefinition`
-- [ ] Config version history with rollback (dashboard-side)
+- [x] Config version history with rollback (dashboard-side)
 - [ ] Export a definition bundle for `--apps-dir` / GitOps
 
 ## M4 — Policies & keys
@@ -100,6 +100,10 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [ ] Live quota and rate-limit usage per key
 - [ ] "What does this key allow" resolver that folds `apply_policies`
 - [ ] Bulk operations and search by alias
+- [ ] Policy history tab and rollback (versions are already kept, ADR-0008)
+- [ ] Decide whether read-only roles see secrets in API definitions and policies.
+      Today the BFF passes `GET` bodies through, and history (ADR-0008 §6) shows
+      viewers the same; redact both together or neither
 
 ## M5 — Traffic & middleware designer
 
@@ -163,7 +167,8 @@ the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
 - [ ] Multi-environment promotion: diff dev → staging → prod, apply with review
 - [ ] Alert rules (error rate, latency, quota exhaustion, circuit open)
 - [ ] Notification channels: webhook, Slack, email
-- [ ] Config backup and restore
+- [ ] Config backup and restore, including restoring a deleted API or policy from
+      its `config_versions` history (ADR-0008), and retention for that table
 - [ ] Boot the built app on Postgres end to end (`make test-pg` covers the data
       layer only), ideally as a bundle-check variant
 - [ ] Dockerfile + `deploy/k8s/` applying as a plain directory alongside g2way's.
@@ -782,3 +787,23 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     definition page is now `/apis/view/[id]`, and `pages.test.ts` fails on any
     dynamic segment with static siblings.
   - Next: config version history with rollback.
+
+- feat(M3): config version history with rollback (ADR-0008).
+  - New table `config_versions` (migration `0004_config_versions`), one
+    unredacted row per API/policy version per environment. Audit snapshots are
+    redacted and cannot restore a secret.
+  - After a gateway-accepted API/policy write, the BFF's `auditedWrite` hands
+    the raw before and after to `AuditSink.version`.
+    - This is best effort: logged on failure, never failing the write.
+    - If the after-read failed, the accepted request body is stored instead.
+  - The first dashboard write to a resource also keeps what it replaced as a
+    `baseline`, so edits made elsewhere can be undone.
+  - The designer has a History tab (newest first, what each version changed
+    from the one before). "Load into the draft" is the rollback, going through
+    the normal review/save/audit/reload path.
+  - Keys are not versioned.
+  - Follow-ups placed:
+    - M4: the policy history UI, and one decision on whether viewers see
+      secrets (BFF reads and history together).
+    - M11: restoring deleted resources from history, and retention for the table.
+  - Next: export a definition bundle.

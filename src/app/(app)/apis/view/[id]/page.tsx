@@ -6,10 +6,13 @@ import { fieldHelp } from '@/lib/apis/field-help';
 import { apiDefinitionSchema } from '@/lib/apis/schema';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
+import { getDatabase } from '@/lib/db';
+import { listVersions } from '@/lib/db/config-versions';
 import { loadApi, type ApiItem } from '@/lib/g2/apis';
 import {
   RegistryConfigError,
   UnknownEnvironmentError,
+  getOrgId,
   listEnvironments,
 } from '@/lib/g2/environments';
 import { DeleteApiButton, NotLiveNote } from '@/components/apis/save-bar';
@@ -48,6 +51,21 @@ export default async function ApiPage({ params, searchParams }: PageProps<'/apis
   }
   if (!api.ok && api.status === 404) notFound();
   const canWrite = can(user.role, 'apis:write');
+  const history = api.ok
+    ? (
+        await listVersions(getDatabase(), getOrgId(), {
+          environment: environment.id,
+          kind: 'api',
+          resourceId: id,
+        })
+      ).map(({ id: versionId, action, definition, actorEmail, createdAt }) => ({
+        id: versionId,
+        action,
+        definition,
+        actorEmail,
+        createdAt: createdAt.toISOString(),
+      }))
+    : [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -76,6 +94,7 @@ export default async function ApiPage({ params, searchParams }: PageProps<'/apis
           // A save refreshes the page with the new stored definition: start a fresh draft.
           key={JSON.stringify(api.value)}
           environment={environment}
+          history={history}
           original={api.value}
           initial={api.value}
           help={fieldHelp()}

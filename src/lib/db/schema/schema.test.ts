@@ -96,5 +96,8 @@ describe('schema parity (SQLite ⇄ Postgres)', () => {
     expectTypeOf<InferSelectModel<typeof pg.loginFailures>>().toEqualTypeOf<
       InferSelectModel<typeof sqlite.loginFailures>
     >();
+    expectTypeOf<InferSelectModel<typeof pg.configVersions>>().toEqualTypeOf<
+      InferSelectModel<typeof sqlite.configVersions>
+    >();
   });
 });

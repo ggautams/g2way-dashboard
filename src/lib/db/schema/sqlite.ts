@@ -1,5 +1,13 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
-import { AUDIT_OUTCOMES, ROLES, THROTTLE_KINDS, monotonicUuid, type JsonValue } from './shared';
+import {
+  AUDIT_OUTCOMES,
+  CONFIG_KINDS,
+  ROLES,
+  THROTTLE_KINDS,
+  VERSION_ACTIONS,
+  monotonicUuid,
+  type JsonValue,
+} from './shared';
 
 /**
  * The dashboard schema for SQLite (the default database). Mirrors `pg.ts`
@@ -92,4 +100,37 @@ export const loginFailures = sqliteTable(
     createdAt: timestamp('created_at'),
   },
   (t) => [index('login_failures_lookup_idx').on(t.orgId, t.kind, t.key, t.createdAt)],
+);
+
+/**
+ * Every version of a gateway API definition or policy written through the
+ * dashboard, per environment (ADR-0008). Unlike `audit_log`, `definition` is
+ * stored **unredacted** — a rollback must restore secrets too — so this table
+ * is as sensitive as the gateway's own storage. `definition` is null for a
+ * delete. `audit_id` links the audit row of the write that produced it.
+ */
+export const configVersions = sqliteTable(
+  'config_versions',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    kind: text('kind', { enum: CONFIG_KINDS }).notNull(),
+    resourceId: text('resource_id').notNull(),
+    action: text('action', { enum: VERSION_ACTIONS }).notNull(),
+    definition: text('definition', { mode: 'json' }).$type<JsonValue>(),
+    actorId: text('actor_id'),
+    actorEmail: text('actor_email'),
+    auditId: text('audit_id'),
+    createdAt: timestamp('created_at'),
+  },
+  (t) => [
+    index('config_versions_resource_idx').on(
+      t.orgId,
+      t.environment,
+      t.kind,
+      t.resourceId,
+      t.createdAt,
+    ),
+  ],
 );

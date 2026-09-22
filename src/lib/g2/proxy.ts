@@ -16,6 +16,7 @@ import {
   createdItem,
   databaseAuditSink,
   describeGatewayWrite,
+  VERSIONED,
   withoutRawKey,
   type AuditSink,
   type GatewayWrite,
@@ -589,6 +590,27 @@ async function auditedWrite(options: AuditedWrite): Promise<Response> {
       outcome: 'success',
       notes,
     });
+    const kind = collection === null ? undefined : VERSIONED[collection];
+    if (kind !== undefined && finalTarget !== null && audit.version !== undefined) {
+      try {
+        await audit.version({
+          environment: target.id,
+          kind,
+          resourceId: finalTarget,
+          action: method === 'DELETE' ? 'delete' : method === 'POST' ? 'create' : 'update',
+          before,
+          // If the read-back failed, what the gateway just accepted is the next best record.
+          after: method === 'DELETE' ? null : (after ?? requestBody),
+          actor,
+          auditId,
+        });
+      } catch (error) {
+        console.error(
+          `[history] FAILED to keep the version from ${write.action} ${finalTarget} (audit ${auditId}):`,
+          error,
+        );
+      }
+    }
   }
 
   const responseHeaders = new Headers({

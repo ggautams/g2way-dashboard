@@ -23,6 +23,18 @@ export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
 export const THROTTLE_KINDS = ['email', 'client'] as const;
 export type ThrottleKind = (typeof THROTTLE_KINDS)[number];
 
+/** Gateway config kinds whose history the dashboard keeps (ADR-0008). */
+export const CONFIG_KINDS = ['api', 'policy'] as const;
+export type ConfigKind = (typeof CONFIG_KINDS)[number];
+
+/**
+ * How a config version came to be: a write through the dashboard, or the
+ * `baseline` state found before the first one (so the first edit of a
+ * definition made elsewhere can still be undone).
+ */
+export const VERSION_ACTIONS = ['baseline', 'create', 'update', 'delete'] as const;
+export type VersionAction = (typeof VERSION_ACTIONS)[number];
+
 /** Stand-in type for audit before/after snapshots: any JSON value. */
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };

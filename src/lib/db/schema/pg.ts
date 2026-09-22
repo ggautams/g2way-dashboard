@@ -8,7 +8,15 @@ import {
   timestamp as pgTimestamp,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { AUDIT_OUTCOMES, ROLES, THROTTLE_KINDS, monotonicUuid, type JsonValue } from './shared';
+import {
+  AUDIT_OUTCOMES,
+  CONFIG_KINDS,
+  ROLES,
+  THROTTLE_KINDS,
+  VERSION_ACTIONS,
+  monotonicUuid,
+  type JsonValue,
+} from './shared';
 
 /**
  * The dashboard schema for Postgres. Mirrors `sqlite.ts` column for column;
@@ -76,4 +84,30 @@ export const loginFailures = pgTable(
     createdAt: timestamp('created_at'),
   },
   (t) => [index('login_failures_lookup_idx').on(t.orgId, t.kind, t.key, t.createdAt)],
+);
+
+export const configVersions = pgTable(
+  'config_versions',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    kind: text('kind', { enum: CONFIG_KINDS }).notNull(),
+    resourceId: text('resource_id').notNull(),
+    action: text('action', { enum: VERSION_ACTIONS }).notNull(),
+    definition: jsonb('definition').$type<JsonValue>(),
+    actorId: text('actor_id'),
+    actorEmail: text('actor_email'),
+    auditId: text('audit_id'),
+    createdAt: timestamp('created_at'),
+  },
+  (t) => [
+    index('config_versions_resource_idx').on(
+      t.orgId,
+      t.environment,
+      t.kind,
+      t.resourceId,
+      t.createdAt,
+    ),
+  ],
 );

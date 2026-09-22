@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { REDACTED_RAW_KEY } from '@/lib/audit/redact';
 import { getDatabase } from '@/lib/db';
 import { completeAudit, recordAudit, type AuditRecord } from '@/lib/db/audit';
+import { recordVersion, type VersionWrite } from '@/lib/db/config-versions';
 import type { JsonValue } from '@/lib/db/schema/shared';
 import { getOrgId } from './environments';
 
@@ -132,6 +133,11 @@ export type AuditSink = {
   record(record: AuditRecord): Promise<string>;
   /** Rewrites a pending row with the final record. */
   complete(id: string, record: AuditRecord): Promise<void>;
+  /**
+   * Keeps the version a successful API/policy write produced, unredacted
+   * (ADR-0008). Best effort: the write has already happened by then.
+   */
+  version?(write: VersionWrite): Promise<void>;
 };
 
 /** The dashboard database, scoped to the configured org. */
@@ -139,5 +145,12 @@ export function databaseAuditSink(): AuditSink {
   return {
     record: (record) => recordAudit(getDatabase(), getOrgId(), record),
     complete: (id, record) => completeAudit(getDatabase(), getOrgId(), id, record),
+    version: (write) => recordVersion(getDatabase(), getOrgId(), write),
   };
 }
+
+/** Collections whose history is kept (ADR-0008), and their version kind. Keys are not config. */
+export const VERSIONED: Readonly<Record<string, 'api' | 'policy'>> = {
+  apis: 'api',
+  policies: 'policy',
+};

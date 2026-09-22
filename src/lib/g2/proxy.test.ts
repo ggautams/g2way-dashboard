@@ -1,3 +1,4 @@
+import type { VersionWrite } from '@/lib/db/config-versions';
 import { ENVIRONMENT_COOKIE } from './selected-environment';
 import { describe, expect, it, vi } from 'vitest';
 import spec from '../../../contracts/openapi.json';
@@ -627,6 +628,57 @@ async function write(
     audit: sink,
   });
 }
+
+describe('config history (ADR-0008)', () => {
+  function historySink(fail = false) {
+    const versions: VersionWrite[] = [];
+    const sink: AuditSink = {
+      ...memoryAudit(),
+      async version(write) {
+        if (fail) throw new Error('disk full');
+        versions.push(write);
+      },
+    };
+    return { sink, versions };
+  }
+
+  it('keeps the unredacted before and after of an API write, and nothing for a failure', async () => {
+    const gateway = statefulGateway();
+    const { sink, versions } = historySink();
+    const next = { api_id: 'httpbin', name: 'httpbin', listen_path: '/new/', secret: 'shh' };
+    await write(gateway, sink, 'apis/httpbin', { method: 'PUT', body: JSON.stringify(next) });
+    await write(gateway, sink, 'apis/httpbin', { method: 'PUT', body: '{"bad":true}' });
+    await write(gateway, sink, 'apis/httpbin', { method: 'DELETE' });
+    expect(versions).toMatchObject([
+      {
+        environment: 'dev',
+        kind: 'api',
+        resourceId: 'httpbin',
+        action: 'update',
+        before: { listen_path: '/old/' },
+        after: next,
+        actor: { email: 'admin@example.com' },
+        auditId: expect.any(String),
+      },
+      { action: 'delete', before: next, after: null },
+    ]);
+  });
+
+  it('keeps no history of keys', async () => {
+    const { sink, versions } = historySink();
+    await write(statefulGateway(), sink, 'keys', { method: 'POST', body: '{}' });
+    expect(versions).toEqual([]);
+  });
+
+  it('never fails a write the gateway accepted because history could not be kept', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { sink } = historySink(true);
+    const response = await write(statefulGateway(), sink, 'apis/httpbin', { method: 'DELETE' });
+    expect(response.status).toBe(200);
+    expect(String(logged.mock.calls[0][0])).toContain('[history] FAILED');
+    logged.mockRestore();
+  });
+});
 
 describe('audited writes (ADR-0006)', () => {
   it('records an API update with before, after, request and the gateway call', async () => {

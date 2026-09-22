@@ -8,6 +8,7 @@ import type { ApiDefinition } from '@/lib/apis/list';
 import { isDraftShape, parseRaw, schemaValidator, serialize, type RawFormat } from '@/lib/apis/raw';
 import { saveBlocker } from '@/lib/apis/save';
 import { ApiForm } from './api-form';
+import { HistoryPanel, type HistoryEntry } from './history-panel';
 import { SaveBar, type DesignerEnvironment } from './save-bar';
 
 // Monaco is large and browser-only: load it on first use, never on the server.
@@ -28,9 +29,11 @@ type Props = {
   canWrite: boolean;
   /** The environment the definition was loaded from, and is saved back to. */
   environment: DesignerEnvironment;
+  /** Its stored versions, newest first (ADR-0008); absent when creating. */
+  history?: readonly HistoryEntry[];
 };
 
-type View = 'form' | RawFormat;
+type View = 'form' | RawFormat | 'history';
 
 /**
  * The API designer: one draft `ApiDefinition`, edited through the structured
@@ -39,11 +42,20 @@ type View = 'form' | RawFormat;
  * re-rendered from it whenever a raw view is opened. Everything the form does
  * not cover is carried along untouched.
  */
-export function ApiDesigner({ original, initial, help, schema, canWrite, environment }: Props) {
+export function ApiDesigner({
+  original,
+  initial,
+  help,
+  schema,
+  canWrite,
+  environment,
+  history,
+}: Props) {
   const [draft, setDraft] = useState(initial);
   const [view, setView] = useState<View>('form');
   const [text, setText] = useState('');
   const [unapplied, setUnapplied] = useState<string | null>(null);
+  const [restored, setRestored] = useState<string | null>(null);
   const validate = useMemo(() => schemaValidator(schema), [schema]);
 
   const problems = draftProblems(draft);
@@ -59,7 +71,7 @@ export function ApiDesigner({ original, initial, help, schema, canWrite, environ
 
   const open = (next: string) => {
     const nextView = next as View;
-    if (nextView !== 'form') setText(serialize(draft, nextView));
+    if (nextView === 'json' || nextView === 'yaml') setText(serialize(draft, nextView));
     setUnapplied(null);
     setView(nextView);
   };
@@ -87,7 +99,13 @@ export function ApiDesigner({ original, initial, help, schema, canWrite, environ
           <TabsTrigger value="form">Form</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
           <TabsTrigger value="yaml">YAML</TabsTrigger>
+          {history !== undefined && <TabsTrigger value="history">History</TabsTrigger>}
         </TabsList>
+        {restored !== null && view === 'form' && (
+          <p role="status" className="mt-3 text-sm text-warning">
+            Loaded the version from {restored} into the draft. Review and save it to roll back.
+          </p>
+        )}
         <TabsContent value="form" className="mt-4 flex flex-col gap-6">
           <ApiForm
             draft={draft}
@@ -123,6 +141,19 @@ export function ApiDesigner({ original, initial, help, schema, canWrite, environ
             )}
           </TabsContent>
         ))}
+        {history !== undefined && (
+          <TabsContent value="history" className="mt-4">
+            <HistoryPanel
+              entries={history}
+              canWrite={canWrite}
+              onRestore={(entry) => {
+                setDraft(entry.definition as ApiDefinition);
+                setRestored(new Date(entry.createdAt).toLocaleString());
+                setView('form');
+              }}
+            />
+          </TabsContent>
+        )}
       </Tabs>
       <SchemaProblems problems={schemaProblems} />
       {canWrite && (
