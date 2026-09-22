@@ -64,8 +64,9 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       `/apis` designer: Monaco has only been built, never run (workers, theme,
       inline schema markers) (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
-      2026-09-23 either — run `next build && next start -p 3100` with a scratch
-      `DATABASE_URL`, since `next dev` refuses a second server per checkout)
+      2026-09-23, twice. `make serve-scratch` is the one-step way to run the
+      pass: a production build on :3100 against a fresh temp-dir SQLite
+      database, starting at first-run `/setup`)
 - [x] Bug: on `/users`, an error on one row's form lingers after the other form
       on the same row succeeds
 - [x] `org-literal.test.ts` only follows `function`-declared org-taking helpers;
@@ -836,3 +837,11 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   nothing had drifted, even with an area newly added to `watch.json`, so a new
   area could never be locked and `check:g2way` warned about it forever. It now
   records first fingerprints for new areas; `file-loader` is locked.
+
+- feat(make): `make serve-scratch` builds and serves the app on
+  :3100 (`SCRATCH_PORT`) against a throwaway SQLite database in a new temp dir,
+  with placeholder gateway and auth secrets unless the environment sets them.
+  Verified: `/` redirects to `/setup`. The browser pass was attempted again and
+  **not done**: the Claude-in-Chrome extension was still not connected (three
+  tries). The box stays open. Next: run `make serve-scratch` with the extension
+  connected, then M4 policy CRUD.

@@ -2,7 +2,8 @@
 # must pass. Mirrors the g2way repo's Makefile deliberately — same muscle memory.
 
 .PHONY: check fmt fmt-check lint typecheck test build bundle-check dev start \
-        db-generate db-migrate test-pg sync-g2way check-g2way hooks clean
+        serve-scratch db-generate db-migrate test-pg sync-g2way check-g2way \
+        hooks clean
 
 ## Quality gate: run before every commit. Must stay green.
 ## `bundle-check` runs the production build itself, so `build` is not repeated.
@@ -37,6 +38,23 @@ dev:
 
 start:
 	npm start
+
+## Production build served on :3100 against a throwaway SQLite database in a
+## fresh temp dir, so a browser pass starts at first-run /setup and can run
+## beside `make dev` (Next refuses a second `next dev` per checkout). Point it
+## at a gateway with G2_ADMIN_URL / G2_ADMIN_SECRET; without one the degraded
+## banner is expected. The database is left in the printed dir for inspection.
+SCRATCH_PORT ?= 3100
+serve-scratch:
+	@dir=$$(mktemp -d "$${TMPDIR:-/tmp}/g2way-dashboard-scratch.XXXXXX"); \
+	echo "scratch database: $$dir/dashboard.db"; \
+	npm run build && \
+	DATABASE_URL="file:$$dir/dashboard.db" \
+	G2_ADMIN_URL="$${G2_ADMIN_URL:-http://127.0.0.1:9696}" \
+	G2_ADMIN_SECRET="$${G2_ADMIN_SECRET:-scratch-admin-secret}" \
+	AUTH_SECRET="$${AUTH_SECRET:-$$(openssl rand -base64 32)}" \
+	AUTH_URL="http://localhost:$(SCRATCH_PORT)" \
+	npx next start -p $(SCRATCH_PORT)
 
 ## ---- dashboard database (ADR-0003) --------------------------------------
 
