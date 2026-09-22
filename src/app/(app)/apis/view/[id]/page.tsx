@@ -7,7 +7,7 @@ import { apiDefinitionSchema } from '@/lib/apis/schema';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
-import { listVersions } from '@/lib/db/config-versions';
+import { loadHistory } from '@/lib/designer/load-history';
 import { loadApi, type ApiItem } from '@/lib/g2/apis';
 import {
   RegistryConfigError,
@@ -52,19 +52,11 @@ export default async function ApiPage({ params, searchParams }: PageProps<'/apis
   if (!api.ok && api.status === 404) notFound();
   const canWrite = can(user.role, 'apis:write');
   const history = api.ok
-    ? (
-        await listVersions(getDatabase(), getOrgId(), {
-          environment: environment.id,
-          kind: 'api',
-          resourceId: id,
-        })
-      ).map(({ id: versionId, action, definition, actorEmail, createdAt }) => ({
-        id: versionId,
-        action,
-        definition,
-        actorEmail,
-        createdAt: createdAt.toISOString(),
-      }))
+    ? await loadHistory(getDatabase(), getOrgId(), {
+        environment: environment.id,
+        kind: 'api',
+        resourceId: id,
+      })
     : [];
 
   return (

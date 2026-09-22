@@ -2,15 +2,16 @@
 
 import { useMemo, useState } from 'react';
 import { RawPanel, SchemaProblems, useRawView } from '@/components/designer/raw-view';
+import { HistoryPanel, RestoredNote } from '@/components/designer/history-panel';
 import { SaveBar, type DesignerEnvironment } from '@/components/designer/save-bar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { draftProblems, otherFields, type FormField } from '@/lib/apis/draft';
 import type { ApiDefinition } from '@/lib/apis/list';
 import { isDraftShape } from '@/lib/apis/raw';
 import { saveBlocker } from '@/lib/apis/save';
+import type { HistoryEntry } from '@/lib/designer/history';
 import { RAW_FORMATS, schemaValidator } from '@/lib/designer/raw';
 import { ApiForm } from './api-form';
-import { HistoryPanel, type HistoryEntry } from './history-panel';
 
 type Props = {
   /** The stored definition when editing; `null` when creating. */
@@ -83,11 +84,7 @@ export function ApiDesigner({
           <TabsTrigger value="yaml">YAML</TabsTrigger>
           {history !== undefined && <TabsTrigger value="history">History</TabsTrigger>}
         </TabsList>
-        {restored !== null && view === 'form' && (
-          <p role="status" className="mt-3 text-sm text-warning">
-            Loaded the version from {restored} into the draft. Review and save it to roll back.
-          </p>
-        )}
+        {restored !== null && view === 'form' && <RestoredNote from={restored} />}
         <TabsContent value="form" className="mt-4 flex flex-col gap-6">
           <ApiForm
             draft={draft}
@@ -124,8 +121,9 @@ export function ApiDesigner({
             <HistoryPanel
               entries={history}
               canWrite={canWrite}
-              onRestore={(entry) => {
-                setDraft(entry.definition as ApiDefinition);
+              isShape={isDraftShape}
+              onRestore={(version, entry) => {
+                setDraft(version);
                 setRestored(new Date(entry.createdAt).toLocaleString());
                 setView('form');
               }}

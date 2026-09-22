@@ -8,10 +8,13 @@ import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import type { ApiChoices } from '@/lib/designer/access';
 import { accessFieldHelp } from '@/lib/designer/access-help';
+import { loadHistory } from '@/lib/designer/load-history';
+import { getDatabase } from '@/lib/db';
 import { loadApiChoices } from '@/lib/g2/apis';
 import {
   RegistryConfigError,
   UnknownEnvironmentError,
+  getOrgId,
   listEnvironments,
 } from '@/lib/g2/environments';
 import { loadPolicy, type PolicyItem } from '@/lib/g2/policies';
@@ -60,6 +63,14 @@ export default async function PolicyPage({
   }
   if (!policy.ok && policy.status === 404) notFound();
   const canWrite = can(user.role, 'policies:write');
+  // Every `policies:read` role sees history (ADR-0008 §6); only writers can load a version.
+  const history = policy.ok
+    ? await loadHistory(getDatabase(), getOrgId(), {
+        environment: environment.id,
+        kind: 'policy',
+        resourceId: id,
+      })
+    : [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -90,6 +101,7 @@ export default async function PolicyPage({
           // A save refreshes the page with the new stored policy: start a fresh draft.
           key={JSON.stringify(policy.value)}
           environment={environment}
+          history={history}
           original={policy.value}
           initial={policy.value}
           help={policyFieldHelp()}

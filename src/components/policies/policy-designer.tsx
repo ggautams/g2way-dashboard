@@ -2,9 +2,11 @@
 
 import { useMemo, useState } from 'react';
 import { RawPanel, SchemaProblems, useRawView } from '@/components/designer/raw-view';
+import { HistoryPanel, RestoredNote } from '@/components/designer/history-panel';
 import { SaveBar, type DesignerEnvironment } from '@/components/designer/save-bar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { AccessHelp, ApiChoices } from '@/lib/designer/access';
+import type { HistoryEntry } from '@/lib/designer/history';
 import { RAW_FORMATS, schemaValidator } from '@/lib/designer/raw';
 import {
   isPolicyShape,
@@ -31,12 +33,14 @@ type Props = {
   /** The environment's APIs for the access matrix (`loadApiChoices`). */
   apis: ApiChoices;
   accessHelp: AccessHelp;
+  /** Its stored versions, newest first (ADR-0008); absent when creating. */
+  history?: readonly HistoryEntry[];
 };
 
 /**
  * The policy designer: one draft `Policy`, edited through the structured form
- * or as raw JSON/YAML, exactly as the API designer works. A History tab
- * (ADR-0008 versions) joins the tabs later.
+ * or as raw JSON/YAML, exactly as the API designer works, with the same History
+ * tab (ADR-0008): loading a version into the draft is the rollback.
  */
 export function PolicyDesigner({
   original,
@@ -47,15 +51,17 @@ export function PolicyDesigner({
   environment,
   apis,
   accessHelp,
+  history,
 }: Props) {
   const [draft, setDraft] = useState(initial);
-  const { view, text, unapplied, open, edit } = useRawView<Policy, 'form'>({
+  const { view, setView, text, unapplied, open, edit } = useRawView<Policy, 'form' | 'history'>({
     draft,
     setDraft,
     initialView: 'form',
     isShape: isPolicyShape,
     shapeError: 'policy_id and name must both be strings.',
   });
+  const [restored, setRestored] = useState<string | null>(null);
   const validate = useMemo(() => schemaValidator(schema), [schema]);
 
   const problems = policyProblems(draft);
@@ -81,7 +87,9 @@ export function PolicyDesigner({
           <TabsTrigger value="form">Form</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
           <TabsTrigger value="yaml">YAML</TabsTrigger>
+          {history !== undefined && <TabsTrigger value="history">History</TabsTrigger>}
         </TabsList>
+        {restored !== null && view === 'form' && <RestoredNote from={restored} />}
         <TabsContent value="form" className="mt-4 flex flex-col gap-6">
           <PolicyForm
             draft={draft}
@@ -115,6 +123,20 @@ export function PolicyDesigner({
             />
           </TabsContent>
         ))}
+        {history !== undefined && (
+          <TabsContent value="history" className="mt-4">
+            <HistoryPanel
+              entries={history}
+              canWrite={canWrite}
+              isShape={isPolicyShape}
+              onRestore={(version, entry) => {
+                setDraft(version);
+                setRestored(new Date(entry.createdAt).toLocaleString());
+                setView('form');
+              }}
+            />
+          </TabsContent>
+        )}
       </Tabs>
       <SchemaProblems problems={schemaProblems} />
       {canWrite && (

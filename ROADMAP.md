@@ -110,7 +110,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [ ] Complete alias/policy/state search past 200 keys: needs g2way to list
       sessions, or at least aliases, in one call (`UPSTREAM.md`, hashes-only
       listing); until then `/keys` says when a search stopped short
-- [ ] Policy history tab and rollback (versions are already kept, ADR-0008)
+- [x] Policy history tab and rollback (versions are already kept, ADR-0008)
 - [ ] Replace the BFF rotate orchestration with g2way's native atomic rotate once it
       exists (`UPSTREAM.md`, ADR-0009); blocked upstream
 - [ ] Keys carry live secrets too: `GET /g2/keys/{key}` returns an hmac session's
@@ -119,7 +119,8 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       reports credentials by presence only; decide redaction with the item below
 - [ ] Decide whether read-only roles see secrets in API definitions and policies.
       Today the BFF passes `GET` bodies through, and history (ADR-0008 §6) shows
-      viewers the same; redact both together or neither
+      viewers the same; redact both together or neither; history's seam is
+      `toHistoryEntry` in `src/lib/designer/load-history.ts`
 
 ## M5 — Traffic & middleware designer
 
@@ -1032,3 +1033,24 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - Follow-ups filed: M4 cross-page bulk selection; M4 complete search past
     200 keys (blocked on a g2way listing with sessions).
   - Next: policy history tab and rollback (M4).
+
+- feat(M4): policy history tab and rollback (ADR-0008).
+  - The History panel moved from `components/apis` to
+    `components/designer/history-panel.tsx` and is generic over the draft type.
+    Its model (`historyRows` in `lib/designer/history.ts`, pure and tested)
+    gives each version its diff from the one before and a `restorable` draft:
+    only for `*:write` roles, never the latest, never a delete, and only a body
+    the designer's shape guard accepts.
+  - `/policies/view/[id]` loads versions and the PolicyDesigner has the same
+    History tab as the API designer: newest first, baseline included, "Load
+    into the draft" feeding the ordinary review → save → audit → reload path
+    (§5). `policies:read` roles see history; they cannot load a version.
+  - Both pages now read versions only through `loadHistory`
+    (`lib/designer/load-history.ts`). `toHistoryEntry` there is the single place
+    a stored body goes to the browser: the redaction seam for the next task. A
+    test fails if any page or component calls `listVersions` directly.
+  - API history behaves as before, except that "Load into the draft" is now
+    also hidden for a stored body that fails `isDraftShape` (it used to cast).
+  - Not run in a browser (the open M2 browser pass covers this too).
+  - Next: decide and implement secret redaction for read-only roles in BFF reads
+    and history together (M4).
