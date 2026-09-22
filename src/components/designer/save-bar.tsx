@@ -53,10 +53,13 @@ export function SaveBar<K extends ResourceKind>({
   draft,
   blocker,
   environment,
+  id: fixedId,
 }: {
   kind: K;
   original: ResourceKinds[K] | null;
   draft: ResourceKinds[K];
+  /** The stored resource's id when the draft does not name it (a key's hash). */
+  id?: string;
   /** Why the draft cannot be saved yet, or `null`. */
   blocker: string | null;
   environment: DesignerEnvironment;
@@ -64,7 +67,7 @@ export function SaveBar<K extends ResourceKind>({
   const router = useRouter();
   const resource = RESOURCES[kind];
   const creating = original === null;
-  const id = resource.idOf(draft);
+  const id = fixedId ?? resource.idOf(draft);
   const [review, setReview] = useState<Review | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +80,7 @@ export function SaveBar<K extends ResourceKind>({
       return;
     }
     setReview({ state: 'loading' });
-    const current = await resource.fetchStored(client, resource.idOf(original));
+    const current = await resource.fetchStored(client, fixedId ?? resource.idOf(original));
     if (!current.ok) return setReview({ state: 'failed', error: current.error });
     setReview({
       state: 'ready',
@@ -89,7 +92,7 @@ export function SaveBar<K extends ResourceKind>({
 
   const save = async () => {
     setSaving(true);
-    const result = await resource.save(client, draft, creating);
+    const result = await resource.save(client, draft, creating, id);
     setSaving(false);
     if (!result.ok) return setError(describeFailure(result));
     setReview(null);

@@ -61,6 +61,14 @@ These are load-bearing for the dashboard and easy to get wrong:
   means unlimited, and zero is refused, never "unlimited"; `access` defaults to
   `{}`, and an **empty `access` grants every API in the org**. Read a policy
   through `summarisePolicy()` (`src/lib/policies/list.ts`).
+- **Key defaults** (`crates/g2-core/src/session.rs`, also absent from the
+  OpenAPI): `active` defaults to `true` (`false` is a soft revoke); an absent
+  `rate`, `quota` or `expires_at` means none; `access` defaults to `{}`, which
+  **grants every API in the org**; `apply_policies` holds at most one id, and a
+  policy's rate, quota and access _replace_ the key's own at auth time. Zero in
+  a limit is refused. Key writes are live at once, with no reload. There is no
+  rotate endpoint (ADR-0009). Read a session through `summariseKey()`
+  (`src/lib/keys/session.ts`).
 - **`GET /g2/keys` returns key _hashes_, not keys.** A raw key exists exactly once,
   in the `POST /g2/keys` 201 response. Anything richer (labels, owner, notes) is
   the dashboard's own data.

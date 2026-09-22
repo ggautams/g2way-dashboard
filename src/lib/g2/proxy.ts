@@ -103,7 +103,7 @@ function findEndpoint(segments: readonly string[]): Endpoint | undefined {
 }
 
 /** A BFF-originated error, in the gateway's own envelope. */
-function errorResponse(status: number, message: string, headers?: HeadersInit): Response {
+export function errorResponse(status: number, message: string, headers?: HeadersInit): Response {
   const response = Response.json({ error: message }, { status, headers });
   response.headers.set('cache-control', 'no-store');
   return response;
@@ -191,6 +191,19 @@ export function isCrossSite(request: Request, config: OriginConfig = originConfi
   return normalised === undefined || !expectedOrigins(request, config).includes(normalised);
 }
 
+/**
+ * The environment a BFF request is for: the `X-G2-Environment` header when the
+ * caller names one, else the shell's remembered choice, else the default.
+ * Throws the registry's `UnknownEnvironmentError` / `RegistryConfigError`.
+ */
+export function requestTarget(request: Request, registry: Registry): GatewayTarget {
+  const id = pickEnvironmentId(registry, {
+    override: request.headers.get(ENVIRONMENT_HEADER) ?? undefined,
+    remembered: cookieValue(request, ENVIRONMENT_COOKIE),
+  });
+  return resolveEnvironment(id, registry);
+}
+
 export type ProxyDeps = {
   fetch?: typeof fetch;
   registry?: Registry;
@@ -271,13 +284,7 @@ export async function proxyToGateway(
 
   let target: GatewayTarget;
   try {
-    const registry = deps.registry ?? getRegistry();
-    // The header when the caller names one; else the shell's remembered choice.
-    const id = pickEnvironmentId(registry, {
-      override: request.headers.get(ENVIRONMENT_HEADER) ?? undefined,
-      remembered: cookieValue(request, ENVIRONMENT_COOKIE),
-    });
-    target = resolveEnvironment(id, registry);
+    target = requestTarget(request, deps.registry ?? getRegistry());
   } catch (error) {
     if (error instanceof UnknownEnvironmentError) return errorResponse(400, error.message);
     if (error instanceof RegistryConfigError) return errorResponse(500, error.message);
@@ -368,7 +375,7 @@ export async function proxyToGateway(
 // ---- audited writes (ADR-0006) ---------------------------------------------
 
 /** Writes an audit row that must not block the response; a failure is logged loudly. */
-async function recordLoudly(audit: AuditSink, record: AuditRecord): Promise<void> {
+export async function recordLoudly(audit: AuditSink, record: AuditRecord): Promise<void> {
   try {
     await audit.record(record);
   } catch (error) {

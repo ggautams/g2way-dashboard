@@ -77,6 +77,20 @@ commit this project is waiting on.
       and schema defaults in `crates/g2-core/src/policy.rs` (see the serde-defaults
       item above); then drop the duplicated checks. _Not a blocker._
 
+- [ ] **No atomic key rotate endpoint.** _Found 2026-09-23 (M4)._ The
+      dashboard rotates a key as three calls: read the session by hash, create
+      a key with it (`POST /g2/keys`), then delete the old hash. The BFF
+      orchestrates them at `POST /api/g2/keys/{hash}/rotate` (ADR-0009). It is
+      not atomic: if the delete fails after the create succeeded, both keys work
+      until someone deletes the old one, and the dashboard can only say so. Ask
+      for `POST /g2/keys/{key}/rotate` (honouring `?hashed=true`) that swaps the
+      session to a fresh key in one storage transaction and answers like create,
+      ideally with an optional grace period during which the old key still
+      works. Then proxy it and retire `src/lib/g2/rotate-key.ts`; its test fails
+      as soon as the spec gains a `/rotate` path. Related, the same gap as the
+      error-envelope item: `GET /g2/keys` and the `POST /g2/keys` 201 declare no
+      body, so `src/lib/keys/session.ts` parses both at runtime. _Not a blocker._
+
 - [ ] **`/g2/stats` is process-local** and resets on restart, so with more than
       one replica it is a per-pod sample rather than a cluster total. Cluster-wide
       numbers must come from the analytics feed or Prometheus. Shapes M6; not a

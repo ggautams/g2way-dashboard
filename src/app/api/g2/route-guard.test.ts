@@ -21,4 +21,20 @@ describe('BFF route', () => {
       /proxyToGateway\(request, path, \{ id: user\.id, email: user\.email, role: user\.role \}\)/,
     );
   });
+
+  // The one BFF route that is not the proxy: key rotation (ADR-0009). Same guard,
+  // same actor, and only POST.
+  it('guards the rotate route the same way', () => {
+    const source = readFileSync(
+      join(import.meta.dirname, 'keys', '[hash]', 'rotate', 'route.ts'),
+      'utf8',
+    );
+    expect(source).toMatch(/const handle = withUser\(/);
+    expect(source).toMatch(
+      /rotateKey\(request, hash, \{ id: user\.id, email: user\.email, role: user\.role \}\)/,
+    );
+    expect([...source.matchAll(/export const (\w+) = (\w+);/g)].map((m) => [m[1], m[2]])).toEqual([
+      ['POST', 'handle'],
+    ]);
+  });
 });

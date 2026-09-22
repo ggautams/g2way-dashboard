@@ -94,7 +94,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 ## M4 — Policies & keys
 
 - [x] Policy CRUD over `/g2/policies`
-- [ ] Key create / list / rotate / revoke; raw key shown once, on creation
+- [x] Key create / list / rotate / revoke; raw key shown once, on creation
 - [ ] Per-API access matrix, rate and quota editors
 - [ ] Dashboard-side key metadata (label, owner, notes) — the gateway lists
       hashes only, so inventory lives here
@@ -102,6 +102,8 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [ ] "What does this key allow" resolver that folds `apply_policies`
 - [ ] Bulk operations and search by alias
 - [ ] Policy history tab and rollback (versions are already kept, ADR-0008)
+- [ ] Replace the BFF rotate orchestration with g2way's native atomic rotate once it
+      exists (`UPSTREAM.md`, ADR-0009); blocked upstream
 - [ ] Decide whether read-only roles see secrets in API definitions and policies.
       Today the BFF passes `GET` bodies through, and history (ADR-0008 §6) shows
       viewers the same; redact both together or neither
@@ -870,3 +872,35 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     "access matrix, rate and quota editors" box is done by the form; the matrix
     itself remains. History tab: its own box, and the designer's tabs have room.
   - Next: key create / list / rotate / revoke.
+
+- feat(M4): key create / list / rotate / revoke.
+  - `/keys` lists hashes a page at a time (25 per page, `?page=`). Each row costs
+    one `GET /g2/keys/{hash}?hashed=true`, at most 5 in flight. A failed read
+    only marks its own row. Rows show alias, policy, limits, expiry and state,
+    plus a warning for "every API".
+  - `/keys/new` and `/keys/view/[hash]` share one `KeyDesigner`: form or
+    JSON/YAML, schema from the contract, help from rustdoc. The form covers
+    alias, active, expiry, one policy from `loadPolicies` and rate/quota.
+    `LimitEditor` moved to `components/designer/limits.tsx`, and `RESOURCES`
+    gained `key`. `SaveBar` takes an explicit `id` (the hash), and
+    `Resource.save` gets it too. Edits use the shared diff-previewed save bar.
+    Revoke/reactivate re-reads the stored key and diffs `active`. Delete is the
+    shared `DeleteButton`.
+  - The raw key (create or rotate) goes into a one-time dialog that only its
+    button can close. That clears the state and navigates by hash.
+    `raw-key-guard.test.ts` statically checks the modules that hold a raw key.
+  - Rotate is ADR-0009: `POST /api/g2/keys/[hash]/rotate` →
+    `lib/g2/rotate-key.ts`. It reads, creates and deletes through
+    `proxyToGateway`, so each write is audited, with a `key.rotate` row linking
+    old and new hashes. A failed delete returns 201 `outcome: "partial"` and the
+    UI says both keys exist. `proxy.ts` exports `requestTarget`,
+    `errorResponse` and `recordLoudly` for it. The UPSTREAM TODO asks for a
+    native rotate.
+  - `/keys` is ready in the nav. The map gained key defaults.
+  - Surprise: `KeySession.rate`/`quota` have no description in the contract,
+    so their help text is the dashboard's own fallback.
+  - Not verified: live route matching. Under the sandbox every local curl
+    answered a bare 400. The build lists `/api/g2/[...path]` and
+    `/api/g2/keys/[hash]/rotate` side by side. The browser pass is still open,
+    and now covers keys.
+  - Next: per-API access matrix for keys (M4).

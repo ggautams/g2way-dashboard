@@ -79,7 +79,7 @@ export const NAV: readonly NavGroup[] = [
         description: 'API keys and quotas',
         keywords: ['tokens', 'credentials'],
         milestone: 'M4',
-        ready: false,
+        ready: true,
         permission: 'keys:read',
       },
       {
