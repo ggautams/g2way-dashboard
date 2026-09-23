@@ -10,6 +10,7 @@ import {
   resolveEnvironment,
   type Registry,
 } from '@/lib/g2/environments';
+import { rollupRetention } from './load-health';
 import {
   MAX_VIEWS_PER_OWNER,
   canonicalViewQuery,
@@ -88,6 +89,7 @@ export async function saveView(
   const rawQuery = form.get('query');
   const query = canonicalViewQuery(typeof rawQuery === 'string' ? rawQuery : '', {
     keys: can(actor.role, 'keys:read'),
+    hourRetentionDays: rollupRetention().hourRetentionDays,
   });
   if (!query.ok) return { error: `Not saved: ${query.error}.` };
 

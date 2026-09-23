@@ -57,9 +57,10 @@ export type TrafficSource = (typeof TRAFFIC_SOURCES)[number];
 /**
  * A fixed time range. `sourceSeconds` is the rollup granularity read;
  * `stepSeconds` is one chart point, a whole multiple of it. Ranges read minute
- * rows only while they fit the default minute retention (3 days, ADR-0012 §7).
- * `sources` lists the sources that offer the range: the long ranges are
- * Prometheus's alone (ADR-0015 §2).
+ * rows while they fit minute retention (ADR-0012 §7); `retainedRange`
+ * (`retention.ts`) moves them to hour rows past it. `sources` lists the
+ * sources that always offer the range: the long ones are Prometheus's, and the
+ * rollups' too only where hour retention covers them (`offersRange`).
  */
 export type TrafficRange = {
   /** A fixed range's id, or `custom` for an absolute window (`custom-range.ts`). */
@@ -146,9 +147,29 @@ export const TRAFFIC_RANGES: Record<TrafficRangeId, FixedTrafficRange> = {
 
 export const DEFAULT_TRAFFIC_RANGE: TrafficRangeId = '1h';
 
-/** The ranges `source` offers, in picker order. */
-export function rangesFor(source: TrafficSource): TrafficRangeId[] {
-  return TRAFFIC_RANGE_IDS.filter((id) => TRAFFIC_RANGES[id].sources.includes(source));
+/**
+ * Whether `source` offers the range `id`. The rollups also offer a
+ * Prometheus range whose whole window their hour rows still hold, given
+ * `hourRetentionDays` (`G2_ANALYTICS_HOUR_RETENTION_DAYS`): `90d` at the
+ * default of 90 days, `1y` from 365 (ADR-0015 §2, amended).
+ */
+export function offersRange(
+  id: TrafficRangeId,
+  source: TrafficSource,
+  hourRetentionDays?: number,
+): boolean {
+  const range = TRAFFIC_RANGES[id];
+  if (range.sources.includes(source)) return true;
+  return (
+    source === 'rollups' &&
+    hourRetentionDays !== undefined &&
+    range.durationSeconds <= hourRetentionDays * 86_400
+  );
+}
+
+/** The ranges `source` offers, in picker order (see `offersRange`). */
+export function rangesFor(source: TrafficSource, hourRetentionDays?: number): TrafficRangeId[] {
+  return TRAFFIC_RANGE_IDS.filter((id) => offersRange(id, source, hourRetentionDays));
 }
 
 /**
@@ -158,8 +179,9 @@ export function rangesFor(source: TrafficSource): TrafficRangeId[] {
 export function parseTrafficRange(
   value: unknown,
   source: TrafficSource = 'rollups',
+  hourRetentionDays?: number,
 ): FixedTrafficRange {
-  const id = rangesFor(source).find((candidate) => candidate === value);
+  const id = rangesFor(source, hourRetentionDays).find((candidate) => candidate === value);
   return TRAFFIC_RANGES[id ?? DEFAULT_TRAFFIC_RANGE];
 }
 

@@ -1,3 +1,4 @@
+import { retentionNotes, type RollupRetention } from './retention';
 import type { TrafficRange, TrafficSource } from './traffic';
 
 /**
@@ -36,7 +37,6 @@ export const PROMETHEUS_MIN_STEP_SECONDS = 120;
 /** Prometheus refuses a range query past this many points per series. */
 export const PROMETHEUS_MAX_POINTS = 11_000;
 
-const DAY_MS = 86_400_000;
 const UTC_MINUTE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?Z?$/;
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -95,13 +95,8 @@ export function readCustomWindow(
   return { window: { from: start, to: end } };
 }
 
-export type CustomRangeContext = {
-  source: TrafficSource;
-  now: number;
-  /** How long minute and hour rollups are kept (ADR-0012 §7); ignored under Prometheus. */
-  minuteRetentionDays: number;
-  hourRetentionDays: number;
-};
+/** The retention settings (ADR-0012 §7) are ignored under Prometheus. */
+export type CustomRangeContext = { source: TrafficSource; now: number } & RollupRetention;
 
 /**
  * The range a custom window reads as at `now`, with notes on what changed
@@ -131,19 +126,9 @@ export function customRange(
 
   let minStep: number = source === 'prometheus' ? PROMETHEUS_MIN_STEP_SECONDS : 60;
   if (source === 'rollups') {
-    const minuteCutoff = now - context.minuteRetentionDays * DAY_MS;
-    const hourCutoff = now - context.hourRetentionDays * DAY_MS;
-    if (window.from < minuteCutoff) {
-      minStep = 3_600;
-      notes.push(
-        `Minute rollups are kept ${context.minuteRetentionDays} days (G2_ANALYTICS_MINUTE_RETENTION_DAYS) and this range starts before that, so it reads hour rollups, one hour per step or more.`,
-      );
-    }
-    if (window.from < hourCutoff) {
-      notes.push(
-        `Hour rollups are kept ${context.hourRetentionDays} days (G2_ANALYTICS_HOUR_RETENTION_DAYS): nothing before ${labelTime(hourCutoff)} UTC remains.`,
-      );
-    }
+    const retained = retentionNotes(window.from, now, context);
+    if (retained.minuteRowsGone) minStep = 3_600;
+    notes.push(...retained.notes);
   }
 
   const fit = CUSTOM_STEPS.filter((step) => step >= minStep)

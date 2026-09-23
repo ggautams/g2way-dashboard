@@ -1,6 +1,6 @@
 import { formatUtcMinute, readCustomWindow } from './custom-range';
 import { DIMENSION_LABELS, drillParams, parseDrill, type DrillState } from './drill';
-import { TRAFFIC_RANGES, parseTrafficRange, type TrafficSource } from './traffic';
+import { parseTrafficRange, type TrafficSource } from './traffic';
 
 /**
  * Saved `/analytics` views (ADR-0016): the pure half. A view is a name for
@@ -44,7 +44,7 @@ export function parseViewName(
  */
 export function canonicalViewQuery(
   query: string,
-  options: { keys: boolean },
+  options: { keys: boolean; hourRetentionDays?: number },
 ): { ok: true; query: string; state: DrillState } | { ok: false; error: string } {
   if (query.length > MAX_VIEW_QUERY) return { ok: false, error: 'the view’s address is too long' };
   const params = Object.fromEntries(new URLSearchParams(query.replace(/^\?/, '')));
@@ -56,7 +56,7 @@ export function canonicalViewQuery(
     return { ok: false, error: 'the custom range ends before it starts' };
   }
   const state: DrillState = {
-    range: custom?.window ?? parseTrafficRange(params.range, source).id,
+    range: custom?.window ?? parseTrafficRange(params.range, source, options.hourRetentionDays).id,
     ...(source === 'prometheus' ? { source } : {}),
     apiId: drill.apiId,
     focus: drill.focus,
@@ -80,8 +80,11 @@ export type ViewSummary = {
   selection: string[];
 };
 
-/** Reads a stored query back for the list. Nothing here is trusted: the page re-checks on open. */
-export function describeViewQuery(query: string): ViewSummary {
+/**
+ * Reads a stored query back for the list, given the rollups' hour retention
+ * (`offersRange`). Nothing here is trusted: the page re-checks on open.
+ */
+export function describeViewQuery(query: string, hourRetentionDays?: number): ViewSummary {
   const params = new URLSearchParams(query);
   const source: TrafficSource = params.get('source') === 'prometheus' ? 'prometheus' : 'rollups';
   const custom = readCustomWindow(params.get('from') ?? undefined, params.get('to') ?? undefined);
@@ -113,7 +116,7 @@ export function describeViewQuery(query: string): ViewSummary {
     };
   }
   return {
-    range: TRAFFIC_RANGES[parseTrafficRange(params.get('range'), source).id].label,
+    range: parseTrafficRange(params.get('range'), source, hourRetentionDays).label,
     absolute: false,
     source,
     selection,

@@ -122,7 +122,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
   const health = await loadIngestHealth(target);
   const now = health.now;
   const view = resolveView(target, params, { keys: roles.keys, now });
-  const { source, range, drill, state, notes, reader, custom } = view;
+  const { source, range, drill, state, notes, reader, custom, retention } = view;
   const ingest = source === 'rollups' ? health : null;
   const keyLabels = roles.keys ? await loadKeyLabels(target, drill) : new Map<string, string>();
   const currentQuery = new URLSearchParams(drillParams(state)).toString();
@@ -132,7 +132,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
     id: view.id,
     name: view.name,
     href: viewHref(view.query),
-    summary: describeViewQuery(view.query),
+    summary: describeViewQuery(view.query, retention.hourRetentionDays),
     shared: view.shared,
     owner: view.ownerEmail,
     deletable: view.shared ? canShare : view.ownerId === user.id,
@@ -142,8 +142,8 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
     prometheus === null
       ? null
       : {
-          rollups: sourceHref(state, 'rollups'),
-          prometheus: sourceHref(state, 'prometheus'),
+          rollups: sourceHref(state, 'rollups', retention.hourRetentionDays),
+          prometheus: sourceHref(state, 'prometheus', retention.hourRetentionDays),
         };
 
   let loaded;
@@ -226,7 +226,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
       ) : (
         <TrafficPanel
           traffic={traffic}
-          rangeHrefs={rangeHrefs(state)}
+          rangeHrefs={rangeHrefs(state, retention.hourRetentionDays)}
           scoped={drill.apiId !== null || drill.focus !== null}
           source={source}
           sourceHrefs={sourceHrefs}

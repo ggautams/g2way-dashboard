@@ -3,7 +3,7 @@ import { formatUtcMinute, type CustomWindow } from './custom-range';
 import {
   DEFAULT_TRAFFIC_RANGE,
   TRAFFIC_COUNTERS,
-  TRAFFIC_RANGES,
+  offersRange,
   addBucket,
   elapsedSeconds,
   emptyBucket,
@@ -297,9 +297,13 @@ export function drillHref(state: DrillState): string {
  * a focus or breakdown that source cannot answer dropped rather than left
  * for `parseDrill` to note.
  */
-export function sourceHref(state: DrillState, source: TrafficSource): string {
+export function sourceHref(
+  state: DrillState,
+  source: TrafficSource,
+  hourRetentionDays?: number,
+): string {
   const range =
-    typeof state.range !== 'string' || TRAFFIC_RANGES[state.range].sources.includes(source)
+    typeof state.range !== 'string' || offersRange(state.range, source, hourRetentionDays)
       ? state.range
       : DEFAULT_TRAFFIC_RANGE;
   const focus =
@@ -313,12 +317,19 @@ export function sourceHref(state: DrillState, source: TrafficSource): string {
   return drillHref({ range, source, apiId: state.apiId, focus, by });
 }
 
-/** The href of every range the state's source offers, with the rest of the drill-down kept. */
+/**
+ * The href of every range the state's source offers (given the rollups' hour
+ * retention, `offersRange`), with the rest of the drill-down kept.
+ */
 export function rangeHrefs(
   state: Omit<DrillState, 'range'>,
+  hourRetentionDays?: number,
 ): Partial<Record<TrafficRangeId, string>> {
   return Object.fromEntries(
-    rangesFor(state.source ?? 'rollups').map((range) => [range, drillHref({ ...state, range })]),
+    rangesFor(state.source ?? 'rollups', hourRetentionDays).map((range) => [
+      range,
+      drillHref({ ...state, range }),
+    ]),
   );
 }
 

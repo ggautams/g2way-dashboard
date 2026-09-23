@@ -242,7 +242,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
         from the rollups or Prometheus, never the live tail (ADR-0013 §8)
   - [x] 6c. Saved views (personal and shared) in the dashboard database,
         carrying `source` and a relative or absolute range; audited (ADR-0016)
-- [ ] Tie the fixed traffic ranges to retention: `24h` reads minute rows, so a
+- [x] Tie the fixed traffic ranges to retention: `24h` reads minute rows, so a
       `G2_ANALYTICS_MINUTE_RETENTION_DAYS` below 1 silently truncates it. Read
       hour rows (or say so) when a range outruns minute retention (ADR-0013 §5)
 
@@ -1911,3 +1911,26 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     decides. `customRange` and `rollupRetention()` already do it for custom
     windows.
   - Next: M6 "tie the fixed traffic ranges to retention".
+- feat(M6): **fixed ranges tied to retention** (ADR-0013 §5
+  and ADR-0015 §2 amended in place). That is M6's last box.
+  - `src/lib/analytics/retention.ts` (pure, tested): `retentionNotes` is the
+    minute/hour check and wording `customRange` used, now shared by both.
+    `retainedRange` applies it to a fixed range on the rollups: a window
+    starting before minute retention reads hour rows (step an hour or more),
+    one starting before hour retention keeps its rows and says the rest was
+    pruned. `resolveView` calls it once, so the page, saved relative views and
+    CSV exports all follow; `ResolvedView.retention` carries the settings.
+  - `90d` and `1y` now open to the rollups where
+    `G2_ANALYTICS_HOUR_RETENTION_DAYS` holds the whole window (`offersRange`
+    in `traffic.ts`; `90d` at the default 90, `1y` from 365). `rangesFor`,
+    `parseTrafficRange`, `rangeHrefs`, `sourceHref`, `canonicalViewQuery` and
+    `describeViewQuery` take the hour retention. A `?range=` the rollups
+    cannot hold falls back with a note naming the setting.
+  - Surprise: the box's premise does not hold today. The minute setting is a
+    whole number of days, at least 1 (`config.ts`), and the `24h` window
+    always starts after now − 24h, so it was never truncated; the switch is
+    a guard. The real silent case was hour retention under `7d`/`30d`, which
+    now gets a note. The page reads retention from its own process's
+    environment, so a standalone `npm run ingest` with different settings
+    would disagree (as custom windows already could).
+  - Not browser-tested. Next: M6 closeout, then M7.

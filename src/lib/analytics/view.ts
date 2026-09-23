@@ -18,6 +18,7 @@ import {
   type DrillState,
 } from './drill';
 import { rollupRetention } from './load-health';
+import { retainedRange, type RollupRetention } from './retention';
 import { loadPrometheusTraffic } from './prometheus';
 import { breakdownTotals, type PromGrouping } from './promql';
 import {
@@ -44,7 +45,10 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
 export type ResolvedView = {
   source: TrafficSource;
-  /** The fixed range asked for (or the default): shown when a custom window is refused. */
+  /**
+   * The fixed range asked for (or the default), as retention lets the source
+   * answer it (`retainedRange`): shown when a custom window is refused.
+   */
   fixed: FixedTrafficRange;
   custom: ReturnType<typeof resolveCustom>;
   /** The range in view: the custom window's, else the fixed one. */
@@ -54,6 +58,8 @@ export type ResolvedView = {
   /** Every ignored or adjusted parameter, with the reason. */
   notes: string[];
   reader: TrafficReader;
+  /** This server's rollup retention: which ranges the rollups offer (`rangesFor`). */
+  retention: RollupRetention;
 };
 
 /**
@@ -71,12 +77,19 @@ export function resolveView(
   const sourceParam = parseTrafficSource(first(params.source), prometheus !== null);
   const source = sourceParam.source;
   const drill = parseDrill(params, { keys: options.keys, source });
-  const fixed = parseTrafficRange(first(params.range), source);
-  const custom = resolveCustom(first(params.from), first(params.to), source, now);
+  const retention = rollupRetention();
+  const retained = retainedRange(
+    parseTrafficRange(first(params.range), source, retention.hourRetentionDays),
+    { source, now, ...retention },
+  );
+  const fixed = retained.range;
+  const custom = resolveCustom(first(params.from), first(params.to), source, now, retention);
   const range = custom.range ?? fixed;
   const notes = [
     ...(sourceParam.note === null ? [] : [sourceParam.note]),
-    ...(custom.range === null ? rangeNotes(first(params.range), fixed) : []),
+    ...(custom.range === null
+      ? [...rangeNotes(first(params.range), fixed, retention), ...retained.notes]
+      : []),
     ...custom.notes,
     ...(custom.problem === null ? [] : [`${custom.problem} Showing ${rangePhrase(fixed)}.`]),
     ...drill.notes,
@@ -92,7 +105,7 @@ export function resolveView(
     focus: drill.focus,
     by: drill.by,
   };
-  return { source, fixed, custom, range, drill, state, notes, reader };
+  return { source, fixed, custom, range, drill, state, notes, reader, retention };
 }
 
 /** Where a view's buckets come from: the rollups or Prometheus, behind one shape. */
@@ -184,6 +197,7 @@ export function resolveCustom(
   to: string | undefined,
   source: TrafficSource,
   now: number,
+  retention: RollupRetention,
 ): {
   window: CustomWindow | null;
   range: TrafficRange | null;
@@ -196,7 +210,7 @@ export function resolveCustom(
   if (read === null) return none;
   const input = { from: from ?? '', to: to ?? '' };
   if ('problem' in read) return { ...none, problem: read.problem, input };
-  const resolved = customRange(read.window, { source, now, ...rollupRetention() });
+  const resolved = customRange(read.window, { source, now, ...retention });
   if ('problem' in resolved) return { ...none, problem: resolved.problem, input };
   return {
     window: read.window,
@@ -207,12 +221,20 @@ export function resolveCustom(
   };
 }
 
-/** Why a `?range=` naming a real range was not used: the source does not offer it. */
-function rangeNotes(requested: string | undefined, range: TrafficRange): string[] {
+/**
+ * Why a `?range=` naming a real range was not used: the rollups do not offer
+ * it, since their hour rows are not kept that long (Prometheus offers every
+ * range).
+ */
+function rangeNotes(
+  requested: string | undefined,
+  range: TrafficRange,
+  retention: RollupRetention,
+): string[] {
   if (requested === undefined || requested === range.id) return [];
   if (!TRAFFIC_RANGE_IDS.some((id) => id === requested)) return [];
   return [
-    `range=${requested}: offered only from Prometheus (ADR-0015); showing ${range.label.toLowerCase()}.`,
+    `range=${requested}: hour rollups are kept ${retention.hourRetentionDays} days (G2_ANALYTICS_HOUR_RETENTION_DAYS), too few for it, so it is offered only from Prometheus (ADR-0015); showing ${rangePhrase(range)}.`,
   ];
 }
 

@@ -44,6 +44,14 @@ describe('canonicalViewQuery', () => {
     });
   });
 
+  it('keeps 90d from the rollups where hour retention holds it', () => {
+    expect(
+      canonicalViewQuery('range=90d&method=GET', { keys: true, hourRetentionDays: 90 }),
+    ).toMatchObject({ query: 'range=90d&method=GET&by=api' });
+    expect(describeViewQuery('range=90d', 90).range).toBe('Last 90 days');
+    expect(describeViewQuery('range=90d').range).toBe('Last hour');
+  });
+
   it('refuses a malformed or inverted window, and an overlong query', () => {
     expect(canonicalViewQuery('from=2026-09-01T00:00', { keys: true }).ok).toBe(false);
     expect(canonicalViewQuery('from=2026-09-02T00:00&to=2026-09-01T00:00', { keys: true }).ok).toBe(

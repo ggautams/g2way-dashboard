@@ -339,6 +339,15 @@ describe('the Prometheus source (ADR-0015 §4)', () => {
     );
     expect(Object.keys(rangeHrefs(state))).toEqual(['1h', '6h', '24h', '7d', '30d', '90d', '1y']);
     expect(Object.keys(rangeHrefs({ ...state, source: 'rollups' }))).not.toContain('1y');
+    // The rollups offer 90d once hour retention holds it (offersRange).
+    expect(Object.keys(rangeHrefs({ ...state, source: 'rollups' }, 90))).toEqual([
+      '1h',
+      '6h',
+      '24h',
+      '7d',
+      '30d',
+      '90d',
+    ]);
   });
 
   it('switches source keeping what the other source can answer', () => {
@@ -360,6 +369,8 @@ describe('the Prometheus source (ADR-0015 §4)', () => {
     } as const;
     // 1y is Prometheus's alone: back to the default range.
     expect(sourceHref(prom, 'rollups')).toBe('/analytics?range=1h&status=5xx&by=status');
+    // Unless the rollups' hour rows are kept a year.
+    expect(sourceHref(prom, 'rollups', 365)).toBe('/analytics?range=1y&status=5xx&by=status');
   });
 });
 

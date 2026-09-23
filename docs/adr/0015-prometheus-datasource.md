@@ -69,6 +69,15 @@ It has no method, key or request-path label.
    mean without saying so. Retention-aware ranges on the rollup side are a
    separate M6 task.
 
+   _Amended 2026-09-23 (M6, ranges tied to retention):_ the rollups offer
+   `90d` and `1y` too wherever this server's hour retention
+   (`G2_ANALYTICS_HOUR_RETENTION_DAYS`) holds the whole window: `90d` at the
+   default of 90 days, `1y` from 365 (`offersRange`,
+   `src/lib/analytics/traffic.ts`). This is still the user's choice of source,
+   not a switch: the range picker lists them under Rollups, and a `?range=`
+   the rollups cannot hold falls back with a note naming the setting.
+   Prometheus remains the only source past hour retention.
+
 3. **PromQL results are converted to the rollups' `TrafficBucket`, so
    everything downstream is reused.** Three `query_range` calls run in
    parallel, one per chart window, each with `step` set to the range's step

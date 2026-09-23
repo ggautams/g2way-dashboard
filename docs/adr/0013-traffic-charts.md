@@ -67,6 +67,21 @@ latencies, so any percentile the dashboard shows is an estimate.
    least a day of minute retention (`G2_ANALYTICS_MINUTE_RETENTION_DAYS`,
    default 3).
 
+   _Amended 2026-09-23 (M6, ranges tied to retention):_ the fixed ranges now
+   check this server's retention the way a custom window does (§7), through
+   `retainedRange` (`src/lib/analytics/retention.ts`), which shares its notes
+   with `customRange`. A range whose window starts before minute retention
+   reads hour rows, at a step of an hour or more, and the page says so. A
+   range whose window starts before hour retention
+   (`G2_ANALYTICS_HOUR_RETENTION_DAYS`) is drawn as it is, with a note that
+   the older part has been pruned. The minute switch cannot fire today: the
+   setting is a whole number of days, at least 1, and no minute range is
+   longer than a day. It is there so the setting can never silently truncate
+   a range. The hour note does fire (`30d` with 7 days of hour retention).
+   Saved relative views and CSV exports follow, since they resolve through
+   `resolveView`. The rollups also offer `90d` and `1y` where hour retention
+   holds their whole window (ADR-0015 §2, amended the same day).
+
 6. **Drill-down folds, never multiplies** (_added 2026-09-23, M6 drill-down_).
    A breakdown chart draws request rate per group. When the three busiest
    groups are all the traffic, each gets its own slot. Otherwise the two
@@ -145,4 +160,4 @@ latencies, so any percentile the dashboard shows is an estimate.
   query's filter and the series change.
 - A custom date range chooses a granularity and a step the way
   `TRAFFIC_RANGES` does (§7). The hour rows are the only option past minute
-  retention. The fixed ranges do not yet check retention (M6 box).
+  retention. The fixed ranges check retention the same way (§5, amended).
