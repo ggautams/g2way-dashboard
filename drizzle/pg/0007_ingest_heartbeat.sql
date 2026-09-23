@@ -1,0 +1,1 @@
+ALTER TABLE "analytics_ingest_state" ADD COLUMN "last_polled_at" timestamp with time zone;

@@ -1,0 +1,1 @@
+ALTER TABLE `analytics_ingest_state` ADD `last_polled_at` integer;

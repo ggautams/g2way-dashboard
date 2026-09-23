@@ -50,6 +50,13 @@
       "when": 1790214891094,
       "tag": "0006_analytics_rollups",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790216390116,
+      "tag": "0007_ingest_heartbeat",
+      "breakpoints": true
     }
   ]
 }

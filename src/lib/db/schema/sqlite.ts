@@ -230,7 +230,9 @@ export const analyticsRollups = sqliteTable(
  * The ingest worker's health, one row per org and environment (ADR-0012 §8):
  * lifetime counters, when records last arrived, the list's length after the
  * last drain (`backlog`) and the last failure. `last_rejection` is why the
- * last malformed record was dropped, never the record itself.
+ * last malformed record was dropped, never the record itself. `last_polled_at`
+ * is the worker's heartbeat: the last successful pop, empty ones included,
+ * written at most every `HEARTBEAT_MS` while idle (ADR-0012 §8).
  */
 export const analyticsIngestState = sqliteTable(
   'analytics_ingest_state',
@@ -243,6 +245,7 @@ export const analyticsIngestState = sqliteTable(
     batches: counter('batches'),
     backlog: counter('backlog'),
     lastDrainedAt: integer('last_drained_at', { mode: 'timestamp_ms' }),
+    lastPolledAt: integer('last_polled_at', { mode: 'timestamp_ms' }),
     lastRecordAt: integer('last_record_at', { mode: 'timestamp_ms' }),
     lastRejection: text('last_rejection'),
     lastError: text('last_error'),

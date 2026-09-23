@@ -1,6 +1,11 @@
 import 'server-only';
 
-import { pruneRollups, recordIngestError, writeIngestBatch } from '@/lib/db/analytics';
+import {
+  pruneRollups,
+  recordIngestError,
+  recordIngestHeartbeat,
+  writeIngestBatch,
+} from '@/lib/db/analytics';
 import type { DataHandle } from '@/lib/db/users';
 import type { IngestConfig } from './config';
 import { redisErrorMessage, type RecordQueue } from './queue';
@@ -44,6 +49,14 @@ export const IDLE_MS = 2000;
 /** Retry backoff for a failing source or database: doubles from the first to the last. */
 export const BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000] as const;
 export const PRUNE_EVERY_MS = 3_600_000;
+/**
+ * The idle heartbeat's throttle (ADR-0012 §8): an empty pop writes
+ * `last_polled_at` at most this often per source, so an idle worker costs
+ * two writes a minute per environment, not one per `IDLE_MS` pass. The first
+ * empty pop after start, or after a Redis failure, writes at once, so a
+ * recovered worker stops reading as failing on its next pass.
+ */
+export const HEARTBEAT_MS = 30_000;
 const DAY_MS = 86_400_000;
 const PREFIX = '[analytics-ingest]';
 
@@ -174,15 +187,41 @@ export async function pruneOnce(deps: IngestDeps): Promise<void> {
 }
 
 /**
+ * Writes the source's heartbeat after an empty pop, unless one was written
+ * within `HEARTBEAT_MS`. A failed write is logged and retried on the next pass.
+ */
+async function heartbeat(
+  environment: string,
+  beats: Map<string, number>,
+  deps: IngestDeps,
+): Promise<void> {
+  const at = (deps.now ?? Date.now)();
+  const last = beats.get(environment);
+  if (last !== undefined && at - last < HEARTBEAT_MS) return;
+  try {
+    await recordIngestHeartbeat(deps.handle, deps.orgId, environment, new Date(at));
+    beats.set(environment, at);
+  } catch (error) {
+    (deps.log ?? console).warn(
+      `${PREFIX} ${environment}: heartbeat failed: ${databaseErrorMessage(error)}`,
+    );
+  }
+}
+
+/**
  * Runs until `deps.signal` aborts. Each pass drains every source once; a
  * source that just had a full batch is drained again without pausing, one
- * whose Redis failed is skipped until its backoff has passed. Prunes at start
- * and then hourly. Never throws.
+ * whose Redis failed is skipped until its backoff has passed. An empty pop
+ * writes the heartbeat, throttled by `HEARTBEAT_MS`. Prunes at start and then
+ * hourly. Never throws.
  */
 export async function runIngest(sources: readonly IngestSource[], deps: IngestDeps): Promise<void> {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? abortableSleep;
   const failures = new Map<string, { count: number; retryAt: number }>();
+  // When each source's `last_polled_at` was last written; absent means "write
+  // on the next successful pop" (at start, and after a Redis failure).
+  const beats = new Map<string, number>();
   let prunedAt = -Infinity;
 
   while (!deps.signal.aborted) {
@@ -200,9 +239,12 @@ export async function runIngest(sources: readonly IngestSource[], deps: IngestDe
         const count = (failure?.count ?? 0) + 1;
         const wait = BACKOFF_MS[Math.min(count - 1, BACKOFF_MS.length - 1)];
         failures.set(source.environment, { count, retryAt: now() + wait });
+        beats.delete(source.environment);
         continue;
       }
       failures.delete(source.environment);
+      if (result.kind === 'written') beats.set(source.environment, now());
+      if (result.kind === 'empty') await heartbeat(source.environment, beats, deps);
       if (result.kind === 'written' && result.popped >= deps.config.batchSize) busy = true;
     }
     if (!busy) await sleep(IDLE_MS, deps.signal);

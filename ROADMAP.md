@@ -90,8 +90,8 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       headers and body; a real response, its headers and a truncated body;
       the inferred trace's badges, mismatches and "In chain" links landing
       on the Chain tab's slot, per version too), and M6's `/analytics`
-      ingest health panel in each state (no Redis, no records, failing,
-      backlog near cap), and its traffic charts (each range; hover and
+      ingest health panel in each state (no Redis, no worker, no records,
+      failing, backlog near cap), and its traffic charts (each range; hover and
       arrow-key readout; tooltip flipping near the right edge; the gaps and
       dots of sparse traffic; the table view; phone width) in both themes,
       with rollups seeded by `make ingest` against Docker Redis or by hand
@@ -207,7 +207,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       "worker failing" (`last_error_at` after `last_drained_at`) and "backlog
       near g2way's 100 000 cap" (the gateway is dropping records) apart
 - [x] Traffic dashboards: RPS, error rate, latency p50/p95/p99
-- [ ] Worker heartbeat in `analytics_ingest_state` (a `last_polled_at` set on
+- [x] Worker heartbeat in `analytics_ingest_state` (a `last_polled_at` set on
       every pass, empty pops included; needs a migration and an ADR-0012
       amendment). Without it the health panel cannot tell "no worker runs"
       from "gateway not sending", and a worker that recovered from an error
@@ -301,6 +301,13 @@ dashboard needs that Redis as `G2_REDIS_URL`. The k8s manifests currently use
       server by default. Optionally a separate `npm run ingest` Deployment,
       with `G2_ANALYTICS_INGEST=off` on the web tier (ADR-0012 §2), and
       `scripts/` plus `tsx` shipped for it
+- [ ] Liveness probe for a standalone `npm run ingest` Deployment: it serves no
+      HTTP, so the probe must read the worker's heartbeat (`last_polled_at`,
+      ADR-0012 §8 amendment; stale after `WORKER_STALE_MS`) or a file it touches
+- [ ] Alert on ingest health leaving `ok` (`no-worker`, `failing`, backlog near
+      cap), and on a gateway gone quiet: a worker polling with no record for a
+      configurable while, which the panel still shows as `ok` ("last drain …
+      ago")
 - [ ] Audit log retention/pruning and export (CSV/JSON). Pruning must keep every
       `api.*`/`policy.*` row newer than its environment's last reload: pending
       changes are derived from them (ADR-0006)
@@ -1649,3 +1656,22 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - Follow-up: new M6 box tying the fixed ranges to minute retention.
   - Next: M6 worker heartbeat, then drill-down, which reuses
     `queryTrafficBuckets({ apiId })`, `trafficSeries` and `TimeSeriesChart`.
+- feat(M6): **worker heartbeat**. `analytics_ingest_state`
+  gains `last_polled_at` (migration `0007_ingest_heartbeat`, both dialects;
+  ADR-0012 §8 amended in place).
+  - Every successful pop sets it: a written batch with `last_drained_at`, an
+    empty pop through `recordIngestHeartbeat`, which also sets `backlog` to 0.
+  - Idle writes are throttled to one per 30 s per environment
+    (`HEARTBEAT_MS`), in memory. The first empty pop after start or after a
+    Redis failure writes at once.
+  - `ingestHealth` takes `now` and adds `no-worker`: no report ever, or the
+    newest of polled/drained/error is older than 2 min (`WORKER_STALE_MS`).
+    `failing` compares against the last successful pop, so a recovered idle
+    worker drops back to `not-sending`/`ok` on its next pass. The panel lost
+    its "stays until the next record" caveat and got a `no-worker` explanation
+    that names `G2_ANALYTICS_INGEST=off` / `npm run ingest`.
+  - Surprise: none upstream. Rows written by an older worker (no heartbeat)
+    fall back to `last_drained_at`.
+  - Follow-ups (M11): a liveness probe for a standalone ingest Deployment,
+    and alerts on ingest health, including a gateway gone quiet.
+  - Next: M6 drill-down by API, key, status class, method, path.

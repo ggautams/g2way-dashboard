@@ -138,6 +138,31 @@ reader runs, what it keeps, or what happens when it fails. Upstream facts
    database failures). The traffic pages use it to tell "not configured",
    "gateway not sending" and "worker failing" apart. A backlog above 80 % of
    g2way's 100 000 cap means the gateway is dropping the oldest records.
+   _Amended 2026-09-23 (migration `0007_ingest_heartbeat`):_ the table cannot
+   tell those cases apart from drains and errors alone: an idle worker writes
+   neither, so "no worker runs" looked like "gateway not sending", and a
+   worker that recovered from an error read as failing until the next record.
+   The row now also holds `last_polled_at`, the worker's heartbeat:
+   - **What sets it**: every successful pop. A non-empty drain writes it with
+     the batch (same time as `last_drained_at`). An empty pop writes it with
+     `backlog` = 0, which is what an empty pop proves, and nothing else.
+   - **Throttle**: an empty pop writes at most every 30 s per environment
+     (`HEARTBEAT_MS`, `src/lib/analytics/ingest.ts`). Unthrottled, an idle
+     worker would write every 2 s pass, about 43 000 writes a day per
+     environment, on SQLite's single writer shared with the web tier. The
+     throttle is per process and in memory. The first empty pop after start,
+     and the first after a Redis failure, write at once, so recovery shows on
+     the next pass.
+   - **Health** (`src/lib/analytics/health.ts`) adds a `no-worker` status. A
+     worker's last report is the newest of `last_polled_at`,
+     `last_drained_at` and `last_error_at`. When there is none, or it is older
+     than 2 minutes (`WORKER_STALE_MS`: four idle heartbeats, or two of the
+     60 s top Redis backoff steps, plus room for clock skew with a standalone
+     worker), the status is `no-worker`. `failing` now compares
+     `last_error_at` with the last successful pop (`last_polled_at`, or
+     `last_drained_at` on a row an older worker wrote), not with the last
+     drain. `not-sending` now means a worker polls but has never popped a
+     record. The backlog is dated by `last_polled_at`.
 
 ## Consequences
 

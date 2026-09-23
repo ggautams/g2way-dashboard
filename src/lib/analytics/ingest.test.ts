@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { migrateDatabase, openDatabase, type DashboardDatabase } from '@/lib/db';
 import * as analyticsDb from '@/lib/db/analytics';
 import { getIngestState } from '@/lib/db/analytics';
-import { BACKOFF_MS, IDLE_MS, drainOnce, runIngest, type IngestDeps } from './ingest';
+import { ingestHealth } from './health';
+import { BACKOFF_MS, HEARTBEAT_MS, IDLE_MS, drainOnce, runIngest, type IngestDeps } from './ingest';
 import type { RecordQueue } from './queue';
 import type { AnalyticsRecord } from './record';
 
@@ -222,6 +223,77 @@ describe('runIngest', () => {
     expect(healthy.drains).toBe(4);
     expect((await getIngestState(handle, ORG, 'healthy'))?.recordsIngested).toBe(4);
     expect((await getIngestState(handle, ORG, 'broken'))?.lastError).toBe('redis: ECONNREFUSED');
+  });
+
+  it('writes a heartbeat on the first empty pop, then at most every HEARTBEAT_MS', async () => {
+    const queue = new MemoryQueue();
+    const controller = new AbortController();
+    let clock = T0;
+    const polls: (number | undefined)[] = [];
+    await runIngest(
+      [{ environment: 'prod', queue, redisUrl: REDIS_URL }],
+      deps({
+        signal: controller.signal,
+        now: () => clock,
+        sleep: async (ms) => {
+          polls.push((await getIngestState(handle, ORG, 'prod'))?.lastPolledAt?.getTime());
+          clock += ms;
+          if (clock - T0 > HEARTBEAT_MS) controller.abort();
+        },
+      }),
+    );
+    const passes = HEARTBEAT_MS / IDLE_MS;
+    expect(polls).toHaveLength(passes + 1);
+    // Written at once, held through the throttle window, then written again.
+    expect(polls.slice(0, passes)).toEqual(Array.from({ length: passes }, () => T0));
+    expect(polls[passes]).toBe(T0 + HEARTBEAT_MS);
+    const state = await getIngestState(handle, ORG, 'prod');
+    expect(state).toMatchObject({ batches: 0, lastDrainedAt: null });
+    expect(
+      ingestHealth({ redisConfigured: true, workerInServer: true, state, now: clock }).status,
+    ).toBe('not-sending');
+  });
+
+  it('beats at once after a Redis failure, so a recovered idle worker stops reading as failing', async () => {
+    const queue = new MemoryQueue();
+    const controller = new AbortController();
+    let clock = T0;
+    let passes = 0;
+    await runIngest(
+      [{ environment: 'prod', queue, redisUrl: REDIS_URL }],
+      deps({
+        signal: controller.signal,
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms;
+          passes += 1;
+          // Pass 1 beats; pass 2 fails; pass 3 (within HEARTBEAT_MS of the first beat) recovers.
+          if (passes === 1) queue.failDrains = 1;
+          if (passes === 3) controller.abort();
+        },
+      }),
+    );
+    const state = await getIngestState(handle, ORG, 'prod');
+    expect(state?.lastErrorAt?.getTime()).toBe(T0 + IDLE_MS);
+    expect(state?.lastPolledAt?.getTime()).toBe(T0 + 2 * IDLE_MS);
+    expect(
+      ingestHealth({ redisConfigured: true, workerInServer: true, state, now: clock }).status,
+    ).toBe('not-sending');
+  });
+
+  it('moves the heartbeat with every written batch', async () => {
+    const queue = new MemoryQueue();
+    queue.items = [record()];
+    const controller = new AbortController();
+    await runIngest(
+      [{ environment: 'prod', queue, redisUrl: REDIS_URL }],
+      deps({ signal: controller.signal, sleep: async () => controller.abort() }),
+    );
+    expect(await getIngestState(handle, ORG, 'prod')).toMatchObject({
+      batches: 1,
+      lastPolledAt: new Date(T0 + 1000),
+      lastDrainedAt: new Date(T0 + 1000),
+    });
   });
 
   it('prunes past retention when it starts', async () => {

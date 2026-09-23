@@ -195,6 +195,7 @@ export const analyticsIngestState = pgTable(
     batches: counter('batches'),
     backlog: counter('backlog'),
     lastDrainedAt: optionalTimestamp('last_drained_at'),
+    lastPolledAt: optionalTimestamp('last_polled_at'),
     lastRecordAt: optionalTimestamp('last_record_at'),
     lastRejection: text('last_rejection'),
     lastError: text('last_error'),

@@ -48,7 +48,9 @@ export function IngestHealthPanel({
             </ul>
           </div>
         )}
-        {state && status !== 'not-configured' && <Counters state={state} now={now} />}
+        {state && status !== 'not-configured' && (
+          <Counters state={state} backlogAsOf={backlog?.asOf ?? null} now={now} />
+        )}
       </div>
     </section>
   );
@@ -56,6 +58,7 @@ export function IngestHealthPanel({
 
 const TITLE: Record<IngestStatus, string> = {
   'not-configured': 'no Redis configured',
+  'no-worker': 'no worker running',
   failing: 'worker failing',
   'not-sending': 'no records received',
   ok: 'receiving records',
@@ -63,6 +66,7 @@ const TITLE: Record<IngestStatus, string> = {
 
 const TONE: Record<IngestStatus, { box: string; text: string }> = {
   'not-configured': { box: 'border-border bg-surface', text: 'text-foreground' },
+  'no-worker': { box: 'border-danger/40 bg-danger/5', text: 'text-danger' },
   failing: { box: 'border-danger/40 bg-danger/5', text: 'text-danger' },
   'not-sending': { box: 'border-warning/40 bg-warning/5', text: 'text-warning' },
   ok: { box: 'border-border bg-surface', text: 'text-success' },
@@ -72,8 +76,15 @@ function ago(date: Date, now: number): string {
   return formatAge(Math.floor(date.getTime() / 1000), now);
 }
 
+function newest(a: Date | null | undefined, b: Date | null | undefined): Date | null {
+  if (a == null) return b ?? null;
+  if (b == null) return a;
+  return a > b ? a : b;
+}
+
 function Explanation({ health, now }: { health: IngestHealth; now: number }) {
-  const { status, state, workerInServer } = health;
+  const { status, state, workerInServer, lastSeenAt } = health;
+  const lastSuccess = newest(state?.lastPolledAt, state?.lastDrainedAt);
   switch (status) {
     case 'not-configured':
       return (
@@ -91,37 +102,44 @@ function Explanation({ health, now }: { health: IngestHealth; now: number }) {
           <p>
             The worker&apos;s last error
             {state?.lastErrorAt && ` (${ago(state.lastErrorAt, now)})`} is newer than its last
-            successful drain
-            {state?.lastDrainedAt
-              ? ` (${ago(state.lastDrainedAt, now)})`
-              : ', which never happened'}
-            . Records wait in Redis until it recovers, up to the gateway&apos;s cap.
+            successful poll of Redis
+            {lastSuccess ? ` (${ago(lastSuccess, now)})` : ', which never happened'}. Records wait
+            in Redis until it recovers, up to the gateway&apos;s cap.
           </p>
           {state?.lastError && (
             <p className="font-mono text-xs break-all text-foreground">{state.lastError}</p>
           )}
-          <p className="text-xs">
-            With no traffic, a recovered worker pops nothing and this stays until the next record
-            arrives.
-          </p>
         </>
+      );
+    case 'no-worker':
+      return (
+        <p>
+          {lastSeenAt
+            ? `No ingest worker has reported for this environment since ${ago(lastSeenAt, now)}, so it has stopped or is stuck.`
+            : 'No ingest worker has ever reported for this environment.'}{' '}
+          {workerInServer ? (
+            <>
+              This server should run one: check its log for{' '}
+              <code className="font-mono">[analytics-ingest]</code> lines.
+            </>
+          ) : (
+            <>
+              This server&apos;s is off (<code className="font-mono">G2_ANALYTICS_INGEST=off</code>
+              ), so <code className="font-mono">npm run ingest</code> must run elsewhere.
+            </>
+          )}{' '}
+          Records wait in Redis until one runs, up to the gateway&apos;s cap.
+        </p>
       );
     case 'not-sending':
       return (
         <p>
-          No worker has popped a record for this environment yet. Either the gateway is not sending
-          (it must run with <code className="font-mono">--analytics-sink redis</code>, i.e.{' '}
+          The worker polls this environment&apos;s Redis
+          {lastSeenAt && ` (last ${ago(lastSeenAt, now)})`} but has never popped a record. Either
+          the gateway is not sending (it must run with{' '}
+          <code className="font-mono">--analytics-sink redis</code>, i.e.{' '}
           <code className="font-mono">G2_ANALYTICS_SINK=redis</code>, against this Redis) or it has
-          served no traffic
-          {workerInServer ? (
-            '.'
-          ) : (
-            <>
-              , or no worker runs: this server&apos;s is off (
-              <code className="font-mono">G2_ANALYTICS_INGEST=off</code>), so{' '}
-              <code className="font-mono">npm run ingest</code> must run elsewhere.
-            </>
-          )}
+          served no traffic.
         </p>
       );
     case 'ok':
@@ -134,7 +152,15 @@ function Explanation({ health, now }: { health: IngestHealth; now: number }) {
   }
 }
 
-function Counters({ state, now }: { state: NonNullable<IngestHealth['state']>; now: number }) {
+function Counters({
+  state,
+  backlogAsOf,
+  now,
+}: {
+  state: NonNullable<IngestHealth['state']>;
+  backlogAsOf: Date | null;
+  now: number;
+}) {
   return (
     <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
       <Counter label="Records ingested" value={state.recordsIngested.toLocaleString('en')} />
@@ -142,7 +168,7 @@ function Counters({ state, now }: { state: NonNullable<IngestHealth['state']>; n
       <Counter label="Batches" value={state.batches.toLocaleString('en')} />
       <Counter
         label="Backlog"
-        value={`${state.backlog.toLocaleString('en')}${state.lastDrainedAt ? ` (${ago(state.lastDrainedAt, now)})` : ''}`}
+        value={`${state.backlog.toLocaleString('en')}${backlogAsOf ? ` (${ago(backlogAsOf, now)})` : ''}`}
       />
       {state.lastRejection && (
         <div className="col-span-full">

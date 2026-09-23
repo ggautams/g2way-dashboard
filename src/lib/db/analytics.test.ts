@@ -11,6 +11,7 @@ import {
   pruneRollups,
   queryTrafficBuckets,
   recordIngestError,
+  recordIngestHeartbeat,
   writeIngestBatch,
   type AnalyticsRollup,
   type IngestBatch,
@@ -219,6 +220,7 @@ describe.each([
       batches: 2,
       backlog: 0,
       lastDrainedAt: new Date(T0 + 9000),
+      lastPolledAt: new Date(T0 + 9000),
       lastRecordAt: new Date(T0 + 5000),
       lastRejection: 'not JSON',
       lastError: null,
@@ -244,6 +246,29 @@ describe.each([
     expect(await getIngestState(handle, ORG_A, 'prod')).toMatchObject({
       recordsIngested: 1,
       lastError: 'later',
+    });
+    expect(await getIngestState(handle, ORG_B, 'prod')).toBeUndefined();
+  });
+
+  it('records a heartbeat without touching the counters or the last drain', async () => {
+    const handle = await open();
+    await recordIngestHeartbeat(handle, ORG_A, 'prod', new Date(T0));
+    expect(await getIngestState(handle, ORG_A, 'prod')).toMatchObject({
+      recordsIngested: 0,
+      batches: 0,
+      backlog: 0,
+      lastPolledAt: new Date(T0),
+      lastDrainedAt: null,
+    });
+    await writeIngestBatch(handle, ORG_A, batch([record(ORG_A)], { backlog: 7 }));
+    await recordIngestHeartbeat(handle, ORG_A, 'prod', new Date(T0 + 5000));
+    expect(await getIngestState(handle, ORG_A, 'prod')).toMatchObject({
+      recordsIngested: 1,
+      batches: 1,
+      // The empty pop saw an empty list.
+      backlog: 0,
+      lastDrainedAt: new Date(T0 + 1000),
+      lastPolledAt: new Date(T0 + 5000),
     });
     expect(await getIngestState(handle, ORG_B, 'prod')).toBeUndefined();
   });

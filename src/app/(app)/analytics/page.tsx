@@ -77,8 +77,9 @@ async function loadIngestHealth(target: GatewayTarget) {
   const state = redisConfigured
     ? await getIngestState(getDatabase(), getOrgId(), target.id)
     : undefined;
-  const health = ingestHealth({ redisConfigured, workerInServer, state });
-  return { health, configProblems, now: Date.now() };
+  const now = Date.now();
+  const health = ingestHealth({ redisConfigured, workerInServer, state, now });
+  return { health, configProblems, now };
 }
 
 /** The range's chart series: every API's totals, summed per step. */

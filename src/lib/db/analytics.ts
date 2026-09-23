@@ -81,6 +81,7 @@ function stateSet(dialect: DataHandle['dialect'], t: StateTable | PgStateTable) 
     batches: sql`${t.batches} + ${excluded(t.batches)}`,
     backlog: excluded(t.backlog),
     lastDrainedAt: excluded(t.lastDrainedAt),
+    lastPolledAt: excluded(t.lastPolledAt),
     // Newest wins; SQLite's max() would turn one NULL into NULL, hence coalesce.
     lastRecordAt: larger(dialect, lastRecord.mine, lastRecord.theirs),
     lastRejection: sql`coalesce(${excluded(t.lastRejection)}, ${t.lastRejection})`,
@@ -111,6 +112,8 @@ export async function writeIngestBatch(
     batches: 1,
     backlog: batch.backlog,
     lastDrainedAt: batch.drainedAt,
+    // A drain is a poll too: the heartbeat moves with every batch.
+    lastPolledAt: batch.drainedAt,
     lastRecordAt: batch.lastRecordAt,
     lastRejection: batch.lastRejection,
     updatedAt: batch.drainedAt,
@@ -187,6 +190,35 @@ export async function recordIngestError(
 ): Promise<void> {
   const values = { orgId, environment, lastError: message, lastErrorAt: at, updatedAt: at };
   const set = { lastError: message, lastErrorAt: at, updatedAt: at };
+  if (handle.dialect === 'sqlite') {
+    const s = handle.schema.analyticsIngestState;
+    handle.db
+      .insert(s)
+      .values(values)
+      .onConflictDoUpdate({ target: [s.orgId, s.environment], set })
+      .run();
+    return;
+  }
+  const s = handle.schema.analyticsIngestState;
+  await handle.db
+    .insert(s)
+    .values(values)
+    .onConflictDoUpdate({ target: [s.orgId, s.environment], set });
+}
+
+/**
+ * The worker's heartbeat (ADR-0012 §8): a pop succeeded and found the list
+ * empty, so the backlog is 0 as of `at`. Counters and `last_drained_at` are
+ * untouched; the row is created if this is the environment's first report.
+ */
+export async function recordIngestHeartbeat(
+  handle: DataHandle,
+  orgId: string,
+  environment: string,
+  at: Date,
+): Promise<void> {
+  const set = { lastPolledAt: at, backlog: 0, updatedAt: at };
+  const values = { orgId, environment, ...set };
   if (handle.dialect === 'sqlite') {
     const s = handle.schema.analyticsIngestState;
     handle.db
