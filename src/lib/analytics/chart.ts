@@ -47,6 +47,10 @@ const TICK_INTERVALS = [
   DAY,
   2 * DAY,
   7 * DAY,
+  // The Prometheus-only ranges (90 and 365 days, ADR-0015).
+  14 * DAY,
+  30 * DAY,
+  60 * DAY,
 ];
 
 /** Epoch-aligned (UTC) x-axis ticks within `[from, to]`, at most `maxTicks` of them. */

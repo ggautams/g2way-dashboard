@@ -98,7 +98,10 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       three-line and "Everything else" charts; row links, API/key page links,
       a viewer without `keys:read` seeing no key tab; the ignored-parameter
       notes; the "Traffic for this API/key" links; the path tab's templating
-      note) in both themes,
+      note) and its Prometheus source (the Rollups | Prometheus toggle next
+      to the range picker; the 90d and 1y ranges and their date ticks; the
+      failed-query alert and its "Show the rollups instead" link; warnings;
+      the missing key/method/path tabs and their notes) in both themes,
       with rollups seeded by `make ingest` against Docker Redis or by hand
       (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
@@ -224,7 +227,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Live request inspector (tail of recent requests). Feed it from the ingest
       worker's batch in hand, never from a second reader of the Redis list,
       which would steal records from the rollups (ADR-0012 §6)
-- [ ] Optional Prometheus datasource for long-range aggregates
+- [x] Optional Prometheus datasource for long-range aggregates (ADR-0015)
 - [ ] Saved views, date-range picker, CSV export
 - [ ] Tie the fixed traffic ranges to retention: `24h` reads minute rows, so a
       `G2_ANALYTICS_MINUTE_RETENTION_DAYS` below 1 silently truncates it. Read
@@ -318,6 +321,11 @@ dashboard needs that Redis as `G2_REDIS_URL`. The k8s manifests currently use
       changes are derived from them (ADR-0006)
 - [ ] Force a password change at next sign-in after an admin reset, and a
       "sign out my other sessions" button (ADR-0004 §9 has the mechanism)
+- [ ] Prometheus datasource status per environment (ADR-0015), on `/gateway`
+      or beside the ingest health panel: reachable, and whether its
+      `G2_PROMETHEUS_SELECTOR` matches any `http_server_request_duration_seconds`
+      series, plus the oldest sample it holds. Today a wrong selector or a short
+      retention only shows as an empty chart
 
 **Requires from g2way**: the admin port is not exposed on any Service today, so
 an in-cluster dashboard cannot reach it. See `UPSTREAM.md`.
@@ -339,6 +347,9 @@ an in-cluster dashboard cannot reach it. See `UPSTREAM.md`.
       segments (the templater's `{token}`/`{hex}` classes) for editors, and
       decide whether an opt-in client IP / User-Agent column is ever allowed
       (it would reverse ADR-0012 §6 and needs its own ADR)
+- [ ] Method drill-down from Prometheus, once g2way's request-duration
+      histogram carries `http.request.method` (`UPSTREAM.md`; ADR-0015 §4):
+      add it to `PROMETHEUS_DIMENSIONS` and `promql.ts`
 
 ---
 
@@ -1761,3 +1772,40 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     lists the inspector. Follow-up in M12 (inspector privacy options).
   - Next: M6 Prometheus datasource. The tail is a sample under load, not a
     log; later M6 tasks should not build exports on it.
+- feat(M6): **optional Prometheus datasource** (ADR-0015).
+  - What g2way exports: one histogram, `http_server_request_duration_seconds`
+    (`crates/g2-middleware/src/metrics.rs`). Its labels are `http_route` (the
+    listen path), `g2_api_id`, `g2_org_id` and `http_response_status_code`.
+    Its buckets run 5 ms to 10 s. There is no method, key or path label.
+    A new `metrics` watch area covers both metrics files (recorded in the
+    lock by `sync:g2way`).
+  - Configuration: `G2_PROMETHEUS_URL`, `_TOKEN` and `_SELECTOR`, or
+    `G2_ENV_<ID>_PROMETHEUS_*`, parsed into a `PrometheusSource` on
+    `GatewayTarget`. URL userinfo becomes Basic auth. The URL and token are
+    private fields, and every message is scrubbed of them. `check:bundle`
+    adds canaries and renders `?source=prometheus` against port 1, where the
+    page must show "Prometheus is unreachable".
+  - Integration: an explicit Rollups | Prometheus toggle
+    (`?source=prometheus`), never an automatic switch. Two new ranges, `90d`
+    and `1y` (one-day steps), are Prometheus-only for now (`TrafficRange.sources`,
+    `rangesFor`). Three `query_range` POSTs (`increase()` per step, by status
+    code, `le`, and sum) run in `src/lib/analytics/prometheus.ts`. `promql.ts`
+    maps them onto `TrafficBucket`, so `trafficSeries`, the breakdowns and
+    "Everything else" are reused unchanged. The page reads through a small
+    `TrafficReader` (rollups or Prometheus). Drill-down covers API and status
+    only; the rest is noted and dropped.
+  - `make test-prometheus` runs the live client tests against Prometheus
+    v3.5.0 in Docker, and they passed.
+  - Surprise: `Number('+Inf')` is `NaN`, so the `le="+Inf"` bucket needs
+    special parsing. Also, the metric has no maximum, so under Prometheus the
+    summary shows none (`SummaryOptions.exactMax`).
+  - For the next task (saved views, date-range picker, CSV): carry `source` in
+    every saved view and export, and use `sourceHref` for switching. A
+    Prometheus custom range needs at least two scrapes per step and at most
+    11 000 points. CSV from Prometheus should say its counts are rounded
+    `increase()` values. For "tie ranges to retention": `90d` could open to
+    the rollups when `G2_ANALYTICS_HOUR_RETENTION_DAYS` covers it.
+  - Follow-ups: M11 (Prometheus status per environment) and M12 (method
+    drill-down, blocked upstream: `UPSTREAM.md` TODO for
+    `http.request.method`). The visual-pass box lists the toggle.
+  - Not browser-tested this session; the visual-pass box lists the new UI.

@@ -5,7 +5,10 @@ import {
   emptyBucket,
   estimatePercentile,
   parseTrafficRange,
+  parseTrafficSource,
+  rangesFor,
   resample,
+  summarise,
   trafficSeries,
   trafficWindow,
   type TrafficBucket,
@@ -193,5 +196,28 @@ describe('trafficSeries', () => {
   it('reports no latency or max without traffic', () => {
     const { summary } = trafficSeries(TRAFFIC_RANGES['7d'], [], NOW);
     expect(summary).toMatchObject({ requests: 0, rps: 0, latencyAvgMs: null, latencyMaxMs: null });
+  });
+});
+
+describe('sources (ADR-0015)', () => {
+  it('offers the long ranges from Prometheus only', () => {
+    expect(rangesFor('rollups')).toEqual(['1h', '6h', '24h', '7d', '30d']);
+    expect(rangesFor('prometheus')).toEqual(['1h', '6h', '24h', '7d', '30d', '90d', '1y']);
+    expect(parseTrafficRange('1y').id).toBe('1h');
+    expect(parseTrafficRange('1y', 'prometheus').id).toBe('1y');
+    expect(trafficWindow(TRAFFIC_RANGES['1y'], Date.UTC(2026, 8, 23, 12)).points).toBe(365);
+  });
+
+  it('reads Prometheus only where one is configured, and says so when not', () => {
+    expect(parseTrafficSource(undefined, true)).toEqual({ source: 'rollups', note: null });
+    expect(parseTrafficSource('prometheus', true)).toEqual({ source: 'prometheus', note: null });
+    expect(parseTrafficSource('prometheus', false)).toMatchObject({ source: 'rollups' });
+    expect(parseTrafficSource('prometheus', false).note).toMatch(/no Prometheus configured/);
+  });
+
+  it('shows no maximum when the source keeps none', () => {
+    const bucket = bucketOf(0, [3, 8]);
+    expect(summarise(bucket, 60).latencyMaxMs).toBe(8);
+    expect(summarise(bucket, 60, { exactMax: false }).latencyMaxMs).toBeNull();
   });
 });

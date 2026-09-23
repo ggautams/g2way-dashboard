@@ -2,15 +2,17 @@ import type { RollupDimension } from '@/lib/db/schema/shared';
 import {
   DEFAULT_TRAFFIC_RANGE,
   TRAFFIC_COUNTERS,
-  TRAFFIC_RANGE_IDS,
+  TRAFFIC_RANGES,
   addBucket,
   elapsedSeconds,
   emptyBucket,
+  rangesFor,
   resample,
   trafficWindow,
   type TrafficBucket,
   type TrafficRange,
   type TrafficRangeId,
+  type TrafficSource,
 } from './traffic';
 
 /**
@@ -35,6 +37,13 @@ export type BreakdownGroup = 'value' | 'api' | 'class';
 /** The dimensions a drill-down narrows to one value of, besides the API. */
 export const FOCUS_DIMENSIONS = ['key', 'status', 'method', 'path'] as const;
 export type FocusDimension = (typeof FOCUS_DIMENSIONS)[number];
+
+/**
+ * The dimensions g2way's request-duration histogram carries as labels
+ * (`g2_api_id`, `http_response_status_code`): all a Prometheus view can
+ * narrow or break down by (ADR-0015 §4).
+ */
+export const PROMETHEUS_DIMENSIONS: readonly BreakdownDimension[] = ['api', 'status'];
 
 /** Breakdown tabs, in display order. */
 export const BREAKDOWN_DIMENSIONS = [
@@ -115,10 +124,11 @@ export const OTHER_PATHS_VALUE = '(other)';
  */
 export function allowedBreakdowns(
   selection: { apiId: string | null; focus: DrillFocus | null },
-  options: { keys: boolean },
+  options: { keys: boolean; source?: TrafficSource },
 ): BreakdownDimension[] {
   const { apiId, focus } = selection;
   return BREAKDOWN_DIMENSIONS.filter((dimension) => {
+    if (options.source === 'prometheus' && !PROMETHEUS_DIMENSIONS.includes(dimension)) return false;
     if (dimension === 'api') return apiId === null;
     if (focus === null) return dimension !== 'key' || options.keys;
     return dimension === 'status' && focus.dimension === 'status' && isStatusClass(focus.value);
@@ -132,9 +142,14 @@ function isStatusClass(value: string): boolean {
 /**
  * Reads the drill-down from `/analytics` search params. `api` names an API;
  * one of `key`, `status`, `method` and `path` narrows further; `by` picks
- * the breakdown. Without `keys:read`, `key` and `by=key` are ignored.
+ * the breakdown. Without `keys:read`, `key` and `by=key` are ignored. From
+ * Prometheus, only `api` and `status` apply (ADR-0015 §4); the rest are
+ * ignored with a note.
  */
-export function parseDrill(params: SearchParams, options: { keys: boolean }): Drill {
+export function parseDrill(
+  params: SearchParams,
+  options: { keys: boolean; source?: TrafficSource },
+): Drill {
   const notes: string[] = [];
   const api = first(params.api);
   let apiId: string | null = null;
@@ -150,6 +165,12 @@ export function parseDrill(params: SearchParams, options: { keys: boolean }): Dr
     if (value === undefined || (value === '' && dimension !== 'key')) continue;
     if (dimension === 'key' && !options.keys) {
       notes.push('key: needs the keys:read permission; ignored.');
+      continue;
+    }
+    if (options.source === 'prometheus' && !PROMETHEUS_DIMENSIONS.includes(dimension)) {
+      notes.push(
+        `${dimension}: ignored, g2way's Prometheus metrics carry no ${dimension} label. Switch to the rollups to narrow by it.`,
+      );
       continue;
     }
     const problem = focusProblem(dimension, value);
@@ -219,6 +240,8 @@ export function groupFocus(
 
 export type DrillState = {
   range: TrafficRangeId;
+  /** Absent means the rollups, the default source. */
+  source?: TrafficSource;
   apiId: string | null;
   focus: DrillFocus | null;
   by: BreakdownDimension | null;
@@ -228,17 +251,40 @@ export type DrillState = {
 export function drillHref(state: DrillState): string {
   const params = new URLSearchParams();
   params.set('range', state.range);
+  if (state.source === 'prometheus') params.set('source', 'prometheus');
   if (state.apiId !== null) params.set('api', state.apiId);
   if (state.focus !== null) params.set(state.focus.dimension, state.focus.value);
   if (state.by !== null) params.set('by', state.by);
   return `/analytics?${params.toString()}`;
 }
 
-/** Every range's href with the rest of the drill-down kept. */
-export function rangeHrefs(state: Omit<DrillState, 'range'>): Record<TrafficRangeId, string> {
+/**
+ * The same view from `source`: the range kept where the source offers it
+ * (else the default), and a focus or breakdown that source cannot answer
+ * dropped rather than left for `parseDrill` to note.
+ */
+export function sourceHref(state: DrillState, source: TrafficSource): string {
+  const range = TRAFFIC_RANGES[state.range].sources.includes(source)
+    ? state.range
+    : DEFAULT_TRAFFIC_RANGE;
+  const focus =
+    source === 'prometheus' &&
+    state.focus !== null &&
+    !PROMETHEUS_DIMENSIONS.includes(state.focus.dimension)
+      ? null
+      : state.focus;
+  const allowed = allowedBreakdowns({ apiId: state.apiId, focus }, { keys: true, source });
+  const by = state.by !== null && allowed.includes(state.by) ? state.by : null;
+  return drillHref({ range, source, apiId: state.apiId, focus, by });
+}
+
+/** The href of every range the state's source offers, with the rest of the drill-down kept. */
+export function rangeHrefs(
+  state: Omit<DrillState, 'range'>,
+): Partial<Record<TrafficRangeId, string>> {
   return Object.fromEntries(
-    TRAFFIC_RANGE_IDS.map((range) => [range, drillHref({ ...state, range })]),
-  ) as Record<TrafficRangeId, string>;
+    rangesFor(state.source ?? 'rollups').map((range) => [range, drillHref({ ...state, range })]),
+  );
 }
 
 /** `total` minus `part`, counter by counter (never below 0). The maximum stays the total's: an upper bound. */

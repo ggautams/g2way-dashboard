@@ -47,9 +47,19 @@ export const TRAFFIC_COUNTERS = [
 export type TrafficCounter = (typeof TRAFFIC_COUNTERS)[number];
 
 /**
+ * Where a traffic view reads from: the dashboard's rollups (ADR-0012, the
+ * default) or, where the environment names one, a Prometheus that scrapes the
+ * gateway (ADR-0015). Chosen by the user, never switched automatically.
+ */
+export const TRAFFIC_SOURCES = ['rollups', 'prometheus'] as const;
+export type TrafficSource = (typeof TRAFFIC_SOURCES)[number];
+
+/**
  * A fixed time range. `sourceSeconds` is the rollup granularity read;
  * `stepSeconds` is one chart point, a whole multiple of it. Ranges read minute
  * rows only while they fit the default minute retention (3 days, ADR-0012 §7).
+ * `sources` lists the sources that offer the range: the long ranges are
+ * Prometheus's alone (ADR-0015 §2).
  */
 export type TrafficRange = {
   id: TrafficRangeId;
@@ -57,10 +67,14 @@ export type TrafficRange = {
   durationSeconds: number;
   sourceSeconds: RollupBucketSeconds;
   stepSeconds: number;
+  sources: readonly TrafficSource[];
 };
 
-export const TRAFFIC_RANGE_IDS = ['1h', '6h', '24h', '7d', '30d'] as const;
+export const TRAFFIC_RANGE_IDS = ['1h', '6h', '24h', '7d', '30d', '90d', '1y'] as const;
 export type TrafficRangeId = (typeof TRAFFIC_RANGE_IDS)[number];
+
+const BOTH: readonly TrafficSource[] = TRAFFIC_SOURCES;
+const PROMETHEUS_ONLY: readonly TrafficSource[] = ['prometheus'];
 
 export const TRAFFIC_RANGES: Record<TrafficRangeId, TrafficRange> = {
   '1h': {
@@ -69,6 +83,7 @@ export const TRAFFIC_RANGES: Record<TrafficRangeId, TrafficRange> = {
     durationSeconds: 3_600,
     sourceSeconds: 60,
     stepSeconds: 60,
+    sources: BOTH,
   },
   '6h': {
     id: '6h',
@@ -76,6 +91,7 @@ export const TRAFFIC_RANGES: Record<TrafficRangeId, TrafficRange> = {
     durationSeconds: 21_600,
     sourceSeconds: 60,
     stepSeconds: 300,
+    sources: BOTH,
   },
   '24h': {
     id: '24h',
@@ -83,6 +99,7 @@ export const TRAFFIC_RANGES: Record<TrafficRangeId, TrafficRange> = {
     durationSeconds: 86_400,
     sourceSeconds: 60,
     stepSeconds: 900,
+    sources: BOTH,
   },
   '7d': {
     id: '7d',
@@ -90,6 +107,7 @@ export const TRAFFIC_RANGES: Record<TrafficRangeId, TrafficRange> = {
     durationSeconds: 604_800,
     sourceSeconds: 3_600,
     stepSeconds: 3_600,
+    sources: BOTH,
   },
   '30d': {
     id: '30d',
@@ -97,15 +115,57 @@ export const TRAFFIC_RANGES: Record<TrafficRangeId, TrafficRange> = {
     durationSeconds: 2_592_000,
     sourceSeconds: 3_600,
     stepSeconds: 21_600,
+    sources: BOTH,
+  },
+  '90d': {
+    id: '90d',
+    label: 'Last 90 days',
+    durationSeconds: 7_776_000,
+    sourceSeconds: 3_600,
+    stepSeconds: 86_400,
+    sources: PROMETHEUS_ONLY,
+  },
+  '1y': {
+    id: '1y',
+    label: 'Last 365 days',
+    durationSeconds: 31_536_000,
+    sourceSeconds: 3_600,
+    stepSeconds: 86_400,
+    sources: PROMETHEUS_ONLY,
   },
 };
 
 export const DEFAULT_TRAFFIC_RANGE: TrafficRangeId = '1h';
 
-/** The range a `?range=` search param names, or the default for anything else. */
-export function parseTrafficRange(value: unknown): TrafficRange {
-  const id = TRAFFIC_RANGE_IDS.find((candidate) => candidate === value);
+/** The ranges `source` offers, in picker order. */
+export function rangesFor(source: TrafficSource): TrafficRangeId[] {
+  return TRAFFIC_RANGE_IDS.filter((id) => TRAFFIC_RANGES[id].sources.includes(source));
+}
+
+/**
+ * The range a `?range=` search param names, or the default for anything
+ * else, including a range `source` does not offer.
+ */
+export function parseTrafficRange(value: unknown, source: TrafficSource = 'rollups'): TrafficRange {
+  const id = rangesFor(source).find((candidate) => candidate === value);
   return TRAFFIC_RANGES[id ?? DEFAULT_TRAFFIC_RANGE];
+}
+
+/**
+ * The source a `?source=` search param asks for, given whether the
+ * environment has a Prometheus. Anything but `prometheus` is the rollups; a
+ * Prometheus request without one falls back with a note, never silently.
+ */
+export function parseTrafficSource(
+  value: unknown,
+  prometheusConfigured: boolean,
+): { source: TrafficSource; note: string | null } {
+  if (value !== 'prometheus') return { source: 'rollups', note: null };
+  if (prometheusConfigured) return { source: 'prometheus', note: null };
+  return {
+    source: 'rollups',
+    note: 'source=prometheus: this environment has no Prometheus configured; showing the rollups.',
+  };
 }
 
 /**
@@ -232,11 +292,19 @@ export type Traffic = {
   summary: TrafficSummary;
 };
 
+/**
+ * How far a source's buckets can be trusted beyond their counters.
+ * `exactMax: false` (Prometheus, ADR-0015 §3) means `latencyMaxMs` only bounds
+ * the interpolation and is not shown as a maximum.
+ */
+export type SummaryOptions = { exactMax?: boolean };
+
 /** The chart series and range totals for `range` at `now`, from the window's source buckets. */
 export function trafficSeries(
   range: TrafficRange,
   buckets: readonly TrafficBucket[],
   now: number,
+  options: SummaryOptions = {},
 ): Traffic {
   const window = trafficWindow(range, now);
   const steps = resample(buckets, window);
@@ -246,15 +314,24 @@ export function trafficSeries(
   }));
   const total = emptyBucket(window.from);
   for (const step of steps) addBucket(total, step);
-  const summary = summarise(total, elapsedSeconds(window.from, window.to - window.from, now));
+  const summary = summarise(
+    total,
+    elapsedSeconds(window.from, window.to - window.from, now),
+    options,
+  );
   return { range, from: window.from, to: window.to, points, summary };
 }
 
 /** Totals over `seconds` as the headline figures: rates, estimated percentiles, mean and max. */
-export function summarise(total: TrafficBucket, seconds: number): TrafficSummary {
+export function summarise(
+  total: TrafficBucket,
+  seconds: number,
+  options: SummaryOptions = {},
+): TrafficSummary {
+  const exactMax = options.exactMax ?? true;
   return {
     ...derive(total, seconds),
     latencyAvgMs: total.requests === 0 ? null : total.latencySumMs / total.requests,
-    latencyMaxMs: total.requests === 0 ? null : total.latencyMaxMs,
+    latencyMaxMs: total.requests === 0 || !exactMax ? null : total.latencyMaxMs,
   };
 }

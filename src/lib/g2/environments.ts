@@ -17,6 +17,9 @@ import 'server-only';
  * analytics ingest worker drains the record list (ADR-0012). That URL can carry
  * a password, so it is held like the secret: never serialised, never echoed.
  *
+ * An environment may name a **Prometheus** that scrapes its gateway, for
+ * long-range traffic charts (ADR-0015). Its URL and token are held the same way.
+ *
  * Configuration comes from the process environment — see `.env.example`.
  */
 
@@ -53,12 +56,24 @@ export class GatewayTarget {
      * worker only; `null` when not configured.
      */
     redisUrl: string | null = null,
+    /**
+     * A Prometheus that scrapes this gateway's `/metrics`, for long-range
+     * traffic charts (ADR-0015); `null` when not configured.
+     */
+    prometheus: PrometheusSource | null = null,
   ) {
     this.#secret = secret;
     this.#redisUrl = redisUrl;
+    this.#prometheus = prometheus;
   }
 
   readonly #redisUrl: string | null;
+  readonly #prometheus: PrometheusSource | null;
+
+  /** The Prometheus datasource, whose URL and credentials stay server-side. */
+  get prometheus(): PrometheusSource | null {
+    return this.#prometheus;
+  }
 
   /** The Redis URL, which may carry a password. Kept off the own properties, like the secret. */
   get redisUrl(): string | null {
@@ -70,7 +85,7 @@ export class GatewayTarget {
     return this.#secret;
   }
 
-  toJSON(): Omit<GatewayTarget, 'secret' | 'redisUrl' | 'toJSON'> {
+  toJSON(): Omit<GatewayTarget, 'secret' | 'redisUrl' | 'prometheus' | 'toJSON'> {
     return {
       id: this.id,
       label: this.label,
@@ -79,6 +94,154 @@ export class GatewayTarget {
       proxyUrl: this.proxyUrl,
     };
   }
+}
+
+/**
+ * A Prometheus HTTP API that scrapes one environment's gateway (ADR-0015).
+ * The URL may have held a password and the token is one, so both are kept
+ * in private fields: nothing here serialises except the selector.
+ */
+export class PrometheusSource {
+  readonly #baseUrl: string;
+  readonly #authorization: string | null;
+  readonly #secrets: readonly string[];
+
+  constructor(
+    /** The API base URL, without userinfo or a trailing slash. */
+    baseUrl: string,
+    /** The `Authorization` header value, or `null` to send none. */
+    authorization: string | null,
+    /**
+     * Extra label matchers (`G2_PROMETHEUS_SELECTOR`), such as
+     * `job="g2way-prod"`, without braces; `null` for none.
+     */
+    readonly selector: string | null,
+    /** Credential strings every message is scrubbed of before it is shown. */
+    secrets: readonly string[] = [],
+  ) {
+    this.#baseUrl = baseUrl;
+    this.#authorization = authorization;
+    this.#secrets = secrets.filter((secret) => secret !== '');
+  }
+
+  /** Where the Prometheus HTTP API lives. Server-side only. */
+  get baseUrl(): string {
+    return this.#baseUrl;
+  }
+
+  get authorization(): string | null {
+    return this.#authorization;
+  }
+
+  /** `message` with the URL and every credential replaced, so it is safe to show. */
+  scrub(message: string): string {
+    let out = message;
+    for (const secret of [this.#baseUrl, ...this.#secrets]) {
+      if (secret !== '') out = out.split(secret).join('[redacted]');
+    }
+    return out;
+  }
+
+  toJSON(): { selector: string | null } {
+    return { selector: this.selector };
+  }
+}
+
+/** One PromQL label matcher: `name op "value"`, the value a Go-style quoted string. */
+const MATCHER = /\s*[A-Za-z_][A-Za-z0-9_]*\s*(?:=~|!~|!=|=)\s*"(?:[^"\\\n]|\\.)*"\s*/y;
+
+/** `raw` as matchers to splice into a selector, or `null` when it is not a matcher list. */
+export function parseSelector(raw: string): string | null {
+  let body = raw.trim();
+  if (body.startsWith('{') && body.endsWith('}')) body = body.slice(1, -1).trim();
+  if (body === '') return null;
+  const matchers: string[] = [];
+  let at = 0;
+  while (at < body.length) {
+    MATCHER.lastIndex = at;
+    const match = MATCHER.exec(body);
+    if (match === null) return null;
+    matchers.push(match[0].trim());
+    at = MATCHER.lastIndex;
+    if (at < body.length) {
+      if (body[at] !== ',') return null;
+      at += 1;
+    }
+  }
+  return matchers.join(',');
+}
+
+/**
+ * The environment's Prometheus source from `<prefix>_PROMETHEUS_URL`, `_TOKEN`
+ * and `_SELECTOR`, or `null` when no URL is set. Problems name the variable,
+ * never its value: the URL may hold a password.
+ */
+function optionalPrometheus(env: Env, prefix: string, problems: string[]): PrometheusSource | null {
+  const urlVar = `${prefix}PROMETHEUS_URL`;
+  const tokenVar = `${prefix}PROMETHEUS_TOKEN`;
+  const selectorVar = `${prefix}PROMETHEUS_SELECTOR`;
+  const raw = read(env, urlVar);
+  const token = read(env, tokenVar);
+  const rawSelector = read(env, selectorVar);
+  if (raw === undefined) {
+    for (const [name, value] of [
+      [tokenVar, token],
+      [selectorVar, rawSelector],
+    ] as const) {
+      if (value !== undefined) problems.push(`${name} is set but ${urlVar} is not`);
+    }
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    problems.push(`${urlVar} is not a valid URL`);
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    problems.push(`${urlVar} must be an http:// or https:// URL`);
+    return null;
+  }
+  const secrets: string[] = [];
+  let authorization: string | null = null;
+  if (url.username !== '' || url.password !== '') {
+    let user: string;
+    let password: string;
+    try {
+      user = decodeURIComponent(url.username);
+      password = decodeURIComponent(url.password);
+    } catch {
+      problems.push(`${urlVar} has credentials that are not valid percent-encoding`);
+      return null;
+    }
+    secrets.push(url.password, password);
+    authorization = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`;
+    if (token !== undefined) {
+      problems.push(`${urlVar} carries credentials and ${tokenVar} is set; use one or the other`);
+      return null;
+    }
+    url.username = '';
+    url.password = '';
+  }
+  if (token !== undefined) {
+    secrets.push(token);
+    authorization = `Bearer ${token}`;
+  }
+  if (url.search !== '' || url.hash !== '') {
+    problems.push(`${urlVar} must not carry a query string or fragment`);
+    return null;
+  }
+  let selector: string | null = null;
+  if (rawSelector !== undefined) {
+    selector = parseSelector(rawSelector);
+    if (selector === null) {
+      problems.push(`${selectorVar} must be PromQL label matchers, such as job="g2way"`);
+      return null;
+    }
+  }
+  const baseUrl = url.toString().replace(/\/+$/, '');
+  return new PrometheusSource(baseUrl, authorization, selector, secrets);
 }
 
 /** What a client component may know about an environment. */
@@ -183,8 +346,18 @@ export function parseEnvironments(env: Env): Registry {
     if (secret === undefined) problems.push('G2_ADMIN_SECRET is not set');
     const proxyUrl = optionalUrl(env, 'G2_PROXY_URL', problems);
     const redisUrl = optionalRedisUrl(env, 'G2_REDIS_URL', problems);
+    const prometheus = optionalPrometheus(env, 'G2_', problems);
     environments.push(
-      new GatewayTarget(SINGLE_ID, SINGLE_LABEL, baseUrl, secret ?? '', orgId, proxyUrl, redisUrl),
+      new GatewayTarget(
+        SINGLE_ID,
+        SINGLE_LABEL,
+        baseUrl,
+        secret ?? '',
+        orgId,
+        proxyUrl,
+        redisUrl,
+        prometheus,
+      ),
     );
   } else {
     const ids = list
@@ -212,8 +385,9 @@ export function parseEnvironments(env: Env): Registry {
       const label = read(env, `${prefix}_LABEL`) ?? id;
       const proxyUrl = optionalUrl(env, `${prefix}_PROXY_URL`, problems);
       const redisUrl = optionalRedisUrl(env, `${prefix}_REDIS_URL`, problems);
+      const prometheus = optionalPrometheus(env, `${prefix}_`, problems);
       environments.push(
-        new GatewayTarget(id, label, baseUrl, secret ?? '', orgId, proxyUrl, redisUrl),
+        new GatewayTarget(id, label, baseUrl, secret ?? '', orgId, proxyUrl, redisUrl, prometheus),
       );
     }
   }

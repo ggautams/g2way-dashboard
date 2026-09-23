@@ -39,6 +39,7 @@ otherwise). Vendored copies of everything under `docs/` are in
 | Auth enforcement behaviour, status codes                                | `crates/g2-middleware/src/auth.rs`                                                                     |
 | `Storage` trait, Redis impl, Lua rate/quota scripts                     | `crates/g2-storage/src/lib.rs`, `redis.rs`                                                             |
 | Analytics sinks (incl. the Redis list the ingest worker drains)         | `crates/g2-telemetry/src/analytics.rs`                                                                 |
+| `/metrics` request-duration histogram: name, labels, buckets            | `crates/g2-middleware/src/metrics.rs` (rendered by `g2-telemetry/src/metrics.rs`)                      |
 | Gateway CLI flags and env vars                                          | `crates/g2way/src/main.rs`                                                                             |
 | k8s manifests, ports, smoke script                                      | `deploy/k8s/`                                                                                          |
 
@@ -108,6 +109,15 @@ These are load-bearing for the dashboard and easy to get wrong:
   Its shape is `crates/g2-core/src/analytics.rs`, hand-typed here in
   `src/lib/analytics/record.ts` (see `UPSTREAM.md`). Optional fields are omitted
   when absent; records have no id.
+- **`/metrics` carries one request-level metric**, the OTel histogram
+  `http.server.request.duration` (seconds), rendered as
+  `http_server_request_duration_seconds_{bucket,count,sum}` with labels
+  `http_route` (the API's _listen path_, not the request path), `g2_api_id`,
+  `g2_org_id`, `http_response_status_code` and `le` (5 ms … 10 s, then
+  `+Inf`). No method, key or request-path label. It records routed requests
+  only (no health checks, no 404s), per replica, reset on restart. The
+  Prometheus datasource (ADR-0015, `src/lib/analytics/promql.ts`) can offer
+  only what those labels carry.
 - **A definition with no `auth` block is protected, not open.** The default is
   `auth_token` on `Authorization`; keyless must be declared explicitly.
 - **Response conventions**: mutations return `{"id", "action"}` where action is

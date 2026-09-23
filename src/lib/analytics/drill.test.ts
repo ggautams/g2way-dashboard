@@ -9,6 +9,7 @@ import {
   groupFocus,
   parseDrill,
   rangeHrefs,
+  sourceHref,
   subtractBucket,
   totalOf,
   trafficHref,
@@ -300,5 +301,63 @@ describe('describeValue', () => {
   it('explains the folded paths', () => {
     expect(describeValue('path', '(other)', { shortHash }).label).toBe('Other paths');
     expect(describeValue('path', '/users', { shortHash })).toMatchObject({ mono: true });
+  });
+});
+
+describe('the Prometheus source (ADR-0015 §4)', () => {
+  const PROM = { keys: true, source: 'prometheus' } as const;
+
+  it('narrows by API and status only, noting the rest', () => {
+    expect(parseDrill({ api: 'users', status: '5xx' }, PROM)).toMatchObject({
+      apiId: 'users',
+      focus: { dimension: 'status', value: '5xx' },
+      notes: [],
+    });
+    const drill = parseDrill({ method: 'GET', path: '/x', key: 'k' }, PROM);
+    expect(drill.focus).toBeNull();
+    expect(drill.notes).toHaveLength(3);
+    expect(drill.notes[0]).toMatch(/^key: ignored, g2way's Prometheus metrics carry no key label/);
+  });
+
+  it('offers only the API and status breakdowns', () => {
+    expect(allowedBreakdowns({ apiId: null, focus: null }, PROM)).toEqual(['api', 'status']);
+    expect(allowedBreakdowns({ apiId: 'users', focus: null }, PROM)).toEqual(['status']);
+    expect(
+      allowedBreakdowns({ apiId: 'users', focus: { dimension: 'status', value: '5xx' } }, PROM),
+    ).toEqual(['status']);
+    expect(parseDrill({ by: 'path' }, PROM)).toMatchObject({
+      by: 'api',
+      notes: ['by=path: not a breakdown this selection can answer; ignored.'],
+    });
+  });
+
+  it('carries the source in every href, and offers its own ranges', () => {
+    const state = { source: 'prometheus', apiId: 'users', focus: null, by: 'status' } as const;
+    expect(drillHref({ ...state, range: '1y' })).toBe(
+      '/analytics?range=1y&source=prometheus&api=users&by=status',
+    );
+    expect(Object.keys(rangeHrefs(state))).toEqual(['1h', '6h', '24h', '7d', '30d', '90d', '1y']);
+    expect(Object.keys(rangeHrefs({ ...state, source: 'rollups' }))).not.toContain('1y');
+  });
+
+  it('switches source keeping what the other source can answer', () => {
+    const rollups = {
+      range: '7d',
+      apiId: 'users',
+      focus: { dimension: 'method', value: 'GET' },
+      by: null,
+    } as const;
+    expect(sourceHref(rollups, 'prometheus')).toBe(
+      '/analytics?range=7d&source=prometheus&api=users',
+    );
+    const prom = {
+      range: '1y',
+      source: 'prometheus',
+      apiId: null,
+      focus: { dimension: 'status', value: '5xx' },
+      by: 'status',
+    } as const;
+    // 1y is Prometheus's alone: back to the default range.
+    expect(sourceHref(prom, 'rollups')).toBe('/analytics?range=1h&status=5xx&by=status');
   });
 });

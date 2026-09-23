@@ -45,6 +45,16 @@ describe('timeTicks', () => {
     expect(formatTick(Date.UTC(2026, 8, 24, 6), span)).toBe('Sep 24 06:00');
   });
 
+  it('keeps the Prometheus-only ranges to a few date ticks', () => {
+    for (const days of [90, 365]) {
+      const span = days * 86_400_000;
+      const ticks = timeTicks(from, from + span);
+      expect(ticks.length).toBeGreaterThan(1);
+      expect(ticks.length).toBeLessThanOrEqual(7);
+      expect(formatTick(ticks[0], span)).toMatch(/^[A-Z][a-z]{2} \d{1,2}$/);
+    }
+  });
+
   it('formats a full timestamp in UTC', () => {
     expect(formatTimestamp(Date.UTC(2026, 8, 23, 4, 5))).toBe('Sep 23 04:05 UTC');
   });

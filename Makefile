@@ -2,7 +2,7 @@
 # must pass. Mirrors the g2way repo's Makefile deliberately — same muscle memory.
 
 .PHONY: check fmt fmt-check lint typecheck test build bundle-check dev start \
-        serve-scratch db-generate db-migrate test-pg ingest test-redis \
+        serve-scratch db-generate db-migrate test-pg ingest test-redis test-prometheus \
         sync-g2way check-g2way hooks clean
 
 ## Quality gate: run before every commit. Must stay green.
@@ -102,6 +102,22 @@ test-redis:
 	@TEST_REDIS_URL=redis://127.0.0.1:$(REDIS_TEST_PORT) \
 		npx vitest run src/lib/analytics; status=$$?; \
 		docker rm -f $(REDIS_TEST_CONTAINER) >/dev/null; exit $$status
+
+## Run the Prometheus datasource tests against a throwaway Prometheus in
+## Docker (ADR-0015), including the live query_range tests that plain
+## `make test` skips. It scrapes only itself, so the tests check the transport
+## and Prometheus's error envelope, not g2way's metric.
+PROM_TEST_CONTAINER := g2way-dashboard-test-prometheus
+PROM_TEST_PORT ?= 59090
+test-prometheus:
+	@docker rm -f $(PROM_TEST_CONTAINER) >/dev/null 2>&1 || true
+	docker run -d --rm --name $(PROM_TEST_CONTAINER) \
+		-p 127.0.0.1:$(PROM_TEST_PORT):9090 prom/prometheus:v3.5.0 >/dev/null
+	@until curl -sf http://127.0.0.1:$(PROM_TEST_PORT)/-/ready >/dev/null 2>&1; do sleep 1; done
+	@sleep 20  # two self-scrapes at the default 15 s interval, so `up` has samples
+	@TEST_PROMETHEUS_URL=http://127.0.0.1:$(PROM_TEST_PORT) \
+		npx vitest run src/lib/analytics/prometheus.test.ts; status=$$?; \
+		docker rm -f $(PROM_TEST_CONTAINER) >/dev/null; exit $$status
 
 ## ---- g2way linkage ------------------------------------------------------
 

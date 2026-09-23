@@ -57,6 +57,10 @@ const secrets = {
   // ingest worker starts, fails to connect and backs off, as it would live.
   G2_REDIS_URL: `redis://:${canary('redis')}@127.0.0.1:1`,
   G2_ENV_PROD_REDIS_URL: `redis://:${canary('redis-prod')}@127.0.0.1:1`,
+  // Prometheus URLs and tokens are credentials too (ADR-0015). Port 1 refuses,
+  // so the Prometheus view renders its error, which must not echo them either.
+  G2_PROMETHEUS_URL: `http://grafana:${canary('prom')}@127.0.0.1:1`,
+  G2_ENV_DEV_PROMETHEUS_TOKEN: canary('prom-token'),
 };
 
 // Auth.js: the canary secret, and trust the Host header as `next start` requires.
@@ -79,6 +83,8 @@ const singleForm = {
   G2_ADMIN_SECRET: secrets.G2_ADMIN_SECRET,
   G2_PROXY_URL: secrets.G2_PROXY_URL,
   G2_REDIS_URL: secrets.G2_REDIS_URL,
+  G2_PROMETHEUS_URL: secrets.G2_PROMETHEUS_URL,
+  G2_PROMETHEUS_SELECTOR: 'job="g2way"',
 };
 const namedForm = {
   G2_ENVIRONMENTS: 'dev,prod',
@@ -87,6 +93,8 @@ const namedForm = {
   G2_ENV_PROD_URL: DEAD_GATEWAY,
   G2_ENV_PROD_SECRET: secrets.G2_ENV_PROD_SECRET,
   G2_ENV_PROD_REDIS_URL: secrets.G2_ENV_PROD_REDIS_URL,
+  G2_ENV_DEV_PROMETHEUS_URL: 'http://127.0.0.1:1',
+  G2_ENV_DEV_PROMETHEUS_TOKEN: secrets.G2_ENV_DEV_PROMETHEUS_TOKEN,
 };
 
 /**
@@ -108,6 +116,7 @@ const PAGES = {
     '/apis/import',
     '/apis/view/any-api',
     '/analytics',
+    '/analytics?source=prometheus&range=1y',
     '/analytics/live',
   ],
   named: [
@@ -125,6 +134,7 @@ const PAGES = {
     '/apis/import',
     '/apis/view/any-api',
     '/analytics',
+    '/analytics?source=prometheus&status=5xx&by=status',
     '/analytics/live?status=5xx',
   ],
 };
@@ -136,6 +146,7 @@ const FORBIDDEN_STATIC = [
   'AUTH_SECRET',
   /G2_ENV_[A-Z0-9_]*_SECRET/,
   /G2_(ENV_[A-Z0-9_]*_)?REDIS_URL/,
+  /G2_(ENV_[A-Z0-9_]*_)?PROMETHEUS_(URL|TOKEN)/,
   /x-g2-authorization/i,
 ];
 
@@ -357,6 +368,12 @@ async function scanRendered(form, env, { firstRun }) {
           failures.push(`${signedIn}: ${kind} ${page} answered ${response.status}`);
         } else if (!body.includes(OWNER.email)) {
           failures.push(`${signedIn}: ${kind} ${page} did not render the signed-in shell`);
+        } else if (
+          page.includes('source=prometheus') &&
+          !body.includes('Prometheus is unreachable')
+        ) {
+          // Proves the Prometheus path really ran (and failed safely) against port 1.
+          failures.push(`${signedIn}: ${kind} ${page} did not render the Prometheus error`);
         }
       }
     }

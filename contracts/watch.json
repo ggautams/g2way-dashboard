@@ -102,6 +102,15 @@
       "onChange": "AnalyticsRecord field changes need a parser change in record.ts and, if the field should be charted, a rollup column and a migration. A change to RedisListSink (batching, cap, one list per org) may change ADR-0012's drain assumptions."
     },
     {
+      "id": "metrics",
+      "paths": ["crates/g2-middleware/src/metrics.rs", "crates/g2-telemetry/src/metrics.rs"],
+      "surfaces": [
+        "Prometheus datasource (M6, ADR-0015): G2_REQUEST_DURATION, G2_METRIC_LABELS and G2_DURATION_BOUNDS_SECONDS in src/lib/analytics/promql.ts mirror the http.server.request.duration histogram (name, unit, attributes, bucket bounds) as opentelemetry_prometheus renders it",
+        "Drill-down under source=prometheus: PROMETHEUS_DIMENSIONS in src/lib/analytics/drill.ts lists the dimensions the labels carry"
+      ],
+      "onChange": "A renamed or re-unit-ed instrument, a changed attribute set or new bucket bounds must be mirrored in promql.ts (and ADR-0015 \u00a73's re-bucketing notes). A new attribute such as http.request.method is a new Prometheus drill-down dimension (PROMETHEUS_DIMENSIONS)."
+    },
+    {
       "id": "storage-keys",
       "paths": ["crates/g2-storage/src", "crates/g2-core/src/config.rs"],
       "surfaces": [

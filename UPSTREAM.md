@@ -185,6 +185,19 @@ commit this project is waiting on.
       100 000) is also not configurable from the CLI or config file. Worth
       exposing in the same change. _Not a blocker._
 
+- [ ] **The request-duration histogram has no `http.request.method`.**
+      _Found 2026-09-23 (M6)._ `MetricsLayer` (`crates/g2-middleware/src/metrics.rs`)
+      attributes `http.server.request.duration` by `http.route`, `g2.api_id`,
+      `g2.org_id` and `http.response.status_code` only. The OTel HTTP semantic
+      conventions make `http.request.method` required on this instrument. It
+      is low-cardinality (a closed set, with `_OTHER` for the rest). Without
+      it, the dashboard's Prometheus datasource cannot narrow or break down by
+      method (ADR-0015 §4), so `/analytics?source=prometheus` offers only API
+      and status. Ask for the attribute, normalised to the known methods. Then
+      add `method` to `PROMETHEUS_DIMENSIONS` (`src/lib/analytics/drill.ts`)
+      and the selector and grouping in `promql.ts`. The `metrics` watch area
+      flags the change. _Not a blocker._
+
 - [ ] **`/g2/stats` is process-local** and resets on restart, so with more than
       one replica it is a per-pod sample rather than a cluster total. Cluster-wide
       numbers must come from the analytics feed or Prometheus. Shapes M6; not a

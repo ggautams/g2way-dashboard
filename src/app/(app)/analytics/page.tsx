@@ -19,6 +19,7 @@ import {
   groupFocus,
   parseDrill,
   rangeHrefs,
+  sourceHref,
   subtractBucket,
   totalOf,
   type BreakdownDimension,
@@ -26,20 +27,31 @@ import {
   type DrillState,
 } from '@/lib/analytics/drill';
 import { loadIngestHealth } from '@/lib/analytics/load-health';
+import { PrometheusError, loadPrometheusTraffic } from '@/lib/analytics/prometheus';
+import { breakdownTotals, type PromGrouping } from '@/lib/analytics/promql';
 import { liveHref } from '@/lib/analytics/tail';
 import {
+  TRAFFIC_RANGE_IDS,
   elapsedSeconds,
   parseTrafficRange,
+  parseTrafficSource,
   summarise,
   trafficSeries,
   trafficWindow,
+  type SummaryOptions,
   type TrafficBucket,
   type TrafficRange,
+  type TrafficSource,
 } from '@/lib/analytics/traffic';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
-import { queryBreakdown, queryBreakdownBuckets, queryTrafficBuckets } from '@/lib/db/analytics';
+import {
+  queryBreakdown,
+  queryBreakdownBuckets,
+  queryTrafficBuckets,
+  type BreakdownRow,
+} from '@/lib/db/analytics';
 import { listKeyMetadata } from '@/lib/db/key-metadata';
 import {
   RegistryConfigError,
@@ -47,6 +59,7 @@ import {
   getOrgId,
   resolveEnvironment,
   type GatewayTarget,
+  type PrometheusSource,
 } from '@/lib/g2/environments';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 import { shortHash } from '@/lib/keys/session';
@@ -63,14 +76,16 @@ export const metadata: Metadata = { title: 'Analytics' };
  * further, and `?by=` picks the breakdown below the charts. Key drill-down
  * needs `keys:read` as well; links to API and key pages appear only for roles
  * that may open them.
+ *
+ * Where the environment names a Prometheus, `?source=prometheus` reads the
+ * gateway's request-duration metric from it instead (ADR-0015): longer
+ * ranges, API and status drill-down only.
  */
 export default async function AnalyticsPage({ searchParams }: PageProps<'/analytics'>) {
   const user = await requirePermission('gateway:read');
   const params = await searchParams;
-  const range = parseTrafficRange(params.range);
   const roles = { keys: can(user.role, 'keys:read'), apis: can(user.role, 'apis:read') };
   const inspect = can(user.role, 'analytics:inspect');
-  const drill = parseDrill(params, { keys: roles.keys });
 
   let target: GatewayTarget;
   try {
@@ -92,27 +107,84 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
     throw error;
   }
 
-  const { health, configProblems, now } = await loadIngestHealth(target);
-  const { traffic, buckets } = await loadTraffic(target, range, drill, now);
+  const prometheus = target.prometheus;
+  const sourceParam = parseTrafficSource(first(params.source), prometheus !== null);
+  const source = sourceParam.source;
+  const range = parseTrafficRange(first(params.range), source);
+  const drill = parseDrill(params, { keys: roles.keys, source });
+  const notes = [
+    ...(sourceParam.note === null ? [] : [sourceParam.note]),
+    ...rangeNotes(first(params.range), range),
+    ...drill.notes,
+  ];
+
+  // Loaded under either source: it is one small read, and it fixes `now`.
+  const health = await loadIngestHealth(target);
+  const now = health.now;
+  const ingest = source === 'rollups' ? health : null;
+  const reader =
+    source === 'prometheus' && prometheus !== null
+      ? prometheusReader(prometheus, range, drill, now)
+      : rollupReader(target, range, drill, now);
   const state: DrillState = {
     range: range.id,
+    ...(source === 'prometheus' ? { source } : {}),
     apiId: drill.apiId,
     focus: drill.focus,
     by: drill.by,
   };
   const keyLabels = roles.keys ? await loadKeyLabels(target, drill) : new Map<string, string>();
-  const breakdown =
-    drill.by === null
+  const sourceHrefs =
+    prometheus === null
       ? null
-      : await loadBreakdown(target, range, drill, drill.by, buckets, now, { roles, state });
+      : {
+          rollups: sourceHref(state, 'rollups'),
+          prometheus: sourceHref(state, 'prometheus'),
+        };
+
+  let loaded;
+  try {
+    const buckets = await reader.total();
+    const traffic = trafficSeries(range, buckets, now, reader.options);
+    const breakdown =
+      drill.by === null
+        ? null
+        : await loadBreakdown(target, reader, range, drill, drill.by, buckets, now, {
+            roles,
+            state,
+          });
+    loaded = { traffic, breakdown, error: null };
+  } catch (error) {
+    if (!(error instanceof PrometheusError)) throw error;
+    loaded = { traffic: null, breakdown: null, error: error.message };
+  }
+  const { traffic, breakdown } = loaded;
 
   return (
-    <Page environment={target.label}>
-      <IngestHealthPanel health={health} configProblems={configProblems} now={now} />
+    <Page environment={target.label} source={source}>
+      {ingest === null ? (
+        <p className="text-sm text-muted">
+          Reading the gateway&apos;s <code className="font-mono">http.server.request.duration</code>{' '}
+          metric from this environment&apos;s Prometheus
+          {prometheus?.selector ? (
+            <>
+              {' '}
+              (series matching <code className="font-mono">{prometheus.selector}</code>)
+            </>
+          ) : null}
+          . Key, method and path are not in the metric&apos;s labels; the rollups have them.
+        </p>
+      ) : (
+        <IngestHealthPanel
+          health={ingest.health}
+          configProblems={ingest.configProblems}
+          now={now}
+        />
+      )}
       <DrillBar
         chips={drillChips(drill, state, roles, keyLabels)}
-        notes={drill.notes}
-        clearHref={drillHref({ range: range.id, apiId: null, focus: null, by: null })}
+        notes={notes}
+        clearHref={drillHref({ ...state, apiId: null, focus: null, by: null })}
       />
       {inspect && (
         <p className="text-sm">
@@ -124,13 +196,34 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
           </span>
         </p>
       )}
-      <TrafficPanel
-        traffic={traffic}
-        rangeHrefs={rangeHrefs(state)}
-        scoped={drill.apiId !== null || drill.focus !== null}
-      />
-      {breakdown === null ? (
-        drill.focus !== null && (
+      {traffic === null ? (
+        <section
+          role="alert"
+          className="rounded-lg border border-danger/40 bg-danger/5 p-4 text-sm"
+        >
+          <p className="mb-1 font-medium text-danger">Prometheus query failed</p>
+          <p className="font-mono text-xs">{loaded.error}</p>
+          {sourceHrefs !== null && (
+            <p className="mt-2">
+              <Link className="underline" href={sourceHrefs.rollups}>
+                Show the rollups instead
+              </Link>
+            </p>
+          )}
+        </section>
+      ) : (
+        <TrafficPanel
+          traffic={traffic}
+          rangeHrefs={rangeHrefs(state)}
+          scoped={drill.apiId !== null || drill.focus !== null}
+          source={source}
+          sourceHrefs={sourceHrefs}
+          warnings={reader.warnings}
+        />
+      )}
+      {traffic === null ? null : breakdown === null ? (
+        drill.focus !== null &&
+        source === 'rollups' && (
           <p className="text-sm text-muted">
             No breakdown: the rollups keep one dimension per row, always with its API, so traffic
             narrowed to an API and a {DIMENSION_LABELS[drill.focus.dimension].toLowerCase()} cannot
@@ -144,18 +237,87 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
   );
 }
 
-/** The range's chart series for the selection, and the source buckets they came from. */
-async function loadTraffic(target: GatewayTarget, range: TrafficRange, drill: Drill, now: number) {
+/** Where a view's buckets come from: the rollups or Prometheus, behind one shape. */
+type TrafficReader = {
+  /** The selection's source buckets over the range's window. */
+  total(): Promise<TrafficBucket[]>;
+  /** The busiest `limit` groups by `by`, and the buckets of at least the top three. */
+  breakdown(
+    by: BreakdownDimension,
+    limit: number,
+  ): Promise<{ rows: BreakdownRow[]; lines: Map<string, TrafficBucket[]> }>;
+  options: SummaryOptions;
+  /** Prometheus's query warnings, filled as queries run. */
+  warnings: string[];
+};
+
+function rollupReader(
+  target: GatewayTarget,
+  range: TrafficRange,
+  drill: Drill,
+  now: number,
+): TrafficReader {
   const { from, to } = trafficWindow(range, now);
-  const buckets = await queryTrafficBuckets(getDatabase(), getOrgId(), {
+  const base = {
     environment: target.id,
     bucketSeconds: range.sourceSeconds,
     from,
     to,
     ...(drill.apiId === null ? {} : { apiId: drill.apiId }),
-    ...focusSelection(drill.focus),
-  });
-  return { traffic: trafficSeries(range, buckets, now), buckets };
+  };
+  return {
+    options: {},
+    warnings: [],
+    total: () =>
+      queryTrafficBuckets(getDatabase(), getOrgId(), { ...base, ...focusSelection(drill.focus) }),
+    async breakdown(by, limit) {
+      const plan = breakdownPlan(drill, by);
+      const selection = { ...base, ...plan.selection };
+      const db = getDatabase();
+      const orgId = getOrgId();
+      const rows = await queryBreakdown(db, orgId, { ...selection, group: plan.group, limit });
+      const lines = await queryBreakdownBuckets(db, orgId, {
+        ...selection,
+        group: plan.group,
+        groups: rows.slice(0, 3).map((row) => row.group),
+      });
+      return { rows, lines };
+    },
+  };
+}
+
+/** The same shape from Prometheus (ADR-0015 §3): API and status only. */
+function prometheusReader(
+  source: PrometheusSource,
+  range: TrafficRange,
+  drill: Drill,
+  now: number,
+): TrafficReader {
+  const { from, to } = trafficWindow(range, now);
+  const warnings: string[] = [];
+  const load = async (grouping: PromGrouping) => {
+    const result = await loadPrometheusTraffic(source, {
+      orgId: getOrgId(),
+      apiId: drill.apiId,
+      status: drill.focus?.dimension === 'status' ? drill.focus.value : null,
+      from,
+      to,
+      stepSeconds: range.stepSeconds,
+      grouping,
+    });
+    for (const warning of result.warnings) if (!warnings.includes(warning)) warnings.push(warning);
+    return result.groups;
+  };
+  return {
+    options: { exactMax: false },
+    warnings,
+    total: async () => (await load(null)).get('') ?? [],
+    async breakdown(by, limit) {
+      const { group } = breakdownPlan(drill, by);
+      const groups = await load({ group, dimension: by === 'api' ? 'api' : 'status' });
+      return { rows: breakdownTotals(groups, limit), lines: groups };
+    },
+  };
 }
 
 /** The busiest groups shown in the table; the chart draws at most three lines (ADR-0013 §2). */
@@ -170,6 +332,7 @@ type Roles = { keys: boolean; apis: boolean };
  */
 async function loadBreakdown(
   target: GatewayTarget,
+  reader: TrafficReader,
   range: TrafficRange,
   drill: Drill,
   by: BreakdownDimension,
@@ -180,32 +343,13 @@ async function loadBreakdown(
   const { roles, state } = context;
   const window = trafficWindow(range, now);
   const plan = breakdownPlan(drill, by);
-  const selection = {
-    environment: target.id,
-    bucketSeconds: range.sourceSeconds,
-    from: window.from,
-    to: window.to,
-    ...(drill.apiId === null ? {} : { apiId: drill.apiId }),
-    ...plan.selection,
-  };
-  const db = getDatabase();
-  const orgId = getOrgId();
-  const rows = await queryBreakdown(db, orgId, {
-    ...selection,
-    group: plan.group,
-    limit: BREAKDOWN_ROWS,
-  });
+  const { rows, lines } = await reader.breakdown(by, BREAKDOWN_ROWS);
   const top = rows.slice(0, 3);
-  const lines = await queryBreakdownBuckets(db, orgId, {
-    ...selection,
-    group: plan.group,
-    groups: top.map((row) => row.group),
-  });
   const keyLabels =
     by === 'key'
       ? await listKeyMetadata(
-          db,
-          orgId,
+          getDatabase(),
+          getOrgId(),
           target.id,
           rows.map((row) => row.group),
         )
@@ -226,7 +370,7 @@ async function loadBreakdown(
       ...display(row.group, row.label),
       requests: row.requests,
       share: all.requests === 0 ? 0 : row.requests / all.requests,
-      summary: summarise(bucket, seconds),
+      summary: summarise(bucket, seconds, reader.options),
       drillHref: drillHref(
         by === 'api'
           ? { ...state, apiId: row.group, by: null }
@@ -247,7 +391,7 @@ async function loadBreakdown(
       mono: false,
       requests: rest.requests,
       share: all.requests === 0 ? 0 : rest.requests / all.requests,
-      summary: summarise(rest, seconds),
+      summary: summarise(rest, seconds, reader.options),
       drillHref: null,
       page: null,
     });
@@ -265,7 +409,7 @@ async function loadBreakdown(
   const starts = Array.from({ length: window.points }, (_, i) => window.from + i * window.stepMs);
   return {
     by,
-    tabs: allowedBreakdowns(drill, roles).map((dimension) => ({
+    tabs: allowedBreakdowns(drill, { ...roles, source: state.source }).map((dimension) => ({
       dimension,
       href: drillHref({ ...state, by: dimension }),
     })),
@@ -334,7 +478,15 @@ function drillChips(
   return chips;
 }
 
-function Page({ children, environment }: { children: React.ReactNode; environment?: string }) {
+function Page({
+  children,
+  environment,
+  source = 'rollups',
+}: {
+  children: React.ReactNode;
+  environment?: string;
+  source?: TrafficSource;
+}) {
   return (
     <div className="flex flex-col gap-6">
       <header>
@@ -347,10 +499,25 @@ function Page({ children, environment }: { children: React.ReactNode; environmen
               for <span className="font-medium text-foreground">{environment}</span>
             </>
           )}
-          , from the gateway&apos;s analytics records.
+          {source === 'prometheus'
+            ? ', from the gateway’s metrics in Prometheus.'
+            : ', from the gateway’s analytics records.'}
         </p>
       </header>
       {children}
     </div>
   );
+}
+
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+/** Why a `?range=` naming a real range was not used: the source does not offer it. */
+function rangeNotes(requested: string | undefined, range: TrafficRange): string[] {
+  if (requested === undefined || requested === range.id) return [];
+  if (!TRAFFIC_RANGE_IDS.some((id) => id === requested)) return [];
+  return [
+    `range=${requested}: offered only from Prometheus (ADR-0015); showing ${range.label.toLowerCase()}.`,
+  ];
 }

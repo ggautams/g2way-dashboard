@@ -5,6 +5,7 @@ import {
   TRAFFIC_RANGE_IDS,
   type Traffic,
   type TrafficRangeId,
+  type TrafficSource,
 } from '@/lib/analytics/traffic';
 import { TimeSeriesChart } from './time-series-chart';
 
@@ -12,17 +13,26 @@ import { TimeSeriesChart } from './time-series-chart';
  * The traffic section of `/analytics`: a range picker, headline tiles, the
  * RPS, error-rate and latency charts, and a table view of every point. A
  * Server Component; only `TimeSeriesChart` runs in the browser, and it gets
- * plain numbers. `rangeHrefs` keeps the drill-down when the range changes;
- * `scoped` says the traffic is narrowed by one.
+ * plain numbers. `rangeHrefs` keeps the drill-down when the range changes,
+ * and lists only the ranges the source offers; `scoped` says the traffic is
+ * narrowed by one. `sources` is the Rollups | Prometheus toggle, present only
+ * where the environment has a Prometheus (ADR-0015 §2).
  */
 export function TrafficPanel({
   traffic,
   rangeHrefs,
   scoped = false,
+  source = 'rollups',
+  sourceHrefs = null,
+  warnings = [],
 }: {
   traffic: Traffic;
-  rangeHrefs: Record<TrafficRangeId, string>;
+  rangeHrefs: Partial<Record<TrafficRangeId, string>>;
   scoped?: boolean;
+  source?: TrafficSource;
+  sourceHrefs?: Record<TrafficSource, string> | null;
+  /** Prometheus's own query warnings, shown as it gave them. */
+  warnings?: readonly string[];
 }) {
   const { range, points, summary, from, to } = traffic;
   const starts = points.map((p) => p.start);
@@ -37,8 +47,24 @@ export function TrafficPanel({
         <h2 id="traffic-heading" className="text-lg font-semibold">
           Traffic
         </h2>
-        <RangePicker current={range.id} hrefs={rangeHrefs} />
+        <div className="flex flex-wrap items-center gap-2">
+          {sourceHrefs !== null && <SourcePicker current={source} hrefs={sourceHrefs} />}
+          <RangePicker current={range.id} hrefs={rangeHrefs} />
+        </div>
       </div>
+
+      {warnings.length > 0 && (
+        <ul
+          aria-label="Prometheus warnings"
+          className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm"
+        >
+          {warnings.map((warning) => (
+            <li key={warning} className="font-mono text-xs">
+              Prometheus warning: {warning}
+            </li>
+          ))}
+        </ul>
+      )}
 
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
         <Tile label="Requests" value={summary.requests.toLocaleString('en')} />
@@ -80,20 +106,33 @@ export function TrafficPanel({
               { label: 'p99', slot: 3, values: points.map((p) => p.p99) },
             ]}
           />
-          <p className="text-xs text-muted">
-            Times are UTC; the last {step} is still filling, so its rate covers the time elapsed so
-            far. Percentiles are estimated from a latency histogram (buckets up to 10 s), not exact:
-            the dashboard keeps rollups, never raw requests. Latency is the gateway&apos;s total per
-            request; max {formatValue(summary.latencyMaxMs, 'ms')}, mean{' '}
-            {formatValue(summary.latencyAvgMs, 'ms')}.
-          </p>
+          {source === 'prometheus' ? (
+            <p className="text-xs text-muted">
+              Times are UTC; the last {step} is still filling. From Prometheus: counts are the
+              rounded <code className="font-mono">increase()</code> of g2way&apos;s request-duration
+              histogram, summed over replicas, and reach back only as far as Prometheus keeps data.
+              Percentiles are estimated from that histogram&apos;s buckets (5 ms to 10 s, so nothing
+              finer than 5 ms). Latency is the gateway&apos;s total per request; mean{' '}
+              {formatValue(summary.latencyAvgMs, 'ms')}. The metric keeps no maximum.
+            </p>
+          ) : (
+            <p className="text-xs text-muted">
+              Times are UTC; the last {step} is still filling, so its rate covers the time elapsed
+              so far. Percentiles are estimated from a latency histogram (buckets up to 10 s), not
+              exact: the dashboard keeps rollups, never raw requests. Latency is the gateway&apos;s
+              total per request; max {formatValue(summary.latencyMaxMs, 'ms')}, mean{' '}
+              {formatValue(summary.latencyAvgMs, 'ms')}.
+            </p>
+          )}
           <TrafficTable traffic={traffic} />
         </>
       ) : (
         <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
           No requests recorded in the {range.label.toLowerCase()}
-          {scoped ? ' for this selection' : ''}. The ingest panel above says whether records are
-          arriving.
+          {scoped ? ' for this selection' : ''}.{' '}
+          {source === 'prometheus'
+            ? 'Prometheus returned no samples: check that it scrapes the gateway’s /metrics, that G2_PROMETHEUS_SELECTOR matches, and that its retention covers the range.'
+            : 'The ingest panel above says whether records are arriving.'}
         </p>
       )}
     </section>
@@ -105,30 +144,72 @@ function RangePicker({
   hrefs,
 }: {
   current: string;
-  hrefs: Record<TrafficRangeId, string>;
+  hrefs: Partial<Record<TrafficRangeId, string>>;
 }) {
   return (
-    <nav aria-label="Time range">
+    <Segmented
+      label="Time range"
+      items={TRAFFIC_RANGE_IDS.flatMap((id) => {
+        const href = hrefs[id];
+        return href === undefined
+          ? []
+          : [{ id, text: id, title: TRAFFIC_RANGES[id].label, href, selected: id === current }];
+      })}
+    />
+  );
+}
+
+const SOURCE_LABELS: Record<TrafficSource, { text: string; title: string }> = {
+  rollups: { text: 'Rollups', title: 'The dashboard’s own rollups of the gateway’s analytics' },
+  prometheus: { text: 'Prometheus', title: 'The gateway’s request-duration metric in Prometheus' },
+};
+
+function SourcePicker({
+  current,
+  hrefs,
+}: {
+  current: TrafficSource;
+  hrefs: Record<TrafficSource, string>;
+}) {
+  return (
+    <Segmented
+      label="Data source"
+      items={(Object.keys(hrefs) as TrafficSource[]).map((id) => ({
+        id,
+        ...SOURCE_LABELS[id],
+        href: hrefs[id],
+        selected: id === current,
+      }))}
+    />
+  );
+}
+
+function Segmented({
+  label,
+  items,
+}: {
+  label: string;
+  items: { id: string; text: string; title: string; href: string; selected: boolean }[];
+}) {
+  return (
+    <nav aria-label={label}>
       <ul className="flex flex-wrap gap-1 rounded-md border border-border bg-surface p-0.5 text-sm">
-        {TRAFFIC_RANGE_IDS.map((id) => {
-          const selected = id === current;
-          return (
-            <li key={id}>
-              <Link
-                href={hrefs[id]}
-                aria-current={selected ? 'page' : undefined}
-                title={TRAFFIC_RANGES[id].label}
-                className={
-                  selected
-                    ? 'block rounded px-2.5 py-1 font-medium bg-subtle text-foreground'
-                    : 'block rounded px-2.5 py-1 text-muted hover:bg-subtle/60 hover:text-foreground'
-                }
-              >
-                {id}
-              </Link>
-            </li>
-          );
-        })}
+        {items.map((item) => (
+          <li key={item.id}>
+            <Link
+              href={item.href}
+              aria-current={item.selected ? 'page' : undefined}
+              title={item.title}
+              className={
+                item.selected
+                  ? 'block rounded px-2.5 py-1 font-medium bg-subtle text-foreground'
+                  : 'block rounded px-2.5 py-1 text-muted hover:bg-subtle/60 hover:text-foreground'
+              }
+            >
+              {item.text}
+            </Link>
+          </li>
+        ))}
       </ul>
     </nav>
   );
@@ -206,6 +287,7 @@ function TrafficTable({ traffic }: { traffic: Traffic }) {
 }
 
 export function formatStep(seconds: number): string {
+  if (seconds % 86_400 === 0) return seconds === 86_400 ? 'day' : `${seconds / 86_400} days`;
   if (seconds % 3600 === 0) return seconds === 3600 ? 'hour' : `${seconds / 3600} hours`;
   return seconds === 60 ? 'minute' : `${seconds / 60} minutes`;
 }
