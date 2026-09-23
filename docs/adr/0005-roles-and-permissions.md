@@ -16,25 +16,32 @@ dashboard is the only place a role can be enforced.
    `src/lib/auth/rbac.ts` is universal and dependency-free (the shell uses it to
    hide what a role cannot use). The matrix, pinned by `rbac.test.ts`:
 
-   | Permission       | viewer | editor | admin | owner | portal-dev |
-   | ---------------- | :----: | :----: | :---: | :---: | :--------: |
-   | `gateway:read`   |   ✓    |   ✓    |   ✓   |   ✓   |            |
-   | `apis:read`      |   ✓    |   ✓    |   ✓   |   ✓   |            |
-   | `policies:read`  |   ✓    |   ✓    |   ✓   |   ✓   |            |
-   | `keys:read`      |   ✓    |   ✓    |   ✓   |   ✓   |            |
-   | `apis:write`     |        |   ✓    |   ✓   |   ✓   |            |
-   | `apis:test`      |        |   ✓    |   ✓   |   ✓   |            |
-   | `policies:write` |        |   ✓    |   ✓   |   ✓   |            |
-   | `gateway:reload` |        |   ✓    |   ✓   |   ✓   |            |
-   | `graphql:sync`   |        |   ✓    |   ✓   |   ✓   |            |
-   | `keys:write`     |        |        |   ✓   |   ✓   |            |
-   | `users:manage`   |        |        |   ✓   |   ✓   |            |
-   | `audit:read`     |        |        |   ✓   |   ✓   |            |
+   | Permission          | viewer | editor | admin | owner | portal-dev |
+   | ------------------- | :----: | :----: | :---: | :---: | :--------: |
+   | `gateway:read`      |   ✓    |   ✓    |   ✓   |   ✓   |            |
+   | `apis:read`         |   ✓    |   ✓    |   ✓   |   ✓   |            |
+   | `policies:read`     |   ✓    |   ✓    |   ✓   |   ✓   |            |
+   | `keys:read`         |   ✓    |   ✓    |   ✓   |   ✓   |            |
+   | `apis:write`        |        |   ✓    |   ✓   |   ✓   |            |
+   | `apis:test`         |        |   ✓    |   ✓   |   ✓   |            |
+   | `policies:write`    |        |   ✓    |   ✓   |   ✓   |            |
+   | `gateway:reload`    |        |   ✓    |   ✓   |   ✓   |            |
+   | `graphql:sync`      |        |   ✓    |   ✓   |   ✓   |            |
+   | `analytics:inspect` |        |   ✓    |   ✓   |   ✓   |            |
+   | `keys:write`        |        |        |   ✓   |   ✓   |            |
+   | `users:manage`      |        |        |   ✓   |   ✓   |            |
+   | `audit:read`        |        |        |   ✓   |   ✓   |            |
 
    `apis:test` (_added 2026-09-23, ADR-0011_) sends test requests through the
    gateway's proxy listener from the request console. It is not a read: the
    request reaches a real upstream and consumes rate limits and quota, so it
    sits with the roles that may change the API.
+
+   `analytics:inspect` (_added 2026-09-23, ADR-0014_) opens the live request
+   inspector: individual recent requests with raw paths and keys, not
+   aggregates. Raw paths can carry personal data, so it sits with the roles
+   that operate the gateway, like `apis:test`. `/analytics` stays on
+   `gateway:read`.
 
    Key writes sit with admin, not editor: minting or revoking a credential is an
    access decision, not a configuration edit. `portal-dev` is a developer-portal

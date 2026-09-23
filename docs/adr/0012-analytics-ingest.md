@@ -162,6 +162,12 @@ reader runs, what it keeps, or what happens when it fails. Upstream facts
    inspector (a later M6 task) must be fed by this worker, from the batch in
    hand, and never by a second reader of the list, which would steal records
    from the rollups.
+   _Amended 2026-09-23 (ADR-0014):_ the inspector is fed this way. The
+   worker writes a projection of the newest records of each batch to
+   `analytics_tail`, in the batch's transaction. The table is capped per
+   environment (`G2_ANALYTICS_TAIL_ROWS`) and to 15 minutes. So raw requests
+   are kept briefly, but client IP and User-Agent still are not: they are
+   dropped before the write.
 
 7. **Retention is pruned by the worker.** Once an hour it deletes minute rows
    older than `G2_ANALYTICS_MINUTE_RETENTION_DAYS` (default 3) and hour rows
