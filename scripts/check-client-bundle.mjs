@@ -53,6 +53,10 @@ const secrets = {
   // Not a secret, but server-only all the same (ADR-0011): the request
   // console's proxy URL must never reach the browser either.
   G2_PROXY_URL: `http://${canary('proxy')}.invalid:8080`,
+  // Redis URLs carry passwords (ADR-0012). Port 1 refuses, so the server's
+  // ingest worker starts, fails to connect and backs off, as it would live.
+  G2_REDIS_URL: `redis://:${canary('redis')}@127.0.0.1:1`,
+  G2_ENV_PROD_REDIS_URL: `redis://:${canary('redis-prod')}@127.0.0.1:1`,
 };
 
 // Auth.js: the canary secret, and trust the Host header as `next start` requires.
@@ -74,6 +78,7 @@ const singleForm = {
   G2_ADMIN_URL: DEAD_GATEWAY,
   G2_ADMIN_SECRET: secrets.G2_ADMIN_SECRET,
   G2_PROXY_URL: secrets.G2_PROXY_URL,
+  G2_REDIS_URL: secrets.G2_REDIS_URL,
 };
 const namedForm = {
   G2_ENVIRONMENTS: 'dev,prod',
@@ -81,6 +86,7 @@ const namedForm = {
   G2_ENV_DEV_SECRET: secrets.G2_ENV_DEV_SECRET,
   G2_ENV_PROD_URL: DEAD_GATEWAY,
   G2_ENV_PROD_SECRET: secrets.G2_ENV_PROD_SECRET,
+  G2_ENV_PROD_REDIS_URL: secrets.G2_ENV_PROD_REDIS_URL,
 };
 
 /**
@@ -125,6 +131,7 @@ const FORBIDDEN_STATIC = [
   'G2_ADMIN_SECRET',
   'AUTH_SECRET',
   /G2_ENV_[A-Z0-9_]*_SECRET/,
+  /G2_(ENV_[A-Z0-9_]*_)?REDIS_URL/,
   /x-g2-authorization/i,
 ];
 

@@ -13,6 +13,10 @@ import 'server-only';
  * real traffic to real upstreams, so it stays off until someone points it at
  * the right listener.
  *
+ * An environment may name the **Redis** its gateway stores into, from which the
+ * analytics ingest worker drains the record list (ADR-0012). That URL can carry
+ * a password, so it is held like the secret: never serialised, never echoed.
+ *
  * Configuration comes from the process environment — see `.env.example`.
  */
 
@@ -44,8 +48,21 @@ export class GatewayTarget {
      * slash; `null` when not configured. Only the request console sends to it.
      */
     readonly proxyUrl: string | null = null,
+    /**
+     * The gateway's Redis (g2way's `G2_REDIS_URL`), for the analytics ingest
+     * worker only; `null` when not configured.
+     */
+    redisUrl: string | null = null,
   ) {
     this.#secret = secret;
+    this.#redisUrl = redisUrl;
+  }
+
+  readonly #redisUrl: string | null;
+
+  /** The Redis URL, which may carry a password. Kept off the own properties, like the secret. */
+  get redisUrl(): string | null {
+    return this.#redisUrl;
   }
 
   /** The admin secret. Kept off the instance's own properties so it never serialises. */
@@ -53,7 +70,7 @@ export class GatewayTarget {
     return this.#secret;
   }
 
-  toJSON(): Omit<GatewayTarget, 'secret' | 'toJSON'> {
+  toJSON(): Omit<GatewayTarget, 'secret' | 'redisUrl' | 'toJSON'> {
     return {
       id: this.id,
       label: this.label,
@@ -120,6 +137,27 @@ function optionalUrl(env: Env, variable: string, problems: string[]): string | n
   return raw === undefined ? null : normaliseUrl(raw, variable, problems);
 }
 
+/**
+ * An optional Redis URL variable: `null` when unset, `''` (with a problem) when
+ * invalid. The problem names the variable only: the value may hold a password.
+ */
+function optionalRedisUrl(env: Env, variable: string, problems: string[]): string | null {
+  const raw = read(env, variable);
+  if (raw === undefined) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    problems.push(`${variable} is not a valid URL`);
+    return '';
+  }
+  if (url.protocol !== 'redis:' && url.protocol !== 'rediss:') {
+    problems.push(`${variable} must be a redis:// or rediss:// URL`);
+    return '';
+  }
+  return raw;
+}
+
 /** Prefix of the per-environment variables for `id`: `staging-eu` → `G2_ENV_STAGING_EU`. */
 export function envPrefix(id: string): string {
   return `G2_ENV_${id.toUpperCase().replace(/-/g, '_')}`;
@@ -144,8 +182,9 @@ export function parseEnvironments(env: Env): Registry {
     const secret = read(env, 'G2_ADMIN_SECRET');
     if (secret === undefined) problems.push('G2_ADMIN_SECRET is not set');
     const proxyUrl = optionalUrl(env, 'G2_PROXY_URL', problems);
+    const redisUrl = optionalRedisUrl(env, 'G2_REDIS_URL', problems);
     environments.push(
-      new GatewayTarget(SINGLE_ID, SINGLE_LABEL, baseUrl, secret ?? '', orgId, proxyUrl),
+      new GatewayTarget(SINGLE_ID, SINGLE_LABEL, baseUrl, secret ?? '', orgId, proxyUrl, redisUrl),
     );
   } else {
     const ids = list
@@ -172,7 +211,10 @@ export function parseEnvironments(env: Env): Registry {
       const baseUrl = rawUrl === undefined ? '' : normaliseUrl(rawUrl, `${prefix}_URL`, problems);
       const label = read(env, `${prefix}_LABEL`) ?? id;
       const proxyUrl = optionalUrl(env, `${prefix}_PROXY_URL`, problems);
-      environments.push(new GatewayTarget(id, label, baseUrl, secret ?? '', orgId, proxyUrl));
+      const redisUrl = optionalRedisUrl(env, `${prefix}_REDIS_URL`, problems);
+      environments.push(
+        new GatewayTarget(id, label, baseUrl, secret ?? '', orgId, proxyUrl, redisUrl),
+      );
     }
   }
 

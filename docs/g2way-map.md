@@ -93,7 +93,21 @@ These are load-bearing for the dashboard and easy to get wrong:
   `GET`/`DELETE` take `?org_id=`. The BFF sets both (ADR-0007).
 - **Redis key schema is `g2:{org_id}:{kind}:{id}`.** Analytics records accumulate at
   `g2:{org}:analytics:records` — but only when the gateway runs with
-  `--analytics-sink redis_list`.
+  `--analytics-sink redis` (`G2_ANALYTICS_SINK=redis`; the sink values are
+  `stdout`, `redis` and `otlp_logs`, in `crates/g2-core/src/config.rs`).
+- **The analytics record list is a capped FIFO with one consumer.** Each
+  gateway replica `RPUSH`es JSON records (batches of up to 512, at least once a
+  second) and, in the same atomic pipeline, `LTRIM`s the list to its newest
+  100 000 (`RedisListSink::DEFAULT_MAX_RECORDS`, not configurable), so without a
+  drainer the _oldest_ fall off. A pump drains with `LPOP key count` (Redis
+  6.2+; `Storage::list_drain`), which removes what it returns. The dashboard's
+  ingest worker is that pump (ADR-0012): anything else reading the list would
+  steal records from the rollups. A sink failure drops the batch upstream, so
+  the feed is best effort from the start.
+- **`AnalyticsRecord` is not in the OpenAPI document** (no endpoint returns it).
+  Its shape is `crates/g2-core/src/analytics.rs`, hand-typed here in
+  `src/lib/analytics/record.ts` (see `UPSTREAM.md`). Optional fields are omitted
+  when absent; records have no id.
 - **A definition with no `auth` block is protected, not open.** The default is
   `auth_token` on `Authorization`; keyless must be declared explicitly.
 - **Response conventions**: mutations return `{"id", "action"}` where action is

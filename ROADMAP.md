@@ -194,15 +194,27 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 ## M6 — Analytics
 
-- [ ] Ingest worker draining `g2:{org}:analytics:records` into rollup tables
+- [x] Ingest worker draining `g2:{org}:analytics:records` into rollup tables
+      (ADR-0012: `analytics_rollups`, `analytics_ingest_state`)
+- [ ] Ingest health on the traffic pages, from `analytics_ingest_state`: tell
+      "no `G2_REDIS_URL`", "gateway not sending" (no `last_drained_at`),
+      "worker failing" (`last_error_at` after `last_drained_at`) and "backlog
+      near g2way's 100 000 cap" (the gateway is dropping records) apart
 - [ ] Traffic dashboards: RPS, error rate, latency p50/p95/p99
 - [ ] Drill-down by API, key, status class, method, path
-- [ ] Live request inspector (tail of recent requests)
+- [ ] Path templating for the `path` dimension (`/users/42` → `/users/{id}`, from
+      the definition's rules or a heuristic) before rollup, so the per-batch cap
+      of 200 paths per API and bucket (`(other)` past it) rarely bites
+- [ ] Live request inspector (tail of recent requests). Feed it from the ingest
+      worker's batch in hand, never from a second reader of the Redis list,
+      which would steal records from the rollups (ADR-0012 §6)
 - [ ] Optional Prometheus datasource for long-range aggregates
 - [ ] Saved views, date-range picker, CSV export
 
-**Requires from g2way**: the gateway must run with `--analytics-sink redis_list`;
-the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
+**Requires from g2way**: the gateway must run with `--analytics-sink redis`
+(`G2_ANALYTICS_SINK=redis`; not `redis_list`, which g2way rejects), and the
+dashboard needs that Redis as `G2_REDIS_URL`. The k8s manifests currently use
+`otlp_logs`. See `UPSTREAM.md` and ADR-0012.
 
 ## M7 — Resilience & upstreams
 
@@ -270,7 +282,11 @@ the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
       layer only), ideally as a bundle-check variant
 - [ ] Dockerfile + `deploy/k8s/` applying as a plain directory alongside g2way's.
       The image must ship `drizzle/` (migrations resolve from `cwd`, ADR-0003) and
-      set `AUTH_URL` or `AUTH_TRUST_HOST` (an empty `AUTH_URL=` breaks Auth.js)
+      set `AUTH_URL` or `AUTH_TRUST_HOST` (an empty `AUTH_URL=` breaks Auth.js).
+      It needs `G2_REDIS_URL` for the analytics ingest worker, which runs in the
+      server by default. Optionally a separate `npm run ingest` Deployment,
+      with `G2_ANALYTICS_INGEST=off` on the web tier (ADR-0012 §2), and
+      `scripts/` plus `tsx` shipped for it
 - [ ] Audit log retention/pruning and export (CSV/JSON). Pruning must keep every
       `api.*`/`policy.*` row newer than its environment's last reload: pending
       changes are derived from them (ADR-0006)
@@ -1548,3 +1564,36 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     per-version `graphql`, and M9 per-version `plugins`. The M2 browser-pass
     box now lists every M5 surface; none of M5 has run in a browser.
   - Next: M6 (analytics).
+- feat(M6): **analytics ingest worker** (ADR-0012).
+  - Source: `LPOP g2:{org}:analytics:records <n>` + `LLEN` on each
+    environment's `G2_REDIS_URL` / `G2_ENV_<ID>_REDIS_URL` (new, optional,
+    server-only, held like the secret in `GatewayTarget`). The gateway flag
+    is `--analytics-sink redis`, **not** `redis_list` as the roadmap and
+    UPSTREAM.md said (fixed there and in the map).
+  - Runs in the server from `instrumentation.ts` (`G2_ANALYTICS_INGEST=off`
+    to disable) or standalone via `make ingest`. Several drainers are safe
+    (atomic LPOP, additive upserts). At-most-once: a DB failure retries the
+    batch in hand; a hard crash loses at most `G2_ANALYTICS_BATCH` (1000).
+  - Tables: `analytics_rollups` has one row per (org, environment,
+    `bucket_seconds` 60|3600, `bucket_start`, `api_id`, `dimension`,
+    `value`). `dimension` is `api` (value `''` = API total), `key`
+    (key_hash, `''` = keyless, `label` = alias), `method`, `status` (exact
+    code) or `path` (`(other)` past 200 per batch). Measures are additive:
+    `requests`, `status_1xx..5xx`, latency sum/max, upstream count/sum,
+    bytes, and a histogram `latency_le_{1,2,5,…,10000}` + `latency_over`
+    (bounds in `LATENCY_BOUNDS_MS`, `schema/shared.ts`). To chart, pick one
+    `bucket_seconds` and one `dimension` and SUM over a `bucket_start`
+    range. Health is in `analytics_ingest_state`. Retention: minutes 3 days,
+    hours 90, pruned hourly by the worker.
+  - Surprises: `AnalyticsRecord` is not in the OpenAPI, so it is hand-typed
+    in `src/lib/analytics/record.ts` with a runtime parser and a tripwire
+    test. Records have no id, which rules out at-least-once. Both are filed
+    in UPSTREAM.md.
+  - Tests: plain `npm run test` needs no Redis. `make test-redis` (Docker)
+    runs the live queue and end-to-end tests, and they passed. A manual
+    `npm run ingest` against Docker Redis drained, rejected and rolled up as
+    expected.
+  - Follow-ups: new M6 boxes for ingest health, path templating and feeding
+    the live inspector from the worker; M11's deploy box now covers the
+    worker.
+  - Next: M6 ingest health / traffic dashboards.

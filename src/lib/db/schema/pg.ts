@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -12,8 +13,10 @@ import {
   AUDIT_OUTCOMES,
   CONFIG_KINDS,
   ROLES,
+  ROLLUP_DIMENSIONS,
   THROTTLE_KINDS,
   VERSION_ACTIONS,
+  latencyColumns,
   monotonicUuid,
   type JsonValue,
 } from './shared';
@@ -127,4 +130,76 @@ export const keyMetadata = pgTable(
     updatedAt: timestamp('updated_at').$onUpdateFn(() => new Date()),
   },
   (t) => [uniqueIndex('key_metadata_key_unique').on(t.orgId, t.environment, t.keyHash)],
+);
+
+/** A traffic counter: `bigint` read as a JS number (SQLite's `integer` is 64-bit too). */
+const counter = (name: string) => bigint(name, { mode: 'number' }).notNull().default(0);
+const optionalTimestamp = (name: string) => pgTimestamp(name, { withTimezone: true, mode: 'date' });
+
+export const analyticsRollups = pgTable(
+  'analytics_rollups',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    bucketSeconds: integer('bucket_seconds').notNull(),
+    bucketStart: pgTimestamp('bucket_start', { withTimezone: true, mode: 'date' }).notNull(),
+    apiId: text('api_id').notNull(),
+    dimension: text('dimension', { enum: ROLLUP_DIMENSIONS }).notNull(),
+    value: text('value').notNull(),
+    label: text('label'),
+    requests: counter('requests'),
+    status1xx: counter('status_1xx'),
+    status2xx: counter('status_2xx'),
+    status3xx: counter('status_3xx'),
+    status4xx: counter('status_4xx'),
+    status5xx: counter('status_5xx'),
+    latencySumMs: counter('latency_sum_ms'),
+    latencyMaxMs: counter('latency_max_ms'),
+    upstreamRequests: counter('upstream_requests'),
+    upstreamLatencySumMs: counter('upstream_latency_sum_ms'),
+    requestBytes: counter('request_bytes'),
+    responseBytes: counter('response_bytes'),
+    ...latencyColumns(counter),
+    latencyOver: counter('latency_over'),
+  },
+  (t) => [
+    uniqueIndex('analytics_rollups_bucket_unique').on(
+      t.orgId,
+      t.environment,
+      t.bucketSeconds,
+      t.bucketStart,
+      t.apiId,
+      t.dimension,
+      t.value,
+    ),
+    index('analytics_rollups_drill_idx').on(
+      t.orgId,
+      t.environment,
+      t.bucketSeconds,
+      t.dimension,
+      t.apiId,
+      t.bucketStart,
+    ),
+  ],
+);
+
+export const analyticsIngestState = pgTable(
+  'analytics_ingest_state',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    recordsIngested: counter('records_ingested'),
+    recordsRejected: counter('records_rejected'),
+    batches: counter('batches'),
+    backlog: counter('backlog'),
+    lastDrainedAt: optionalTimestamp('last_drained_at'),
+    lastRecordAt: optionalTimestamp('last_record_at'),
+    lastRejection: text('last_rejection'),
+    lastError: text('last_error'),
+    lastErrorAt: optionalTimestamp('last_error_at'),
+    updatedAt: timestamp('updated_at').$onUpdateFn(() => new Date()),
+  },
+  (t) => [uniqueIndex('analytics_ingest_state_env_unique').on(t.orgId, t.environment)],
 );

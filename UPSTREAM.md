@@ -24,11 +24,13 @@ commit this project is waiting on.
       or the dashboard deployed as a sidecar. _Blocks M1 and M11 in minikube;
       local development via `kubectl port-forward` is unaffected._
 
-- [ ] **k8s analytics sink is `otlp_logs`, not `redis_list`.** The M6 ingest
-      worker drains `g2:{org}:analytics:records`, which is only populated when the
-      gateway runs with `--analytics-sink redis_list`. The deployed manifests
-      choose the OTLP sink. Needs a gateway able to feed both, or a deployment
-      choice. _Blocks M6 in-cluster._
+- [ ] **k8s analytics sink is `otlp_logs`, not `redis`.** The M6 ingest
+      worker (ADR-0012) drains `g2:{org}:analytics:records`, which is only
+      populated when the gateway runs with `--analytics-sink redis`
+      (`G2_ANALYTICS_SINK=redis`; this entry used to say `redis_list`, which
+      g2way's parser rejects). The deployed manifests choose the OTLP sink.
+      Needs a gateway able to feed both, or a deployment choice. _Blocks M6
+      in-cluster; local development with `G2_ANALYTICS_SINK=redis` works._
 
 - [ ] **No cache-flush endpoint.** Already noted as open in g2way's own progress
       log, which observes that the storage prefix scan is ready for it. Until it
@@ -159,6 +161,29 @@ commit this project is waiting on.
       `src/lib/apis/trace.test.ts` fails as soon as the spec gains a
       trace/debug path or an `x-g2-trace`/`x-g2-debug` header. _Blocks one
       M5 box._
+
+- [ ] **`AnalyticsRecord` is not in the OpenAPI document.** _Found 2026-09-23
+      (M6)._ No admin endpoint returns it, so utoipa never emits its schema,
+      and `contracts/g2way.d.ts` has no type for the records the ingest worker
+      drains. The dashboard hand-types it in `src/lib/analytics/record.ts`,
+      mirroring `crates/g2-core/src/analytics.rs`, and checks every element at
+      runtime (`parseAnalyticsRecord`). Ask for `#[derive(ToSchema)]` on
+      `AnalyticsRecord` and its listing under `components(schemas(...))` in
+      `crates/g2-admin/src/openapi.rs`, even without a path. Then alias the
+      type to the generated one and keep only the parser;
+      `src/lib/analytics/record.test.ts` fails once the schema appears. _Not a
+      blocker._
+
+- [ ] **Analytics records carry no id.** _Found 2026-09-23 (M6)._ Draining is
+      therefore at-most-once (ADR-0012 §3): a record replayed after a crash
+      could not be told from a genuine repeat, so the worker cannot use an
+      in-flight list and replay. A dashboard crash between the pop and the
+      commit loses at most one batch. Ask for a `record_id` (a UUIDv7 minted
+      at the analytics layer, `#[serde(default)]` so old records still parse).
+      With it, at-least-once delivery plus dedupe becomes possible (a new
+      ADR). The per-org list cap (`RedisListSink::DEFAULT_MAX_RECORDS`,
+      100 000) is also not configurable from the CLI or config file. Worth
+      exposing in the same change. _Not a blocker._
 
 - [ ] **`/g2/stats` is process-local** and resets on restart, so with more than
       one replica it is a per-pod sample rather than a cluster total. Cluster-wide

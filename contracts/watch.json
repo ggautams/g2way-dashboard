@@ -93,14 +93,21 @@
         "crates/g2-telemetry/src/analytics.rs",
         "crates/g2-middleware/src/stats.rs"
       ],
-      "surfaces": ["Ingest worker and charts (M6)"],
-      "onChange": "AnalyticsRecord field changes need an ingest migration and rollup updates."
+      "surfaces": [
+        "Ingest worker (M6, ADR-0012): parseAnalyticsRecord and the hand-written AnalyticsRecord in src/lib/analytics/record.ts mirror crates/g2-core/src/analytics.rs",
+        "Rollups (M6): rollupBatch in src/lib/analytics/rollup.ts and the analytics_rollups columns in src/lib/db/schema/",
+        "Charts (M6)"
+      ],
+      "onChange": "AnalyticsRecord field changes need a parser change in record.ts and, if the field should be charted, a rollup column and a migration. A change to RedisListSink (batching, cap, one list per org) may change ADR-0012's drain assumptions."
     },
     {
       "id": "storage-keys",
       "paths": ["crates/g2-storage/src", "crates/g2-core/src/config.rs"],
-      "surfaces": ["Ingest worker, direct Redis access (M6)"],
-      "onChange": "Redis key schema or analytics sink names changed \u2014 the ingest worker reads these keys directly."
+      "surfaces": [
+        "Ingest worker, direct Redis access (M6, ADR-0012): analyticsRecordsKey in src/lib/analytics/record.ts, and LPOP-with-count/LLEN in src/lib/analytics/queue.ts mirror list_drain in crates/g2-storage/src/redis.rs",
+        "Sink name in .env.example, ROADMAP.md and docs/g2way-map.md (AnalyticsSinkKind in config.rs)"
+      ],
+      "onChange": "Redis key schema, list_append/list_drain semantics or analytics sink names changed \u2014 the ingest worker reads these keys directly."
     },
     {
       "id": "deploy",

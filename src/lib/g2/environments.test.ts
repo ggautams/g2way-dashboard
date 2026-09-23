@@ -198,3 +198,49 @@ describe('proxy URL (ADR-0011)', () => {
     expect(JSON.stringify(listEnvironments(registry))).not.toContain('proxy.internal');
   });
 });
+
+describe('Redis URL (ADR-0012)', () => {
+  const REDIS = 'redis://:hunter2-redis@redis.internal:6379/0';
+
+  it('is optional: an environment without one has no analytics feed', () => {
+    const target = resolveEnvironment(undefined, parseEnvironments({ G2_ADMIN_SECRET: SECRET }));
+    expect(target.redisUrl).toBeNull();
+  });
+
+  it('reads G2_REDIS_URL in the single form and G2_ENV_<ID>_REDIS_URL per environment', () => {
+    const single = parseEnvironments({ G2_ADMIN_SECRET: SECRET, G2_REDIS_URL: REDIS });
+    expect(resolveEnvironment(undefined, single).redisUrl).toBe(REDIS);
+
+    const multi = parseEnvironments({
+      G2_ENVIRONMENTS: 'dev,prod',
+      G2_ENV_DEV_URL: 'http://localhost:9696',
+      G2_ENV_DEV_SECRET: 'dev',
+      G2_ENV_DEV_REDIS_URL: 'rediss://cache.example.com:6380',
+      G2_ENV_PROD_URL: 'https://admin.example.com',
+      G2_ENV_PROD_SECRET: 'prod',
+      // The single-form variable is ignored in the multi form.
+      G2_REDIS_URL: REDIS,
+    });
+    expect(resolveEnvironment('dev', multi).redisUrl).toBe('rediss://cache.example.com:6380');
+    expect(resolveEnvironment('prod', multi).redisUrl).toBeNull();
+  });
+
+  it('rejects a non-redis URL by name, without echoing the value', () => {
+    const problems = problemsOf({
+      G2_ADMIN_SECRET: SECRET,
+      G2_REDIS_URL: 'http://:hunter2-redis@redis.internal',
+    });
+    expect(problems).toEqual(['G2_REDIS_URL must be a redis:// or rediss:// URL']);
+    expect(problemsOf({ G2_ADMIN_SECRET: SECRET, G2_REDIS_URL: 'hunter2 nope' })).toEqual([
+      'G2_REDIS_URL is not a valid URL',
+    ]);
+  });
+
+  it('never serialises, and never reaches the browser', () => {
+    const registry = parseEnvironments({ G2_ADMIN_SECRET: SECRET, G2_REDIS_URL: REDIS });
+    const target = resolveEnvironment(undefined, registry);
+    expect(JSON.stringify(target)).not.toContain('hunter2');
+    expect(Object.values(target).join(' ')).not.toContain('hunter2');
+    expect(JSON.stringify(listEnvironments(registry))).not.toContain('hunter2');
+  });
+});

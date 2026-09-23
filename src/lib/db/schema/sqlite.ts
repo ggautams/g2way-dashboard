@@ -3,8 +3,10 @@ import {
   AUDIT_OUTCOMES,
   CONFIG_KINDS,
   ROLES,
+  ROLLUP_DIMENSIONS,
   THROTTLE_KINDS,
   VERSION_ACTIONS,
+  latencyColumns,
   monotonicUuid,
   type JsonValue,
 } from './shared';
@@ -160,4 +162,92 @@ export const keyMetadata = sqliteTable(
     updatedAt: timestamp('updated_at').$onUpdateFn(() => new Date()),
   },
   (t) => [uniqueIndex('key_metadata_key_unique').on(t.orgId, t.environment, t.keyHash)],
+);
+
+/** A traffic counter: SQLite's `integer` is 64-bit. Postgres uses `bigint`. */
+const counter = (name: string) => integer(name).notNull().default(0);
+
+/**
+ * Traffic rollups drained from the gateway's analytics record list (ADR-0012).
+ * One row per bucket (`bucket_seconds` 60 or 3600, `bucket_start` its first
+ * instant), API and one `dimension`/`value` pair: `api`/`''` is the API's
+ * total, the others break it down by key hash (`''` for none), method, exact
+ * status code or path (`(other)` past the per-batch path cap). Every measure is
+ * additive, so wider questions are sums; `latency_max_ms` merges with max.
+ * `label` is the latest `key_alias` seen, on `key` rows only. The latency
+ * histogram's `latency_le_<ms>` columns are non-cumulative bucket counts
+ * (bounds in `LATENCY_BOUNDS_MS`), `latency_over` the rest.
+ */
+export const analyticsRollups = sqliteTable(
+  'analytics_rollups',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    bucketSeconds: integer('bucket_seconds').notNull(),
+    bucketStart: integer('bucket_start', { mode: 'timestamp_ms' }).notNull(),
+    apiId: text('api_id').notNull(),
+    dimension: text('dimension', { enum: ROLLUP_DIMENSIONS }).notNull(),
+    value: text('value').notNull(),
+    label: text('label'),
+    requests: counter('requests'),
+    status1xx: counter('status_1xx'),
+    status2xx: counter('status_2xx'),
+    status3xx: counter('status_3xx'),
+    status4xx: counter('status_4xx'),
+    status5xx: counter('status_5xx'),
+    latencySumMs: counter('latency_sum_ms'),
+    latencyMaxMs: counter('latency_max_ms'),
+    upstreamRequests: counter('upstream_requests'),
+    upstreamLatencySumMs: counter('upstream_latency_sum_ms'),
+    requestBytes: counter('request_bytes'),
+    responseBytes: counter('response_bytes'),
+    ...latencyColumns(counter),
+    latencyOver: counter('latency_over'),
+  },
+  (t) => [
+    uniqueIndex('analytics_rollups_bucket_unique').on(
+      t.orgId,
+      t.environment,
+      t.bucketSeconds,
+      t.bucketStart,
+      t.apiId,
+      t.dimension,
+      t.value,
+    ),
+    index('analytics_rollups_drill_idx').on(
+      t.orgId,
+      t.environment,
+      t.bucketSeconds,
+      t.dimension,
+      t.apiId,
+      t.bucketStart,
+    ),
+  ],
+);
+
+/**
+ * The ingest worker's health, one row per org and environment (ADR-0012 §8):
+ * lifetime counters, when records last arrived, the list's length after the
+ * last drain (`backlog`) and the last failure. `last_rejection` is why the
+ * last malformed record was dropped, never the record itself.
+ */
+export const analyticsIngestState = sqliteTable(
+  'analytics_ingest_state',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    recordsIngested: counter('records_ingested'),
+    recordsRejected: counter('records_rejected'),
+    batches: counter('batches'),
+    backlog: counter('backlog'),
+    lastDrainedAt: integer('last_drained_at', { mode: 'timestamp_ms' }),
+    lastRecordAt: integer('last_record_at', { mode: 'timestamp_ms' }),
+    lastRejection: text('last_rejection'),
+    lastError: text('last_error'),
+    lastErrorAt: integer('last_error_at', { mode: 'timestamp_ms' }),
+    updatedAt: timestamp('updated_at').$onUpdateFn(() => new Date()),
+  },
+  (t) => [uniqueIndex('analytics_ingest_state_env_unique').on(t.orgId, t.environment)],
 );

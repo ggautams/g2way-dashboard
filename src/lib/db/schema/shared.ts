@@ -75,3 +75,45 @@ export function monotonicUuid(now: number = Date.now()): string {
 }
 
 const monotonic = { lastMs: 0, counter: 0 };
+
+/**
+ * What one `analytics_rollups` row breaks traffic down by (ADR-0012 §5): the
+ * API's total (`api`, value `''`), or one key hash, method, exact status code
+ * or path within that API.
+ */
+export const ROLLUP_DIMENSIONS = ['api', 'key', 'method', 'status', 'path'] as const;
+export type RollupDimension = (typeof ROLLUP_DIMENSIONS)[number];
+
+/** Rollup bucket widths, in seconds: minute and hour (ADR-0012 §5). */
+export const ROLLUP_BUCKET_SECONDS = [60, 3600] as const;
+export type RollupBucketSeconds = (typeof ROLLUP_BUCKET_SECONDS)[number];
+
+/**
+ * Upper bounds (ms, inclusive) of the latency histogram's buckets. Each bound
+ * is a column, `latency_le_<bound>`, holding a non-cumulative count; latencies
+ * above the last bound count in `latency_over`. Changing this list is a
+ * migration.
+ */
+export const LATENCY_BOUNDS_MS = [
+  1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000,
+] as const;
+export type LatencyBound = (typeof LATENCY_BOUNDS_MS)[number];
+
+/** The row property holding the count for one histogram bucket. */
+export type LatencyBucketKey = `latencyLe${LatencyBound}`;
+
+/** The row property of `bound`'s histogram bucket. */
+export function latencyBucketKey(bound: LatencyBound): LatencyBucketKey {
+  return `latencyLe${bound}`;
+}
+
+/**
+ * The histogram columns, built once per dialect from `LATENCY_BOUNDS_MS` so the
+ * two schemas cannot list different buckets. `column` makes one non-null
+ * counter column from its SQL name.
+ */
+export function latencyColumns<C>(column: (name: string) => C): Record<LatencyBucketKey, C> {
+  return Object.fromEntries(
+    LATENCY_BOUNDS_MS.map((bound) => [latencyBucketKey(bound), column(`latency_le_${bound}`)]),
+  ) as Record<LatencyBucketKey, C>;
+}

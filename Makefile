@@ -2,8 +2,8 @@
 # must pass. Mirrors the g2way repo's Makefile deliberately — same muscle memory.
 
 .PHONY: check fmt fmt-check lint typecheck test build bundle-check dev start \
-        serve-scratch db-generate db-migrate test-pg sync-g2way check-g2way \
-        hooks clean
+        serve-scratch db-generate db-migrate test-pg ingest test-redis \
+        sync-g2way check-g2way hooks clean
 
 ## Quality gate: run before every commit. Must stay green.
 ## `bundle-check` runs the production build itself, so `build` is not repeated.
@@ -80,6 +80,28 @@ test-pg:
 	@TEST_POSTGRES_URL=postgres://postgres:test@127.0.0.1:$(PG_TEST_PORT)/postgres \
 		npx vitest run src/lib/db; status=$$?; \
 		docker rm -f $(PG_TEST_CONTAINER) >/dev/null; exit $$status
+
+## ---- analytics ingest (ADR-0012) ----------------------------------------
+
+## Run the analytics ingest worker as its own process: drains every
+## environment's G2_REDIS_URL / G2_ENV_<ID>_REDIS_URL record list into the
+## dashboard database. The server runs the same loop unless
+## G2_ANALYTICS_INGEST=off; the gateway needs --analytics-sink redis.
+ingest:
+	npm run ingest
+
+## Run the analytics tests against a throwaway Redis in Docker, including the
+## live queue and end-to-end ingest tests that plain `make test` skips.
+REDIS_TEST_CONTAINER := g2way-dashboard-test-redis
+REDIS_TEST_PORT ?= 56379
+test-redis:
+	@docker rm -f $(REDIS_TEST_CONTAINER) >/dev/null 2>&1 || true
+	docker run -d --rm --name $(REDIS_TEST_CONTAINER) \
+		-p 127.0.0.1:$(REDIS_TEST_PORT):6379 redis:7-alpine >/dev/null
+	@until docker exec $(REDIS_TEST_CONTAINER) redis-cli ping >/dev/null 2>&1; do sleep 1; done
+	@TEST_REDIS_URL=redis://127.0.0.1:$(REDIS_TEST_PORT) \
+		npx vitest run src/lib/analytics; status=$$?; \
+		docker rm -f $(REDIS_TEST_CONTAINER) >/dev/null; exit $$status
 
 ## ---- g2way linkage ------------------------------------------------------
 

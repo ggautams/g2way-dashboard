@@ -16,6 +16,7 @@
     "sync:g2way": "node scripts/sync-g2way.mjs",
     "db:generate": "node scripts/db-generate.mjs",
     "db:migrate": "tsx --conditions=react-server scripts/db-migrate.mts",
+    "ingest": "tsx --conditions=react-server scripts/ingest.mts",
     "ui:add": "node scripts/shadcn-tokens.mjs --add"
   },
   "dependencies": {
@@ -35,6 +36,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "^10.1.0",
+    "redis": "^6.2.1",
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
     "yaml": "^2.9.1"

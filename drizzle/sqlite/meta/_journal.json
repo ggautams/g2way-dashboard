@@ -43,6 +43,13 @@
       "when": 1790200612665,
       "tag": "0005_key_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790214890722,
+      "tag": "0006_analytics_rollups",
+      "breakpoints": true
     }
   ]
 }
