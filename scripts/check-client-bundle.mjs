@@ -117,6 +117,7 @@ const PAGES = {
     '/apis/view/any-api',
     '/analytics',
     '/analytics?source=prometheus&range=1y',
+    '/analytics?from=2026-01-01T00:00&to=2026-01-02T00:00&by=path',
     '/analytics/live',
   ],
   named: [
@@ -135,6 +136,7 @@ const PAGES = {
     '/apis/view/any-api',
     '/analytics',
     '/analytics?source=prometheus&status=5xx&by=status',
+    '/analytics?source=prometheus&from=2026-01-01T00:00&to=2026-01-01T06:00',
     '/analytics/live?status=5xx',
   ],
 };

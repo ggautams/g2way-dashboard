@@ -7,7 +7,17 @@ import {
 } from '@/components/analytics/breakdown-panel';
 import { DrillBar, type DrillChip } from '@/components/analytics/drill-bar';
 import { IngestHealthPanel } from '@/components/analytics/ingest-health';
-import { TrafficPanel, formatStep } from '@/components/analytics/traffic-panel';
+import {
+  TrafficPanel,
+  formatStep,
+  type CustomRangeForm,
+} from '@/components/analytics/traffic-panel';
+import {
+  customRange,
+  formatUtcMinute,
+  readCustomWindow,
+  type CustomWindow,
+} from '@/lib/analytics/custom-range';
 import {
   DIMENSION_LABELS,
   allowedBreakdowns,
@@ -19,6 +29,7 @@ import {
   groupFocus,
   parseDrill,
   rangeHrefs,
+  selectionParams,
   sourceHref,
   subtractBucket,
   totalOf,
@@ -26,7 +37,7 @@ import {
   type Drill,
   type DrillState,
 } from '@/lib/analytics/drill';
-import { loadIngestHealth } from '@/lib/analytics/load-health';
+import { loadIngestHealth, rollupRetention } from '@/lib/analytics/load-health';
 import { PrometheusError, loadPrometheusTraffic } from '@/lib/analytics/prometheus';
 import { breakdownTotals, type PromGrouping } from '@/lib/analytics/promql';
 import { liveHref } from '@/lib/analytics/tail';
@@ -35,6 +46,8 @@ import {
   elapsedSeconds,
   parseTrafficRange,
   parseTrafficSource,
+  rangePhrase,
+  rangeWithin,
   summarise,
   trafficSeries,
   trafficWindow,
@@ -80,6 +93,10 @@ export const metadata: Metadata = { title: 'Analytics' };
  * Where the environment names a Prometheus, `?source=prometheus` reads the
  * gateway's request-duration metric from it instead (ADR-0015): longer
  * ranges, API and status drill-down only.
+ *
+ * `?from=` and `?to=` (UTC, `YYYY-MM-DDTHH:mm`) replace `?range=` with a
+ * custom window (ADR-0013 §7); a window that cannot be shown says why, and
+ * the fixed range is shown instead.
  */
 export default async function AnalyticsPage({ searchParams }: PageProps<'/analytics'>) {
   const user = await requirePermission('gateway:read');
@@ -110,24 +127,29 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
   const prometheus = target.prometheus;
   const sourceParam = parseTrafficSource(first(params.source), prometheus !== null);
   const source = sourceParam.source;
-  const range = parseTrafficRange(first(params.range), source);
   const drill = parseDrill(params, { keys: roles.keys, source });
-  const notes = [
-    ...(sourceParam.note === null ? [] : [sourceParam.note]),
-    ...rangeNotes(first(params.range), range),
-    ...drill.notes,
-  ];
 
   // Loaded under either source: it is one small read, and it fixes `now`.
   const health = await loadIngestHealth(target);
   const now = health.now;
+
+  const fixed = parseTrafficRange(first(params.range), source);
+  const custom = resolveCustom(first(params.from), first(params.to), source, now);
+  const range = custom.range ?? fixed;
+  const notes = [
+    ...(sourceParam.note === null ? [] : [sourceParam.note]),
+    ...(custom.range === null ? rangeNotes(first(params.range), fixed) : []),
+    ...custom.notes,
+    ...(custom.problem === null ? [] : [`${custom.problem} Showing ${rangePhrase(fixed)}.`]),
+    ...drill.notes,
+  ];
   const ingest = source === 'rollups' ? health : null;
   const reader =
     source === 'prometheus' && prometheus !== null
       ? prometheusReader(prometheus, range, drill, now)
       : rollupReader(target, range, drill, now);
   const state: DrillState = {
-    range: range.id,
+    range: custom.window ?? fixed.id,
     ...(source === 'prometheus' ? { source } : {}),
     apiId: drill.apiId,
     focus: drill.focus,
@@ -219,6 +241,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
           source={source}
           sourceHrefs={sourceHrefs}
           warnings={reader.warnings}
+          custom={customForm(custom, state, trafficWindow(range, now), now)}
         />
       )}
       {traffic === null ? null : breakdown === null ? (
@@ -416,7 +439,8 @@ async function loadBreakdown(
     groupHeading: groupHeading(by, plan.group),
     items,
     chart: { starts, stepMs: window.stepMs, from: window.from, to: window.to, series },
-    rangeLabel: range.label,
+    rangePhrase: rangePhrase(range),
+    rangeWithin: rangeWithin(range),
     step: formatStep(range.stepSeconds),
   };
 }
@@ -520,4 +544,53 @@ function rangeNotes(requested: string | undefined, range: TrafficRange): string[
   return [
     `range=${requested}: offered only from Prometheus (ADR-0015); showing ${range.label.toLowerCase()}.`,
   ];
+}
+
+/** A custom window, if the URL asks for one: the range it reads as, or why it cannot. */
+function resolveCustom(
+  from: string | undefined,
+  to: string | undefined,
+  source: TrafficSource,
+  now: number,
+): {
+  window: CustomWindow | null;
+  range: TrafficRange | null;
+  notes: string[];
+  problem: string | null;
+  input: { from: string; to: string } | null;
+} {
+  const none = { window: null, range: null, notes: [], problem: null, input: null };
+  const read = readCustomWindow(from, to);
+  if (read === null) return none;
+  const input = { from: from ?? '', to: to ?? '' };
+  if ('problem' in read) return { ...none, problem: read.problem, input };
+  const resolved = customRange(read.window, { source, now, ...rollupRetention() });
+  if ('problem' in resolved) return { ...none, problem: resolved.problem, input };
+  return {
+    window: read.window,
+    range: resolved.range,
+    notes: resolved.notes,
+    problem: null,
+    input,
+  };
+}
+
+/**
+ * The custom-range form: the window in view (or the refused input, to fix),
+ * and the rest of the selection as hidden fields.
+ */
+function customForm(
+  custom: ReturnType<typeof resolveCustom>,
+  state: DrillState,
+  window: { from: number; to: number },
+  now: number,
+): CustomRangeForm {
+  const shown =
+    custom.window !== null
+      ? { from: formatUtcMinute(custom.window.from), to: formatUtcMinute(custom.window.to) }
+      : (custom.input ?? {
+          from: formatUtcMinute(window.from),
+          to: formatUtcMinute(Math.min(window.to, now)),
+        });
+  return { ...shown, hidden: selectionParams(state), problem: custom.problem };
 }

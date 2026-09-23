@@ -37,7 +37,9 @@ export type BreakdownView = {
     to: number;
     series: BreakdownSeries[];
   } | null;
-  rangeLabel: string;
+  /** The range after a comma (`last hour`), and after "nothing" (`in the last hour`); see `rangePhrase`. */
+  rangePhrase: string;
+  rangeWithin: string;
   step: string;
 };
 
@@ -85,7 +87,7 @@ export function BreakdownPanel({ view }: { view: BreakdownView }) {
 
       {items.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-          Nothing to break down in the {view.rangeLabel.toLowerCase()}.
+          Nothing to break down {view.rangeWithin}.
         </p>
       ) : (
         <>
@@ -94,7 +96,7 @@ export function BreakdownPanel({ view }: { view: BreakdownView }) {
               title={`Requests per second by ${label.toLowerCase()} (per ${view.step})`}
               description={`Average requests per second in each ${view.step} for ${chart.series
                 .map((s) => s.label)
-                .join(', ')}; ${view.rangeLabel.toLowerCase()}.`}
+                .join(', ')}; ${view.rangePhrase}.`}
               unit="rps"
               starts={chart.starts}
               stepMs={chart.stepMs}
@@ -115,7 +117,7 @@ function BreakdownTable({ view }: { view: BreakdownView }) {
     <div className="overflow-x-auto rounded-lg border border-border bg-surface">
       <table className="w-full text-sm tabular-nums">
         <caption className="sr-only">
-          {`The busiest values by ${view.groupHeading.toLowerCase()}, ${view.rangeLabel.toLowerCase()}, most requests first. Percentiles are estimated.`}
+          {`The busiest values by ${view.groupHeading.toLowerCase()}, ${view.rangePhrase}, most requests first. Percentiles are estimated.`}
         </caption>
         <thead className="text-xs text-muted">
           <tr className="border-b border-border">

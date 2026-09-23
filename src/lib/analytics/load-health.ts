@@ -3,7 +3,7 @@ import 'server-only';
 import { getDatabase } from '@/lib/db';
 import { getIngestState } from '@/lib/db/analytics';
 import { getOrgId, type GatewayTarget } from '@/lib/g2/environments';
-import { IngestConfigError, parseIngestConfig } from './config';
+import { INGEST_DEFAULTS, IngestConfigError, parseIngestConfig } from './config';
 import { ingestHealth } from './health';
 
 /**
@@ -27,4 +27,20 @@ export async function loadIngestHealth(target: GatewayTarget) {
   const now = Date.now();
   const health = ingestHealth({ redisConfigured, workerInServer, state, now });
   return { health, configProblems, now };
+}
+
+/**
+ * How long this server's settings keep minute and hour rollups (ADR-0012 §7),
+ * for the custom range's choice of rows. Invalid settings fall back to the
+ * defaults here: the health panel already reports them.
+ */
+export function rollupRetention(): { minuteRetentionDays: number; hourRetentionDays: number } {
+  try {
+    const { minuteRetentionDays, hourRetentionDays } = parseIngestConfig(process.env);
+    return { minuteRetentionDays, hourRetentionDays };
+  } catch (error) {
+    if (!(error instanceof IngestConfigError)) throw error;
+    const { minuteRetentionDays, hourRetentionDays } = INGEST_DEFAULTS;
+    return { minuteRetentionDays, hourRetentionDays };
+  }
 }

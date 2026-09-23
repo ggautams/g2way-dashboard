@@ -62,21 +62,30 @@ export type TrafficSource = (typeof TRAFFIC_SOURCES)[number];
  * Prometheus's alone (ADR-0015 §2).
  */
 export type TrafficRange = {
-  id: TrafficRangeId;
+  /** A fixed range's id, or `custom` for an absolute window (`custom-range.ts`). */
+  id: TrafficRangeId | 'custom';
   label: string;
   durationSeconds: number;
   sourceSeconds: RollupBucketSeconds;
   stepSeconds: number;
   sources: readonly TrafficSource[];
+  /**
+   * A custom range's end (Unix ms, step-aligned, exclusive). Absent on the
+   * fixed ranges, whose window ends with the step holding `now`.
+   */
+  end?: number;
 };
 
 export const TRAFFIC_RANGE_IDS = ['1h', '6h', '24h', '7d', '30d', '90d', '1y'] as const;
 export type TrafficRangeId = (typeof TRAFFIC_RANGE_IDS)[number];
 
+/** One of the fixed ranges: relative to now, named by its id. */
+export type FixedTrafficRange = TrafficRange & { id: TrafficRangeId; end?: undefined };
+
 const BOTH: readonly TrafficSource[] = TRAFFIC_SOURCES;
 const PROMETHEUS_ONLY: readonly TrafficSource[] = ['prometheus'];
 
-export const TRAFFIC_RANGES: Record<TrafficRangeId, TrafficRange> = {
+export const TRAFFIC_RANGES: Record<TrafficRangeId, FixedTrafficRange> = {
   '1h': {
     id: '1h',
     label: 'Last hour',
@@ -146,7 +155,10 @@ export function rangesFor(source: TrafficSource): TrafficRangeId[] {
  * The range a `?range=` search param names, or the default for anything
  * else, including a range `source` does not offer.
  */
-export function parseTrafficRange(value: unknown, source: TrafficSource = 'rollups'): TrafficRange {
+export function parseTrafficRange(
+  value: unknown,
+  source: TrafficSource = 'rollups',
+): FixedTrafficRange {
   const id = rangesFor(source).find((candidate) => candidate === value);
   return TRAFFIC_RANGES[id ?? DEFAULT_TRAFFIC_RANGE];
 }
@@ -170,12 +182,13 @@ export function parseTrafficSource(
 
 /**
  * The window a range covers at `now`: `points` whole steps, epoch-aligned,
- * the last of which contains `now` (so it is still filling). Query rows with
+ * the last of which contains `now` (so it is still filling). A custom range
+ * ends at its own `end` instead, which may be long past. Query rows with
  * `from <= bucket_start < to`.
  */
 export function trafficWindow(range: TrafficRange, now: number) {
   const stepMs = range.stepSeconds * 1000;
-  const to = Math.floor(now / stepMs) * stepMs + stepMs;
+  const to = range.end ?? Math.floor(now / stepMs) * stepMs + stepMs;
   const points = Math.round(range.durationSeconds / range.stepSeconds);
   return { from: to - points * stepMs, to, stepMs, points };
 }
@@ -288,6 +301,8 @@ export type Traffic = {
   range: TrafficRange;
   from: number;
   to: number;
+  /** Whether the last step holds `now`, so it is still filling. False for a custom range in the past. */
+  filling: boolean;
   points: TrafficPoint[];
   summary: TrafficSummary;
 };
@@ -319,7 +334,20 @@ export function trafficSeries(
     elapsedSeconds(window.from, window.to - window.from, now),
     options,
   );
-  return { range, from: window.from, to: window.to, points, summary };
+  return { range, from: window.from, to: window.to, filling: window.to > now, points, summary };
+}
+
+/**
+ * The range in running text, after a comma: `last hour`, or
+ * `from 2026-09-01 00:00 to 2026-09-02 00:00 UTC` for a custom range.
+ */
+export function rangePhrase(range: TrafficRange): string {
+  return range.id === 'custom' ? range.label : range.label.toLowerCase();
+}
+
+/** The range after "recorded": `in the last hour`, or a custom range's `from … to … UTC`. */
+export function rangeWithin(range: TrafficRange): string {
+  return range.id === 'custom' ? range.label : `in the ${range.label.toLowerCase()}`;
 }
 
 /** Totals over `seconds` as the headline figures: rates, estimated percentiles, mean and max. */

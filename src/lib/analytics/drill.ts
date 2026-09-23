@@ -1,4 +1,5 @@
 import type { RollupDimension } from '@/lib/db/schema/shared';
+import { formatUtcMinute, type CustomWindow } from './custom-range';
 import {
   DEFAULT_TRAFFIC_RANGE,
   TRAFFIC_COUNTERS,
@@ -239,7 +240,8 @@ export function groupFocus(
 }
 
 export type DrillState = {
-  range: TrafficRangeId;
+  /** A fixed range, relative to now, or a custom window, absolute (`?from=&to=`). */
+  range: TrafficRangeId | CustomWindow;
   /** Absent means the rollups, the default source. */
   source?: TrafficSource;
   apiId: string | null;
@@ -247,26 +249,50 @@ export type DrillState = {
   by: BreakdownDimension | null;
 };
 
+/**
+ * A drill-down state as search parameters, in a fixed order: `range` (or
+ * `from` and `to` for a custom window), `source`, `api`, the focus, `by`.
+ */
+export function drillParams(state: DrillState): [string, string][] {
+  const params: [string, string][] =
+    typeof state.range === 'string'
+      ? [['range', state.range]]
+      : [
+          ['from', formatUtcMinute(state.range.from)],
+          ['to', formatUtcMinute(state.range.to)],
+        ];
+  return [...params, ...selectionParams(state)];
+}
+
+/**
+ * Everything but the range: what a custom-range form carries in hidden
+ * inputs, so submitting new dates keeps the source and the drill-down.
+ */
+export function selectionParams(state: Omit<DrillState, 'range'>): [string, string][] {
+  const params: [string, string][] = [];
+  if (state.source === 'prometheus') params.push(['source', 'prometheus']);
+  if (state.apiId !== null) params.push(['api', state.apiId]);
+  if (state.focus !== null) params.push([state.focus.dimension, state.focus.value]);
+  if (state.by !== null) params.push(['by', state.by]);
+  return params;
+}
+
 /** The `/analytics` URL for a drill-down state; parameters in a fixed order. */
 export function drillHref(state: DrillState): string {
-  const params = new URLSearchParams();
-  params.set('range', state.range);
-  if (state.source === 'prometheus') params.set('source', 'prometheus');
-  if (state.apiId !== null) params.set('api', state.apiId);
-  if (state.focus !== null) params.set(state.focus.dimension, state.focus.value);
-  if (state.by !== null) params.set('by', state.by);
-  return `/analytics?${params.toString()}`;
+  return `/analytics?${new URLSearchParams(drillParams(state)).toString()}`;
 }
 
 /**
  * The same view from `source`: the range kept where the source offers it
- * (else the default), and a focus or breakdown that source cannot answer
- * dropped rather than left for `parseDrill` to note.
+ * (else the default; a custom window is always kept, and checked again), and
+ * a focus or breakdown that source cannot answer dropped rather than left
+ * for `parseDrill` to note.
  */
 export function sourceHref(state: DrillState, source: TrafficSource): string {
-  const range = TRAFFIC_RANGES[state.range].sources.includes(source)
-    ? state.range
-    : DEFAULT_TRAFFIC_RANGE;
+  const range =
+    typeof state.range !== 'string' || TRAFFIC_RANGES[state.range].sources.includes(source)
+      ? state.range
+      : DEFAULT_TRAFFIC_RANGE;
   const focus =
     source === 'prometheus' &&
     state.focus !== null &&

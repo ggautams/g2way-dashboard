@@ -83,6 +83,34 @@ latencies, so any percentile the dashboard shows is an estimate.
    only by API under one (the focus's rows grouped by `api_id`), and by code
    inside a status class. Key × path is never offered.
 
+7. **A custom range is an absolute window in the URL, read like a fixed
+   one** (_added 2026-09-23, M6 date-range picker_). `?from=` and `?to=`
+   (UTC, `YYYY-MM-DDTHH:mm`, the value format of a `datetime-local` input)
+   replace `?range=`. The picker is a plain GET form under the range buttons,
+   with the rest of the selection in hidden fields, so it needs no client
+   code. `customRange` (`src/lib/analytics/custom-range.ts`) turns the window
+   into a `TrafficRange` with an `end`, and everything downstream
+   (`trafficWindow`, `trafficSeries`, the breakdowns, both readers) is
+   unchanged.
+   - Step: the shortest of 1, 2, 5, 10, 15 and 30 minutes, 1, 3, 6 and 12
+     hours, and 1 day that keeps the chart at 400 points or fewer. The window
+     is widened to whole steps. Longer than 400 days is refused.
+   - Rows: minute rows for sub-hour steps, hour rows from one hour up. A
+     window that starts before minute retention
+     (`G2_ANALYTICS_MINUTE_RETENTION_DAYS`) can only read hour rows, so its
+     step is an hour or more, and the page says so. A window starting before
+     hour retention says that the older part has been pruned.
+   - Prometheus: steps of at least 2 minutes, so each has two scrapes at
+     Prometheus's default one-minute `scrape_interval`. 400 points is far
+     under its 11 000 per series. Retention there is Prometheus's own, and
+     unknown to us.
+   - Refused, with the reason on the page and the fixed range shown instead:
+     only one of `from`/`to`, one that does not parse, an end not after the
+     start, a start in the future, or under 5 minutes. An end in the future
+     becomes now, with a note, and its last step is still filling. A window
+     wholly in the past has no filling step (`Traffic.filling`), so the
+     "still filling" caveat is not shown.
+
 ## Consequences
 
 - No new dependency. Chart code is ours to maintain, and the pure helpers
@@ -90,6 +118,6 @@ latencies, so any percentile the dashboard shows is an estimate.
 - Later M6 charts (drill-down by dimension, saved views) reuse
   `TimeSeriesChart`, `trafficSeries` and `queryTrafficBuckets`. Only the
   query's filter and the series change.
-- A custom date range (M6's picker task) has to choose a granularity and a
-  step the way `TRAFFIC_RANGES` does. The hour rows are the only option past
-  minute retention.
+- A custom date range chooses a granularity and a step the way
+  `TRAFFIC_RANGES` does (§7). The hour rows are the only option past minute
+  retention. The fixed ranges do not yet check retention (M6 box).

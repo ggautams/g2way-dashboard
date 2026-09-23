@@ -101,7 +101,10 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       note) and its Prometheus source (the Rollups | Prometheus toggle next
       to the range picker; the 90d and 1y ranges and their date ticks; the
       failed-query alert and its "Show the rollups instead" link; warnings;
-      the missing key/method/path tabs and their notes) in both themes,
+      the missing key/method/path tabs and their notes) and its custom range
+      (the form's `datetime-local` inputs in a non-UTC browser; each refusal
+      and note; the form open after a refusal; switching back to a fixed
+      range) in both themes,
       with rollups seeded by `make ingest` against Docker Redis or by hand
       (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
@@ -228,7 +231,13 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       worker's batch in hand, never from a second reader of the Redis list,
       which would steal records from the rollups (ADR-0012 §6)
 - [x] Optional Prometheus datasource for long-range aggregates (ADR-0015)
-- [ ] Saved views, date-range picker, CSV export
+- [ ] Saved views, date-range picker, CSV export (ticked when all three below are)
+  - [x] 6a. Date-range picker: a custom `?from=`/`?to=` window (UTC) beside
+        the fixed ranges, validated with the reason on the page (ADR-0013 §7)
+  - [ ] 6b. CSV export of the current selection's time series and breakdown,
+        from the rollups or Prometheus, never the live tail
+  - [ ] 6c. Saved views (personal and shared) in the dashboard database,
+        carrying `source` and a relative or absolute range; audited
 - [ ] Tie the fixed traffic ranges to retention: `24h` reads minute rows, so a
       `G2_ANALYTICS_MINUTE_RETENTION_DAYS` below 1 silently truncates it. Read
       hour rows (or say so) when a range outruns minute retention (ADR-0013 §5)
@@ -1809,3 +1818,31 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     drill-down, blocked upstream: `UPSTREAM.md` TODO for
     `http.request.method`). The visual-pass box lists the toggle.
   - Not browser-tested this session; the visual-pass box lists the new UI.
+- feat(M6): **date-range picker** (6a; ADR-0013 §7 added).
+  M6's "saved views, date-range picker, CSV export" box is split into
+  6a/6b/6c, landing as separate commits.
+  - `?from=`/`?to=` (UTC, `YYYY-MM-DDTHH:mm`) replace `?range=`. A plain GET
+    form (`datetime-local` inputs, the selection in hidden fields) sits under
+    the range buttons in a `<details>`, open while a custom range shows or
+    after a refused one. No client code.
+  - `src/lib/analytics/custom-range.ts` (pure, tested): `readCustomWindow`
+    and `customRange` turn the window into a `TrafficRange` with an `end`, so
+    `trafficWindow`, `trafficSeries`, the breakdowns and both readers are
+    unchanged. The step is the shortest that keeps 400 points or fewer (1 min
+    to 1 day). Hour rows past minute retention, 2-minute steps or more under
+    Prometheus. Refused with the reason, falling back to the fixed range:
+    half a window, bad dates, inverted, starting in the future, under 5 min,
+    over 400 days. An end in the future becomes now, with a note.
+  - `DrillState.range` is now `TrafficRangeId | CustomWindow`. `drillParams`
+    and `selectionParams` split what `drillHref` writes, for the form's hidden
+    fields and for 6b/6c. `Traffic.filling` hides the "last step is still
+    filling" caveat for windows in the past. `rangePhrase`/`rangeWithin`
+    replace `label.toLowerCase()` in running text.
+  - `rollupRetention()` (`load-health.ts`) reads the retention settings for
+    the page, falling back to the defaults where they are invalid.
+  - Surprise: none upstream. `check:bundle` renders a custom window from
+    both sources. Not browser-tested; the visual-pass box lists the picker.
+  - For "tie ranges to retention": `customRange` already does it for custom
+    windows (minute cutoff → hour rows, hour cutoff → note). The fixed ranges
+    can reuse `rollupRetention()` and the same notes.
+  - Next: 6b, CSV export.
