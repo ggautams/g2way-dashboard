@@ -7,6 +7,7 @@ import {
 } from '@/components/analytics/breakdown-panel';
 import { DrillBar, type DrillChip } from '@/components/analytics/drill-bar';
 import { IngestHealthPanel } from '@/components/analytics/ingest-health';
+import { SavedViewsPanel, type SavedViewItem } from '@/components/analytics/saved-views';
 import {
   TrafficPanel,
   formatStep,
@@ -20,6 +21,7 @@ import {
   breakdownSeries,
   describeValue,
   drillHref,
+  drillParams,
   exportHref,
   groupFocus,
   rangeHrefs,
@@ -33,6 +35,8 @@ import {
 } from '@/lib/analytics/drill';
 import { loadIngestHealth } from '@/lib/analytics/load-health';
 import { PrometheusError } from '@/lib/analytics/prometheus';
+import { deleteViewAction, saveViewAction } from '@/lib/analytics/saved-view-actions';
+import { describeViewQuery, viewHref } from '@/lib/analytics/saved-views';
 import { liveHref } from '@/lib/analytics/tail';
 import { resolveView, type ResolvedView, type TrafficReader } from '@/lib/analytics/view';
 import {
@@ -50,6 +54,7 @@ import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
 import { listKeyMetadata } from '@/lib/db/key-metadata';
+import { listSavedViews } from '@/lib/db/saved-views';
 import {
   RegistryConfigError,
   UnknownEnvironmentError,
@@ -80,12 +85,16 @@ export const metadata: Metadata = { title: 'Analytics' };
  * `?from=` and `?to=` (UTC, `YYYY-MM-DDTHH:mm`) replace `?range=` with a
  * custom window (ADR-0013 §7); a window that cannot be shown says why, and
  * the fixed range is shown instead.
+ *
+ * Saved views (ADR-0016) are names for these URLs, listed per environment:
+ * the shared ones, then the user's own.
  */
 export default async function AnalyticsPage({ searchParams }: PageProps<'/analytics'>) {
   const user = await requirePermission('gateway:read');
   const params = await searchParams;
   const roles = { keys: can(user.role, 'keys:read'), apis: can(user.role, 'apis:read') };
   const inspect = can(user.role, 'analytics:inspect');
+  const canShare = can(user.role, 'analytics:share');
 
   let target: GatewayTarget;
   try {
@@ -116,6 +125,19 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
   const { source, range, drill, state, notes, reader, custom } = view;
   const ingest = source === 'rollups' ? health : null;
   const keyLabels = roles.keys ? await loadKeyLabels(target, drill) : new Map<string, string>();
+  const currentQuery = new URLSearchParams(drillParams(state)).toString();
+  const savedViews: SavedViewItem[] = (
+    await listSavedViews(getDatabase(), getOrgId(), { environment: target.id, ownerId: user.id })
+  ).map((view) => ({
+    id: view.id,
+    name: view.name,
+    href: viewHref(view.query),
+    summary: describeViewQuery(view.query),
+    shared: view.shared,
+    owner: view.ownerEmail,
+    deletable: view.shared ? canShare : view.ownerId === user.id,
+    current: view.query === currentQuery,
+  }));
   const sourceHrefs =
     prometheus === null
       ? null
@@ -167,6 +189,14 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
         chips={drillChips(drill, state, roles, keyLabels)}
         notes={notes}
         clearHref={drillHref({ ...state, apiId: null, focus: null, by: null })}
+      />
+      <SavedViewsPanel
+        items={savedViews}
+        environment={target.id}
+        query={currentQuery}
+        canShare={canShare}
+        saveAction={saveViewAction}
+        deleteAction={deleteViewAction}
       />
       {inspect && (
         <p className="text-sm">

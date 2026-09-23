@@ -38,6 +38,11 @@ export const PERMISSIONS = [
    * (`/users/alice@example.com`), so not a viewer's.
    */
   'analytics:inspect',
+  /**
+   * Save an `/analytics` view for the whole team, and delete any shared view
+   * (ADR-0016). Personal views need only `gateway:read`.
+   */
+  'analytics:share',
   /** The users page. Who may change whom is decided by {@link userChangeDenial}. */
   'users:manage',
   /** The audit log (ADR-0006). */
@@ -54,6 +59,7 @@ const EDITOR: readonly Permission[] = [
   'gateway:reload',
   'graphql:sync',
   'analytics:inspect',
+  'analytics:share',
 ];
 const ADMIN: readonly Permission[] = [...EDITOR, 'keys:write', 'users:manage', 'audit:read'];
 

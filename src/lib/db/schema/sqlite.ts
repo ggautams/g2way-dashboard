@@ -285,3 +285,29 @@ export const analyticsTail = sqliteTable(
   },
   (t) => [index('analytics_tail_env_at_idx').on(t.orgId, t.environment, t.at)],
 );
+
+/**
+ * Saved `/analytics` views (ADR-0016): a name for the canonical query string
+ * of a view (`drillParams`), in the environment it was saved in. `shared`
+ * views are listed for everyone with `gateway:read`; the others only for
+ * `owner_id`. `owner_email` is a snapshot, like the audit actor.
+ */
+export const savedViews = sqliteTable(
+  'saved_views',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    ownerId: text('owner_id').notNull(),
+    ownerEmail: text('owner_email').notNull(),
+    name: text('name').notNull(),
+    shared: integer('shared', { mode: 'boolean' }).notNull().default(false),
+    query: text('query').notNull(),
+    createdAt: timestamp('created_at'),
+    updatedAt: timestamp('updated_at').$onUpdateFn(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex('saved_views_owner_name_unique').on(t.orgId, t.environment, t.ownerId, t.name),
+    index('saved_views_env_shared_idx').on(t.orgId, t.environment, t.shared),
+  ],
+);
