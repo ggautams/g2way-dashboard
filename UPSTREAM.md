@@ -236,3 +236,13 @@ g2way's history was rewritten: every commit has a new sha, but all 11 watched
 areas are unchanged apart from wording: rustdoc, `docs/`, the schema
 descriptions in `docs/api/openapi.json`, and a few test names. Contract types
 and endpoints are identical. Lock advanced; nothing to catch up on.
+
+## 2026-09-24 — g2way f777776 → a3a1c47
+
+Watched areas changed: **admin-api**
+
+### admin-api
+
+- Drives: src/app/api/g2/**, src/lib/g2/**, contracts/g2way.d.ts
+- Action: Re-copy the spec and regenerate types; check the BFF proxy allowlist for new or removed endpoints, and where each write reads its org (body org_id vs ?org_id=, ADR-0007).
+- [ ] TODO: Re-copy the spec and regenerate types; check the BFF proxy allowlist for new or removed endpoints, and where each write reads its org (body org_id vs ?org_id=, ADR-0007).
