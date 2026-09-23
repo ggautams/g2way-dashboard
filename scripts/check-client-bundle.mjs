@@ -439,6 +439,10 @@ async function checkRoles(base) {
   await expectStatus('viewer', viewer, '/analytics', 200);
   await expectStatus('viewer', viewer, '/analytics/live', 403);
   await expectStatus('viewer', viewer, '/api/analytics/live', 403);
+  // The CSV export is the page's own view: gateway:read, as /analytics (ADR-0013 §8).
+  await expectStatus('viewer', viewer, '/api/analytics/export?table=series&range=6h', 200);
+  await expectStatus('viewer', viewer, '/api/analytics/export?table=breakdown&by=status', 200);
+  await expectStatus('viewer', viewer, '/api/analytics/export?table=nope', 400);
 
   const portal = await signIn(base, 'portal-dev', PORTAL_DEV);
   await expectStatus('portal-dev', portal, '/', 200);
@@ -446,6 +450,7 @@ async function checkRoles(base) {
   await expectStatus('portal-dev', portal, '/apis', 403);
   await expectStatus('portal-dev', portal, '/api/g2/version', 403);
   await expectStatus('portal-dev', portal, '/api/analytics/live', 403);
+  await expectStatus('portal-dev', portal, '/api/analytics/export?table=series', 403);
   return fetched;
 }
 

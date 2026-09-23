@@ -29,6 +29,7 @@ export function TrafficPanel({
   sourceHrefs = null,
   warnings = [],
   custom,
+  exportHref,
 }: {
   traffic: Traffic;
   rangeHrefs: Partial<Record<TrafficRangeId, string>>;
@@ -38,6 +39,8 @@ export function TrafficPanel({
   /** Prometheus's own query warnings, shown as it gave them. */
   warnings?: readonly string[];
   custom: CustomRangeForm;
+  /** The time series as CSV (`GET /api/analytics/export`). */
+  exportHref: string;
 }) {
   const { range, points, summary, from, to } = traffic;
   const starts = points.map((p) => p.start);
@@ -135,6 +138,12 @@ export function TrafficPanel({
             </p>
           )}
           <TrafficTable traffic={traffic} />
+          <p className="text-xs text-muted">
+            <a className="underline" href={exportHref} download>
+              Download as CSV
+            </a>{' '}
+            (every step, with status counts{source === 'prometheus' ? '' : ' and the maximum'})
+          </p>
         </>
       ) : (
         <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">

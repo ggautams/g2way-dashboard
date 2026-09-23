@@ -12,12 +12,7 @@ import {
   formatStep,
   type CustomRangeForm,
 } from '@/components/analytics/traffic-panel';
-import {
-  customRange,
-  formatUtcMinute,
-  readCustomWindow,
-  type CustomWindow,
-} from '@/lib/analytics/custom-range';
+import { formatUtcMinute } from '@/lib/analytics/custom-range';
 import {
   DIMENSION_LABELS,
   allowedBreakdowns,
@@ -25,9 +20,8 @@ import {
   breakdownSeries,
   describeValue,
   drillHref,
-  focusSelection,
+  exportHref,
   groupFocus,
-  parseDrill,
   rangeHrefs,
   selectionParams,
   sourceHref,
@@ -37,21 +31,17 @@ import {
   type Drill,
   type DrillState,
 } from '@/lib/analytics/drill';
-import { loadIngestHealth, rollupRetention } from '@/lib/analytics/load-health';
-import { PrometheusError, loadPrometheusTraffic } from '@/lib/analytics/prometheus';
-import { breakdownTotals, type PromGrouping } from '@/lib/analytics/promql';
+import { loadIngestHealth } from '@/lib/analytics/load-health';
+import { PrometheusError } from '@/lib/analytics/prometheus';
 import { liveHref } from '@/lib/analytics/tail';
+import { resolveView, type ResolvedView, type TrafficReader } from '@/lib/analytics/view';
 import {
-  TRAFFIC_RANGE_IDS,
   elapsedSeconds,
-  parseTrafficRange,
-  parseTrafficSource,
   rangePhrase,
   rangeWithin,
   summarise,
   trafficSeries,
   trafficWindow,
-  type SummaryOptions,
   type TrafficBucket,
   type TrafficRange,
   type TrafficSource,
@@ -59,12 +49,6 @@ import {
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
-import {
-  queryBreakdown,
-  queryBreakdownBuckets,
-  queryTrafficBuckets,
-  type BreakdownRow,
-} from '@/lib/db/analytics';
 import { listKeyMetadata } from '@/lib/db/key-metadata';
 import {
   RegistryConfigError,
@@ -72,7 +56,6 @@ import {
   getOrgId,
   resolveEnvironment,
   type GatewayTarget,
-  type PrometheusSource,
 } from '@/lib/g2/environments';
 import { selectedEnvironmentId } from '@/lib/g2/selected-environment';
 import { shortHash } from '@/lib/keys/session';
@@ -125,36 +108,13 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
   }
 
   const prometheus = target.prometheus;
-  const sourceParam = parseTrafficSource(first(params.source), prometheus !== null);
-  const source = sourceParam.source;
-  const drill = parseDrill(params, { keys: roles.keys, source });
 
   // Loaded under either source: it is one small read, and it fixes `now`.
   const health = await loadIngestHealth(target);
   const now = health.now;
-
-  const fixed = parseTrafficRange(first(params.range), source);
-  const custom = resolveCustom(first(params.from), first(params.to), source, now);
-  const range = custom.range ?? fixed;
-  const notes = [
-    ...(sourceParam.note === null ? [] : [sourceParam.note]),
-    ...(custom.range === null ? rangeNotes(first(params.range), fixed) : []),
-    ...custom.notes,
-    ...(custom.problem === null ? [] : [`${custom.problem} Showing ${rangePhrase(fixed)}.`]),
-    ...drill.notes,
-  ];
+  const view = resolveView(target, params, { keys: roles.keys, now });
+  const { source, range, drill, state, notes, reader, custom } = view;
   const ingest = source === 'rollups' ? health : null;
-  const reader =
-    source === 'prometheus' && prometheus !== null
-      ? prometheusReader(prometheus, range, drill, now)
-      : rollupReader(target, range, drill, now);
-  const state: DrillState = {
-    range: custom.window ?? fixed.id,
-    ...(source === 'prometheus' ? { source } : {}),
-    apiId: drill.apiId,
-    focus: drill.focus,
-    by: drill.by,
-  };
   const keyLabels = roles.keys ? await loadKeyLabels(target, drill) : new Map<string, string>();
   const sourceHrefs =
     prometheus === null
@@ -242,6 +202,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
           sourceHrefs={sourceHrefs}
           warnings={reader.warnings}
           custom={customForm(custom, state, trafficWindow(range, now), now)}
+          exportHref={exportHref(state, 'series')}
         />
       )}
       {traffic === null ? null : breakdown === null ? (
@@ -258,89 +219,6 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
       )}
     </Page>
   );
-}
-
-/** Where a view's buckets come from: the rollups or Prometheus, behind one shape. */
-type TrafficReader = {
-  /** The selection's source buckets over the range's window. */
-  total(): Promise<TrafficBucket[]>;
-  /** The busiest `limit` groups by `by`, and the buckets of at least the top three. */
-  breakdown(
-    by: BreakdownDimension,
-    limit: number,
-  ): Promise<{ rows: BreakdownRow[]; lines: Map<string, TrafficBucket[]> }>;
-  options: SummaryOptions;
-  /** Prometheus's query warnings, filled as queries run. */
-  warnings: string[];
-};
-
-function rollupReader(
-  target: GatewayTarget,
-  range: TrafficRange,
-  drill: Drill,
-  now: number,
-): TrafficReader {
-  const { from, to } = trafficWindow(range, now);
-  const base = {
-    environment: target.id,
-    bucketSeconds: range.sourceSeconds,
-    from,
-    to,
-    ...(drill.apiId === null ? {} : { apiId: drill.apiId }),
-  };
-  return {
-    options: {},
-    warnings: [],
-    total: () =>
-      queryTrafficBuckets(getDatabase(), getOrgId(), { ...base, ...focusSelection(drill.focus) }),
-    async breakdown(by, limit) {
-      const plan = breakdownPlan(drill, by);
-      const selection = { ...base, ...plan.selection };
-      const db = getDatabase();
-      const orgId = getOrgId();
-      const rows = await queryBreakdown(db, orgId, { ...selection, group: plan.group, limit });
-      const lines = await queryBreakdownBuckets(db, orgId, {
-        ...selection,
-        group: plan.group,
-        groups: rows.slice(0, 3).map((row) => row.group),
-      });
-      return { rows, lines };
-    },
-  };
-}
-
-/** The same shape from Prometheus (ADR-0015 §3): API and status only. */
-function prometheusReader(
-  source: PrometheusSource,
-  range: TrafficRange,
-  drill: Drill,
-  now: number,
-): TrafficReader {
-  const { from, to } = trafficWindow(range, now);
-  const warnings: string[] = [];
-  const load = async (grouping: PromGrouping) => {
-    const result = await loadPrometheusTraffic(source, {
-      orgId: getOrgId(),
-      apiId: drill.apiId,
-      status: drill.focus?.dimension === 'status' ? drill.focus.value : null,
-      from,
-      to,
-      stepSeconds: range.stepSeconds,
-      grouping,
-    });
-    for (const warning of result.warnings) if (!warnings.includes(warning)) warnings.push(warning);
-    return result.groups;
-  };
-  return {
-    options: { exactMax: false },
-    warnings,
-    total: async () => (await load(null)).get('') ?? [],
-    async breakdown(by, limit) {
-      const { group } = breakdownPlan(drill, by);
-      const groups = await load({ group, dimension: by === 'api' ? 'api' : 'status' });
-      return { rows: breakdownTotals(groups, limit), lines: groups };
-    },
-  };
 }
 
 /** The busiest groups shown in the table; the chart draws at most three lines (ADR-0013 §2). */
@@ -441,6 +319,7 @@ async function loadBreakdown(
     chart: { starts, stepMs: window.stepMs, from: window.from, to: window.to, series },
     rangePhrase: rangePhrase(range),
     rangeWithin: rangeWithin(range),
+    exportHref: exportHref(state, 'breakdown'),
     step: formatStep(range.stepSeconds),
   };
 }
@@ -533,54 +412,12 @@ function Page({
   );
 }
 
-function first(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-/** Why a `?range=` naming a real range was not used: the source does not offer it. */
-function rangeNotes(requested: string | undefined, range: TrafficRange): string[] {
-  if (requested === undefined || requested === range.id) return [];
-  if (!TRAFFIC_RANGE_IDS.some((id) => id === requested)) return [];
-  return [
-    `range=${requested}: offered only from Prometheus (ADR-0015); showing ${range.label.toLowerCase()}.`,
-  ];
-}
-
-/** A custom window, if the URL asks for one: the range it reads as, or why it cannot. */
-function resolveCustom(
-  from: string | undefined,
-  to: string | undefined,
-  source: TrafficSource,
-  now: number,
-): {
-  window: CustomWindow | null;
-  range: TrafficRange | null;
-  notes: string[];
-  problem: string | null;
-  input: { from: string; to: string } | null;
-} {
-  const none = { window: null, range: null, notes: [], problem: null, input: null };
-  const read = readCustomWindow(from, to);
-  if (read === null) return none;
-  const input = { from: from ?? '', to: to ?? '' };
-  if ('problem' in read) return { ...none, problem: read.problem, input };
-  const resolved = customRange(read.window, { source, now, ...rollupRetention() });
-  if ('problem' in resolved) return { ...none, problem: resolved.problem, input };
-  return {
-    window: read.window,
-    range: resolved.range,
-    notes: resolved.notes,
-    problem: null,
-    input,
-  };
-}
-
 /**
  * The custom-range form: the window in view (or the refused input, to fix),
  * and the rest of the selection as hidden fields.
  */
 function customForm(
-  custom: ReturnType<typeof resolveCustom>,
+  custom: ResolvedView['custom'],
   state: DrillState,
   window: { from: number; to: number },
   now: number,

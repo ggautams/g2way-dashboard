@@ -5,6 +5,7 @@ import {
   breakdownSeries,
   describeValue,
   drillHref,
+  exportHref,
   focusSelection,
   groupFocus,
   parseDrill,
@@ -359,5 +360,16 @@ describe('the Prometheus source (ADR-0015 §4)', () => {
     } as const;
     // 1y is Prometheus's alone: back to the default range.
     expect(sourceHref(prom, 'rollups')).toBe('/analytics?range=1h&status=5xx&by=status');
+  });
+});
+
+describe('exportHref', () => {
+  it('names the table, then the view’s own parameters', () => {
+    expect(
+      exportHref(
+        { range: '6h', source: 'prometheus', apiId: 'a', focus: null, by: 'status' },
+        'breakdown',
+      ),
+    ).toBe('/api/analytics/export?table=breakdown&range=6h&source=prometheus&api=a&by=status');
   });
 });

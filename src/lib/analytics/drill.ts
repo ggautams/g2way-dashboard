@@ -277,6 +277,15 @@ export function selectionParams(state: Omit<DrillState, 'range'>): [string, stri
   return params;
 }
 
+/**
+ * The CSV export of a view (`GET /api/analytics/export`, ADR-0013 §8): the
+ * table first, then the view's own parameters.
+ */
+export function exportHref(state: DrillState, table: 'series' | 'breakdown'): string {
+  const params = new URLSearchParams([['table', table], ...drillParams(state)]);
+  return `/api/analytics/export?${params.toString()}`;
+}
+
 /** The `/analytics` URL for a drill-down state; parameters in a fixed order. */
 export function drillHref(state: DrillState): string {
   return `/analytics?${new URLSearchParams(drillParams(state)).toString()}`;

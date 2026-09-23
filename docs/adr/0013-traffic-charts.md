@@ -111,6 +111,31 @@ latencies, so any percentile the dashboard shows is an estimate.
      wholly in the past has no filling step (`Traffic.filling`), so the
      "still filling" caveat is not shown.
 
+8. **CSV export is the view on screen, one file per table** (_added
+   2026-09-23, M6 CSV export_). `GET /api/analytics/export?table=series|breakdown`
+   takes the page's own URL parameters and reads through the same
+   `resolveView` (`src/lib/analytics/view.ts`), so a download matches the
+   page, including a custom window and the source. It sits behind `withUser`
+   and `gateway:read`, like the page. Key focus and the key breakdown still
+   need `keys:read` (`parseDrill`), so a role without it gets no key column.
+   - Files: `series` has one row per step, empty steps included, with status
+     counts and the derived rates and latencies. `breakdown` lists up to
+     1 000 groups plus "Everything else", not only the ten the page shows.
+     Each file opens with `# name,value` rows naming the environment, source,
+     window, step, selection and every note the page would show, then a
+     header row. `#` is the usual comment marker for CSV readers. We chose
+     two files over one file with sections, which no CSV reader handles.
+   - Every text cell starting with `=`, `+`, `-`, `@`, a tab or a CR gets a
+     leading `'`, so a spreadsheet shows it as text rather than running it.
+     API ids, paths and key aliases come from traffic, and anyone can put
+     them there. Numbers are written as they are.
+   - Under Prometheus the file says its counts are rounded `increase()`
+     values summed over replicas, and `latency_max_ms` is empty.
+   - Never from the live inspector's tail: `analytics_tail` is a sample
+     (ADR-0014), and an export built on it would look complete when it
+     is not.
+   - An export is a read, so it is not audited (ADR-0006 audits mutations).
+
 ## Consequences
 
 - No new dependency. Chart code is ours to maintain, and the pure helpers

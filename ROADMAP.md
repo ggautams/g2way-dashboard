@@ -104,7 +104,8 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       the missing key/method/path tabs and their notes) and its custom range
       (the form's `datetime-local` inputs in a non-UTC browser; each refusal
       and note; the form open after a refusal; switching back to a fixed
-      range) in both themes,
+      range) and its two "Download as CSV" links (the files open cleanly in a
+      spreadsheet, `#` rows included) in both themes,
       with rollups seeded by `make ingest` against Docker Redis or by hand
       (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
@@ -234,8 +235,8 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [ ] Saved views, date-range picker, CSV export (ticked when all three below are)
   - [x] 6a. Date-range picker: a custom `?from=`/`?to=` window (UTC) beside
         the fixed ranges, validated with the reason on the page (ADR-0013 §7)
-  - [ ] 6b. CSV export of the current selection's time series and breakdown,
-        from the rollups or Prometheus, never the live tail
+  - [x] 6b. CSV export of the current selection's time series and breakdown,
+        from the rollups or Prometheus, never the live tail (ADR-0013 §8)
   - [ ] 6c. Saved views (personal and shared) in the dashboard database,
         carrying `source` and a relative or absolute range; audited
 - [ ] Tie the fixed traffic ranges to retention: `24h` reads minute rows, so a
@@ -1846,3 +1847,25 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     windows (minute cutoff → hour rows, hour cutoff → note). The fixed ranges
     can reuse `rollupRetention()` and the same notes.
   - Next: 6b, CSV export.
+- feat(M6): **CSV export** (6b; ADR-0013 §8 added).
+  - `GET /api/analytics/export?table=series|breakdown&<the page's params>`
+    (`withUser`, `gateway:read`; key focus and `by=key` still need
+    `keys:read` through `parseDrill`). Two files, not one with sections:
+    the series has every step with status counts, rates and latencies. The
+    breakdown has up to 1 000 groups plus "Everything else". Each file opens
+    with `# name,value` rows (environment, source, window, step, selection,
+    every page note), then a header row.
+  - The page's readers and URL resolution moved to
+    `src/lib/analytics/view.ts` (`resolveView`, `TrafficReader`), so the
+    export reads exactly what the page shows. The page only builds the UI now.
+  - `src/lib/analytics/csv.ts` (pure, tested): `csvCell` puts a `'` before any
+    text starting with `=`, `+`, `-`, `@`, a tab or a CR, and quotes where
+    needed. CRLF line ends. Prometheus exports say their counts are rounded
+    `increase()` values and leave `latency_max_ms` empty.
+  - Never from `analytics_tail`: `route-guard.test.ts` fails if the handler
+    mentions it. `check:bundle` checks a viewer's 200s and a 400, and a
+    portal-dev's 403.
+  - Not audited: an export is a read. If exports of key-level traffic ever
+    need a trail, that belongs with M11's audit export box, not here.
+  - Surprise: none upstream. Not browser-tested.
+  - Next: 6c, saved views.

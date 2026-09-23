@@ -41,6 +41,8 @@ export type BreakdownView = {
   rangePhrase: string;
   rangeWithin: string;
   step: string;
+  /** The CSV of every group, not only the busiest ten (`GET /api/analytics/export`). */
+  exportHref: string;
 };
 
 /**
@@ -106,6 +108,12 @@ export function BreakdownPanel({ view }: { view: BreakdownView }) {
             />
           )}
           <BreakdownTable view={view} />
+          <p className="text-xs text-muted">
+            <a className="underline" href={view.exportHref} download>
+              Download as CSV
+            </a>{' '}
+            (every group, not only the ten busiest)
+          </p>
         </>
       )}
     </section>
