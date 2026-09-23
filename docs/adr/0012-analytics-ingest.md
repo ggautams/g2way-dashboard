@@ -114,6 +114,45 @@ reader runs, what it keeps, or what happens when it fails. Upstream facts
      so it cannot collide. The cap is per batch, so a busy minute can still
      hold more than 200 path rows. Templating paths (`/users/{id}`) is M6
      drill-down work.
+     _Amended 2026-09-23:_ the worker now files **templated** paths, so one
+     endpoint is one row and the cap rarely bites
+     (`src/lib/analytics/path-template.ts`). The raw path is templated before
+     truncation and before the cap, which counts templates:
+     - **The definition first.** Every regex `pattern` the API's definition
+       carries (the six rule lists, body-transform rules, and each version
+       override's) is tried in that order, searched against the full client
+       path as g2way does. The first that matches with a **named** group
+       (`(?P<id>…)` or `(?<id>…)`) that captured text wins, and each such
+       group becomes `{id}`; nested groups yield the outermost. Unnamed groups
+       are ignored: `^/(v1|v2)/` captures a literal, and only a name says a
+       group is a parameter. Rule `methods` are ignored. A pattern JavaScript
+       cannot follow faithfully (`jsRegex` in `src/lib/apis/rules.ts`: inline
+       flags, nested classes) is skipped. A group starting at the path's first
+       character is refused, so the leading `/` survives.
+     - **Then a heuristic** on every whole segment no group touched: all
+       digits → `{id}`, a UUID → `{uuid}`, 16+ hex digits → `{hex}`, 20+
+       letters and digits with a digit in them → `{token}`, and 20+ base64url
+       characters with a digit and both letter cases → `{token}`. Slugs
+       (`order-summary`, `v2`) stay literal.
+     - **Fetching definitions.** Each environment's worker source keeps a
+       cache of compiled rules from `GET /g2/apis`, through the server-side
+       gateway client (org-scoped, secret never leaves the server) with a
+       3 s timeout. It refetches at most once a minute, only when a batch
+       needs templating, so an idle worker never calls the gateway. The fetch
+       happens after the pop, which widens §3's loss window by at most that
+       timeout. On failure (gateway down, 403, bad registry) the last rules
+       fetched are used, or none, so the heuristic alone. Ingest never fails
+       on it. Only the transition to failing and back is logged.
+     - **What it cannot see.** `GET /g2/apis` lists stored definitions only
+       (UPSTREAM.md), so an API loaded from `--apps-dir` files is templated by
+       heuristic alone. A definition written but not yet reloaded already
+       templates. A rule change applies to rows written after the next
+       refresh; rows are never rewritten.
+     - **Earlier rows stay raw.** Rows written before this change keep their
+       raw paths until retention prunes them (§7), so a drill-down spanning
+       the change can show one endpoint twice. The path breakdown says so.
+     - The raw records in hand are not changed, so the live request inspector
+       (§6) still sees real paths.
    - Counters are `bigint` in Postgres and `integer` (64-bit) in SQLite. Both
      read back as `number` (ADR-0003 §2).
 
