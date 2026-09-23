@@ -141,6 +141,25 @@ commit this project is waiting on.
       a draft (debounced) through the BFF before save. _Blocks one M5 box
       (2b follow-up)._
 
+- [ ] **No per-request middleware trace.** _Found 2026-09-23 (M5)._ The
+      request console (ADR-0011) sends a test request through the proxy
+      listener and must say which middleware acted on it, but g2way gives no
+      signal: `AnalyticsRecord` has no layer field, rejections carry only
+      `{"error": …}`, and there is no debug or trace header. The dashboard
+      therefore infers a trace from the stored definition, the request and
+      the response (`src/lib/apis/trace.ts`), which cannot see the IP filter,
+      plugins or GraphQL, and cannot tell a live route from a stored one. Ask
+      for an opt-in, admin-authenticated debug header on the proxy listener
+      (e.g. `X-G2-Debug-Trace: <hmac of the admin secret and a nonce>`, or a
+      short-lived token minted by `POST /g2/debug/tokens`) that makes the
+      gateway answer with the layers that ran, in order, each with its
+      outcome (`passed`/`rejected`/`answered`/`acted`) and the rule index that
+      matched, in a response header or trailer, documented in the OpenAPI.
+      Then the console shows the gateway's own trace beside the inferred one;
+      `src/lib/apis/trace.test.ts` fails as soon as the spec gains a
+      trace/debug path or an `x-g2-trace`/`x-g2-debug` header. _Blocks one
+      M5 box._
+
 - [ ] **`/g2/stats` is process-local** and resets on restart, so with more than
       one replica it is a per-pod sample rather than a cluster total. Cluster-wide
       numbers must come from the analytics feed or Prometheus. Shapes M6; not a

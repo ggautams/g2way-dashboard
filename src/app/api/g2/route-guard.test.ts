@@ -49,4 +49,16 @@ describe('BFF route', () => {
       ['POST', 'handle'],
     ]);
   });
+
+  // The request console (ADR-0011): same guard, same actor, and only POST.
+  it('guards the console route the same way', () => {
+    const source = readFileSync(join(import.meta.dirname, 'console', 'route.ts'), 'utf8');
+    expect(source).toMatch(/const handle = withUser\(/);
+    expect(source).toMatch(
+      /sendConsoleRequest\(request, \{ id: user\.id, email: user\.email, role: user\.role \}\)/,
+    );
+    expect([...source.matchAll(/export const (\w+) = (\w+);/g)].map((m) => [m[1], m[2]])).toEqual([
+      ['POST', 'handle'],
+    ]);
+  });
 });

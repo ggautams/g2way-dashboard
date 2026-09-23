@@ -230,18 +230,58 @@ export function isHeaderValue(value: string): boolean {
  *   unknown escape such as `\q`): those pass here and fail on save.
  */
 export function regexProblem(pattern: string): string | undefined {
+  const translated = translateRegex(pattern);
+  if (translated.kind === 'problem') return translated.message;
+  if (translated.kind === 'unknown') return undefined;
+  try {
+    new RegExp(translated.source);
+    return undefined;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `Not a valid regex: ${message.replace(/^Invalid regular expression: /, '')}`;
+  }
+}
+
+/**
+ * A JavaScript regex matching what g2way's `pattern` matches, or `null` when
+ * the browser's dialect cannot follow it faithfully: inline flags (which
+ * change meaning), nested classes, verbose mode, Rust-only constructs, or a
+ * pattern that does not compile. Used by the request console's inferred
+ * trace (`trace.ts`), which says "unknown" for a `null`. Unicode classes
+ * (`\d`, `\w`, `.`) are ASCII-leaning in JavaScript's non-`u` mode, so
+ * even a translated pattern is an approximation on non-ASCII paths.
+ */
+export function jsRegex(pattern: string): RegExp | null {
+  const translated = translateRegex(pattern);
+  if (translated.kind !== 'ok' || translated.flags) return null;
+  try {
+    return new RegExp(translated.source);
+  } catch {
+    return null;
+  }
+}
+
+type Translation =
+  | { kind: 'ok'; source: string; flags: boolean }
+  | { kind: 'problem'; message: string }
+  | { kind: 'unknown' };
+
+/** Rust `regex` syntax → JavaScript source, as far as it can be followed (see {@link regexProblem}). */
+function translateRegex(pattern: string): Translation {
   let source = '';
   let inClass = false;
+  let flags = false;
+  const problem = (message: string): Translation => ({ kind: 'problem', message });
   for (let i = 0; i < pattern.length; i++) {
     const ch = pattern[i] as string;
     const rest = pattern.slice(i);
     if (ch === '\\') {
       const next = pattern[i + 1] ?? '';
       if (!inClass && /[1-9]/.test(next)) {
-        return `Backreferences (\\${next}) are not supported by g2way's regex engine.`;
+        return problem(`Backreferences (\\${next}) are not supported by g2way's regex engine.`);
       }
       if (!inClass && next === 'k' && pattern[i + 2] === '<') {
-        return "Backreferences (\\k<…>) are not supported by g2way's regex engine.";
+        return problem("Backreferences (\\k<…>) are not supported by g2way's regex engine.");
       }
       source += ch + next;
       i++;
@@ -249,7 +289,7 @@ export function regexProblem(pattern: string): string | undefined {
     }
     if (inClass) {
       // Rust nests classes (`[[:alpha:]]`, `[a-z&&[^x]]`); JavaScript cannot follow.
-      if (ch === '[') return undefined;
+      if (ch === '[') return { kind: 'unknown' };
       if (ch === ']') inClass = false;
       source += ch;
       continue;
@@ -266,7 +306,7 @@ export function regexProblem(pattern: string): string | undefined {
       continue;
     }
     if (/^\(\?(?:=|!|<=|<!)/.test(rest)) {
-      return "Look-ahead and look-behind are not supported by g2way's regex engine.";
+      return problem("Look-ahead and look-behind are not supported by g2way's regex engine.");
     }
     const named = /^\(\?P<([A-Za-z_][A-Za-z0-9_]*)>/.exec(rest);
     if (named) {
@@ -274,23 +314,18 @@ export function regexProblem(pattern: string): string | undefined {
       i += named[0].length - 1;
       continue;
     }
-    const flags = /^\(\?(-?[imsuxUR]+(?:-[imsuxUR]*)?)(\)|:)/.exec(rest);
-    if (flags) {
+    const flagGroup = /^\(\?(-?[imsuxUR]+(?:-[imsuxUR]*)?)(\)|:)/.exec(rest);
+    if (flagGroup) {
       // Flags change meaning, not syntax: a group of them becomes a plain group.
-      if (flags[1]?.includes('x')) return undefined; // Verbose mode: whitespace is not literal.
-      source += flags[2] === ':' ? '(?:' : '';
-      i += flags[0].length - 1;
+      if (flagGroup[1]?.includes('x')) return { kind: 'unknown' }; // Verbose mode: whitespace is not literal.
+      flags = true;
+      source += flagGroup[2] === ':' ? '(?:' : '';
+      i += flagGroup[0].length - 1;
       continue;
     }
     source += ch;
   }
-  try {
-    new RegExp(source);
-    return undefined;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Not a valid regex: ${message.replace(/^Invalid regular expression: /, '')}`;
-  }
+  return { kind: 'ok', source, flags };
 }
 
 /** `validate_methods`: every entry a standard method, case-insensitively. */

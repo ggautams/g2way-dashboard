@@ -85,7 +85,11 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       the Chain tab's per-version "Edit v2" links landing on that version's
       sections), and the Chain tab's "Explain" panels (auth's panel following
       the selected mode; tables, code blocks and neutralised relative links
-      in both themes) (M1 and M2
+      in both themes), and the request console (the Console tab on a stored
+      API: the not-configured and viewer states; method, path, version,
+      headers and body; a real response, its headers and a truncated body;
+      the inferred trace's badges, mismatches and "In chain" links landing
+      on the Chain tab's slot, per version too) (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23, twice. `make serve-scratch` is the one-step way to run the
       pass: a production build on :3100 against a fresh temp-dir SQLite
@@ -176,8 +180,11 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
   - [x] 2d. Versioning (`VersioningConfig`; each version's overrides reuse the
         2b/2c editors; non-overridable fields shown as inherited)
 - [x] Explain panel per slot rendered from `contracts/g2way-docs/`
-- [ ] Request console: send a test request through the gateway, show the
+- [x] Request console: send a test request through the gateway, show the
       response and which middleware acted on it
+- [ ] Show the gateway's real middleware trace in the request console —
+      **blocked**: no per-request middleware trace (`UPSTREAM.md`); the
+      console shows a dashboard-side inferred trace meanwhile (ADR-0011 §5)
 
 ## M6 — Analytics
 
@@ -1462,3 +1469,54 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     forwarder surfaces.
   - Not run in a browser; added to the open M2 browser-pass box.
   - Next: the request console.
+- feat(M5): the request console. ADR-0011 records it.
+  - Config: each environment may name its proxy listener
+    (`G2_PROXY_URL`, `G2_ENV_<ID>_PROXY_URL`; `GatewayTarget.proxyUrl`). There
+    is no default, since the console sends real traffic. It is server-only
+    like the admin URL: the page passes only `configured`, and
+    `check:bundle` now carries a proxy-URL canary. `.env.example`
+    documents it.
+  - RBAC: new `apis:test` for editor and up (ADR-0005's table amended). A
+    test request reaches a real upstream and uses up rate and quota, so it is
+    not a viewer's.
+  - BFF: `POST /api/g2/console` (`src/lib/g2/console.ts`). It reads the
+    stored definition over the admin API, then sends to the proxy base +
+    stored `listen_path` + the browser's suffix. The guard is
+    `consoleTarget` in `src/lib/apis/console-guard.ts`:
+    - no encoded `/`, `\` or NUL, no `#`;
+    - `..` (encoded too) must stay under the listen path;
+    - the origin is fixed by config;
+    - no redirects followed, a 15 s timeout, a 64 KiB read cap, and
+      `Host`, hop-by-hop and `X-G2-Authorization` refused.
+
+    The guard lives apart from `console.ts` (the client-side contract)
+    because the client bundle may not contain `x-g2-authorization`
+    (`check:bundle`'s FORBIDDEN_STATIC). A chosen version goes where the
+    selector reads it. Connection errors report only the code, so the host
+    never reaches the browser.
+
+  - Audit: `api.test_request`, written ahead and failing closed (503). It
+    records the method, the path without its query, the version and the
+    status. It never records the query, header names or values, or the
+    body. It is not a pending-reload action.
+  - Trace: `inferTrace` (`src/lib/apis/trace.ts`) makes deterministic
+    predictions: path policy, size limit, a missing credential per auth
+    mode, mocks, a CORS preflight, dispatcher refusals. It reads evidence
+    from the response: 429 + `X-RateLimit-*`, `x-g2-cache: hit`, ACAO, and
+    the `{"error"}` envelope. The IP filter, plugins, GraphQL and flag
+    slots are `unknown`, and are only candidates for an otherwise
+    unexplained error. A contradicted prediction is a "mismatch", usually a
+    stale (unreloaded) route. `jsRegex` (rules.ts) shares `regexProblem`'s
+    translator and gives up (`null` → unknown) on inline flags, nested
+    classes and verbose mode.
+  - UI: a Console tab on stored APIs (`request-console.tsx`). Each trace
+    step's "In chain" link uses `chainAnchor(id, version)`; the designer's
+    existing `#chain-` handler switches tabs.
+  - Follow-ups: UPSTREAM.md "No per-request middleware trace" and a new
+    blocked M5 box. `trace.test.ts` is the tripwire: it fails when the spec
+    gains a trace/debug path or an `x-g2-trace`/`x-g2-debug` header.
+    `watch.json` names trace.ts under middleware-chain, traffic-middleware
+    and auth-modes, and the proxy URL under deploy.
+  - Not run in a browser; added to the open M2 browser-pass box.
+  - Next: M5's remaining boxes are both blocked upstream (2b follow-up, real
+    trace), so M6 (analytics) is next.

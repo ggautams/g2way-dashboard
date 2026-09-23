@@ -14,6 +14,7 @@ import type { HistoryEntry } from '@/lib/designer/history';
 import { RAW_FORMATS, schemaValidator } from '@/lib/designer/raw';
 import { ApiForm } from './api-form';
 import { ChainView } from './chain-view';
+import { RequestConsole, type ConsoleAccess } from './request-console';
 
 type Props = {
   /** The stored definition when editing; `null` when creating. */
@@ -34,6 +35,8 @@ type Props = {
   environment: DesignerEnvironment;
   /** Its stored versions, newest first (ADR-0008); absent when creating. */
   history?: readonly HistoryEntry[];
+  /** The request console's access (ADR-0011); absent when creating, which hides the tab. */
+  console?: ConsoleAccess;
 };
 
 /**
@@ -42,7 +45,9 @@ type Props = {
  * applied to it whenever it parses into something the form can show, and is
  * re-rendered from it whenever a raw view is opened. Everything the form does
  * not cover is carried along untouched. The Chain tab shows the middleware
- * chain g2way would build for the draft.
+ * chain g2way would build for the draft; the Console tab sends a test request
+ * through the gateway to the stored definition, with an inferred trace that
+ * links back to the Chain tab.
  */
 export function ApiDesigner({
   original,
@@ -53,11 +58,12 @@ export function ApiDesigner({
   canWrite,
   environment,
   history,
+  console: consoleAccess,
 }: Props) {
   const [draft, setDraft] = useState(initial);
   const { view, setView, text, unapplied, open, edit } = useRawView<
     ApiDefinition,
-    'form' | 'chain' | 'history'
+    'form' | 'chain' | 'history' | 'console'
   >({
     draft,
     setDraft,
@@ -90,6 +96,7 @@ export function ApiDesigner({
     }
   };
   const validate = useMemo(() => schemaValidator(schema), [schema]);
+  const showConsole = original !== null && consoleAccess !== undefined;
 
   const problems = draftProblems(draft);
   const schemaProblems = validate(draft);
@@ -116,6 +123,7 @@ export function ApiDesigner({
           <TabsTrigger value="yaml">YAML</TabsTrigger>
           <TabsTrigger value="chain">Chain</TabsTrigger>
           {history !== undefined && <TabsTrigger value="history">History</TabsTrigger>}
+          {showConsole && <TabsTrigger value="console">Console</TabsTrigger>}
         </TabsList>
         {restored !== null && view === 'form' && <RestoredNote from={restored} />}
         <TabsContent value="form" className="mt-4 flex flex-col gap-6">
@@ -152,6 +160,18 @@ export function ApiDesigner({
         <TabsContent value="chain" className="mt-4">
           <ChainView draft={draft} explain={explain} />
         </TabsContent>
+        {showConsole && original !== null && (
+          <TabsContent value="console" className="mt-4">
+            <RequestConsole
+              apiId={original.api_id}
+              listenPath={original.listen_path}
+              versions={original.versioning ? Object.keys(original.versioning.versions) : null}
+              environment={environment}
+              access={consoleAccess}
+              dirty={JSON.stringify(draft) !== JSON.stringify(original)}
+            />
+          </TabsContent>
+        )}
         {history !== undefined && (
           <TabsContent value="history" className="mt-4">
             <HistoryPanel

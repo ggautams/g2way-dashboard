@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SECRET_MASK } from '@/lib/secrets/redact';
 import {
   formatHeaders,
+  jsRegex,
   listProblems,
   moveBy,
   newRule,
@@ -161,5 +162,20 @@ describe('listProblems / problemsOf', () => {
     expect(back[0]).toBeUndefined();
     expect(back[1]?.methods).toMatch(/NOPE/);
     expect(back).toHaveLength(2);
+  });
+});
+
+describe('jsRegex', () => {
+  it('translates what it can follow, searched unanchored like g2way', () => {
+    expect(jsRegex('^/users/(\\d+)$')?.test('/users/42')).toBe(true);
+    expect(jsRegex('users')?.test('/api/users/1')).toBe(true);
+    expect(jsRegex('^/(?P<id>\\d+)$')?.test('/7')).toBe(true);
+    expect(jsRegex('[]a]')?.test(']')).toBe(true);
+  });
+
+  it('gives up (null) where the dialects differ in meaning, or on a bad pattern', () => {
+    for (const pattern of ['(?i)^/users', '(?x) a b', '[[:alpha:]]', '(?=x)', '(a)\\1', '(']) {
+      expect(jsRegex(pattern), pattern).toBeNull();
+    }
   });
 });

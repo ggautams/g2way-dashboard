@@ -15,6 +15,7 @@ import {
   UnknownEnvironmentError,
   getOrgId,
   listEnvironments,
+  resolveEnvironment,
 } from '@/lib/g2/environments';
 import { DeleteButton, NotLiveNote } from '@/components/designer/save-bar';
 import { Notice } from '@/components/users/controls';
@@ -28,7 +29,7 @@ export async function generateMetadata({
 
 /**
  * One stored definition in the designer: editable with `apis:write`, read-only
- * otherwise. A gateway failure is quoted verbatim; a 404 is the not-found page.
+ * otherwise. The Console tab sends test requests with `apis:test` (ADR-0011). A gateway failure is quoted verbatim; a 404 is the not-found page.
  */
 export default async function ApiPage({ params, searchParams }: PageProps<'/apis/view/[id]'>) {
   const user = await requirePermission('apis:read');
@@ -99,6 +100,11 @@ export default async function ApiPage({ params, searchParams }: PageProps<'/apis
           explain={slotExplanations()}
           schema={apiDefinitionSchema()}
           canWrite={canWrite}
+          console={{
+            canSend: can(user.role, 'apis:test'),
+            // Only whether a proxy URL is set: the URL itself stays on the server (ADR-0011).
+            configured: resolveEnvironment(environment.id).proxyUrl !== null,
+          }}
         />
       ) : (
         <section

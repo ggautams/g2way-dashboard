@@ -50,6 +50,9 @@ const secrets = {
   G2_ENV_DEV_SECRET: canary('dev'),
   G2_ENV_PROD_SECRET: canary('prod'),
   AUTH_SECRET: canary('auth'),
+  // Not a secret, but server-only all the same (ADR-0011): the request
+  // console's proxy URL must never reach the browser either.
+  G2_PROXY_URL: `http://${canary('proxy')}.invalid:8080`,
 };
 
 // Auth.js: the canary secret, and trust the Host header as `next start` requires.
@@ -70,6 +73,7 @@ const PORTAL_DEV = account('portal-dev', 'bundle-portal@example.com');
 const singleForm = {
   G2_ADMIN_URL: DEAD_GATEWAY,
   G2_ADMIN_SECRET: secrets.G2_ADMIN_SECRET,
+  G2_PROXY_URL: secrets.G2_PROXY_URL,
 };
 const namedForm = {
   G2_ENVIRONMENTS: 'dev,prod',
@@ -394,6 +398,12 @@ async function checkRoles(base) {
   // A read reaches the (dead) gateway; a write is refused before it.
   await expectStatus('viewer', viewer, '/api/g2/version', 502);
   await expectStatus('viewer', viewer, '/api/g2/reload', 403, { method: 'POST' });
+  // The request console needs apis:test (ADR-0011), refused before any gateway call.
+  await expectStatus('viewer', viewer, '/api/g2/console', 403, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ apiId: 'any-api', method: 'GET', path: '', headers: [], body: '' }),
+  });
 
   const portal = await signIn(base, 'portal-dev', PORTAL_DEV);
   await expectStatus('portal-dev', portal, '/', 200);
