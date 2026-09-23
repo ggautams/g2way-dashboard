@@ -185,6 +185,12 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [ ] Show the gateway's real middleware trace in the request console —
       **blocked**: no per-request middleware trace (`UPSTREAM.md`); the
       console shows a dashboard-side inferred trace meanwhile (ADR-0011 §5)
+- [ ] Confirm whether g2way builds a layer for a present-but-empty block
+      (`transform_headers: {}`). `chain.ts` shows it as on; `HeaderTransforms`
+      has an `is_empty()`, but the code that builds the route's chain is not in
+      `docs/g2way-map.md`. Find it, add it to the map, and fix `chainFor` if
+      needed. This is only about the Chain tab's display: an empty block does
+      nothing either way.
 
 ## M6 — Analytics
 
@@ -215,6 +221,10 @@ the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
       move from `DEFERRED_OVERRIDES` to `FORM_OVERRIDES` in
       `src/lib/apis/versioning.ts`; the `target_url`-under-a-target-list check
       there already reads a `target_list` override
+- [ ] Explain panels for the forwarder and the dispatcher, the M5 Chain tab
+      nodes that are not slots, from the vendored `websockets.md`, `grpc.md`,
+      `service-discovery.md` and `tls.md` (TLS termination). Extend
+      `src/lib/apis/slot-docs.ts` the way M5 did for the slots
 
 ## M8 — GraphQL studio
 
@@ -1520,3 +1530,21 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - Not run in a browser; added to the open M2 browser-pass box.
   - Next: M5's remaining boxes are both blocked upstream (2b follow-up, real
     trace), so M6 (analytics) is next.
+- docs(M5): **M5 complete** (except as noted below).
+  - Landed: the Chain tab, in g2way's 19-slot order with the versioned split
+    (ddc50c7). Editors 2a–2d for auth settings, IP, size and method
+    (cc8a315), path rules, rewrites, mocks and endpoint limits (a15fbe1),
+    header/body transforms and CORS (d279524), and versioning with
+    per-version overrides (7274f86). An explain panel per slot, from the
+    vendored docs (2313035). The request console, with an inferred trace,
+    behind ADR-0011 and the new `apis:test` permission (34c6712, 15ce301).
+  - Blocked upstream, kept open in M5 with a matching `UPSTREAM.md` TODO:
+    exact regex and minijinja checks (no validate-only endpoint); the
+    gateway's real middleware trace (no per-request trace).
+  - Open in M5 and not blocked: whether an empty `transform_headers: {}`
+    builds a layer. It affects only what the Chain tab shows.
+  - Follow-ups filed elsewhere: M7 gets per-version upstream and resilience
+    overrides, plus the forwarder and dispatcher explain panels. M8 gets
+    per-version `graphql`, and M9 per-version `plugins`. The M2 browser-pass
+    box now lists every M5 surface; none of M5 has run in a browser.
+  - Next: M6 (analytics).
