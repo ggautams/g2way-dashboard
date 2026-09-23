@@ -107,6 +107,8 @@ const PAGES = {
     '/apis/new',
     '/apis/import',
     '/apis/view/any-api',
+    '/analytics',
+    '/analytics/live',
   ],
   named: [
     '/',
@@ -122,6 +124,8 @@ const PAGES = {
     '/apis/new',
     '/apis/import',
     '/apis/view/any-api',
+    '/analytics',
+    '/analytics/live?status=5xx',
   ],
 };
 
@@ -412,11 +416,17 @@ async function checkRoles(base) {
     body: JSON.stringify({ apiId: 'any-api', method: 'GET', path: '', headers: [], body: '' }),
   });
 
+  // The live inspector shows individual requests: analytics:inspect, editor and up (ADR-0014).
+  await expectStatus('viewer', viewer, '/analytics', 200);
+  await expectStatus('viewer', viewer, '/analytics/live', 403);
+  await expectStatus('viewer', viewer, '/api/analytics/live', 403);
+
   const portal = await signIn(base, 'portal-dev', PORTAL_DEV);
   await expectStatus('portal-dev', portal, '/', 200);
   await expectStatus('portal-dev', portal, '/gateway', 403);
   await expectStatus('portal-dev', portal, '/apis', 403);
   await expectStatus('portal-dev', portal, '/api/g2/version', 403);
+  await expectStatus('portal-dev', portal, '/api/analytics/live', 403);
   return fetched;
 }
 

@@ -29,6 +29,7 @@ describe('ROLE_PERMISSIONS', () => {
         'keys:read',
         'gateway:reload',
         'graphql:sync',
+        'analytics:inspect',
       ],
       viewer: ['gateway:read', 'apis:read', 'policies:read', 'keys:read'],
       'portal-dev': [],

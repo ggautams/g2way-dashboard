@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import {
   BreakdownPanel,
   type BreakdownItem,
@@ -7,7 +8,6 @@ import {
 import { DrillBar, type DrillChip } from '@/components/analytics/drill-bar';
 import { IngestHealthPanel } from '@/components/analytics/ingest-health';
 import { TrafficPanel, formatStep } from '@/components/analytics/traffic-panel';
-import { IngestConfigError, parseIngestConfig } from '@/lib/analytics/config';
 import {
   DIMENSION_LABELS,
   allowedBreakdowns,
@@ -25,7 +25,8 @@ import {
   type Drill,
   type DrillState,
 } from '@/lib/analytics/drill';
-import { ingestHealth } from '@/lib/analytics/health';
+import { loadIngestHealth } from '@/lib/analytics/load-health';
+import { liveHref } from '@/lib/analytics/tail';
 import {
   elapsedSeconds,
   parseTrafficRange,
@@ -38,12 +39,7 @@ import {
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
-import {
-  getIngestState,
-  queryBreakdown,
-  queryBreakdownBuckets,
-  queryTrafficBuckets,
-} from '@/lib/db/analytics';
+import { queryBreakdown, queryBreakdownBuckets, queryTrafficBuckets } from '@/lib/db/analytics';
 import { listKeyMetadata } from '@/lib/db/key-metadata';
 import {
   RegistryConfigError,
@@ -73,6 +69,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
   const params = await searchParams;
   const range = parseTrafficRange(params.range);
   const roles = { keys: can(user.role, 'keys:read'), apis: can(user.role, 'apis:read') };
+  const inspect = can(user.role, 'analytics:inspect');
   const drill = parseDrill(params, { keys: roles.keys });
 
   let target: GatewayTarget;
@@ -117,6 +114,16 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
         notes={drill.notes}
         clearHref={drillHref({ range: range.id, apiId: null, focus: null, by: null })}
       />
+      {inspect && (
+        <p className="text-sm">
+          <Link className="underline" href={liveHref({ apiId: drill.apiId, focus: drill.focus })}>
+            Live requests for this selection
+          </Link>{' '}
+          <span className="text-muted">
+            (the newest individual requests, refreshed as they arrive)
+          </span>
+        </p>
+      )}
       <TrafficPanel
         traffic={traffic}
         rangeHrefs={rangeHrefs(state)}
@@ -135,25 +142,6 @@ export default async function AnalyticsPage({ searchParams }: PageProps<'/analyt
       )}
     </Page>
   );
-}
-
-/** The environment's ingest health, and the time it was read (for the "ago" labels). */
-async function loadIngestHealth(target: GatewayTarget) {
-  let workerInServer = false;
-  let configProblems: readonly string[] = [];
-  try {
-    workerInServer = parseIngestConfig(process.env).inServer;
-  } catch (error) {
-    if (!(error instanceof IngestConfigError)) throw error;
-    configProblems = error.problems;
-  }
-  const redisConfigured = target.redisUrl !== null;
-  const state = redisConfigured
-    ? await getIngestState(getDatabase(), getOrgId(), target.id)
-    : undefined;
-  const now = Date.now();
-  const health = ingestHealth({ redisConfigured, workerInServer, state, now });
-  return { health, configProblems, now };
 }
 
 /** The range's chart series for the selection, and the source buckets they came from. */

@@ -13,6 +13,11 @@ export type IngestConfig = {
   minuteRetentionDays: number;
   /** Hour rollups older than this many days are pruned. */
   hourRetentionDays: number;
+  /**
+   * Recent requests kept per environment for the live inspector
+   * (`G2_ANALYTICS_TAIL_ROWS`, ADR-0014); 0 keeps none.
+   */
+  tailRows: number;
 };
 
 export const INGEST_DEFAULTS: IngestConfig = {
@@ -20,6 +25,7 @@ export const INGEST_DEFAULTS: IngestConfig = {
   batchSize: 1000,
   minuteRetentionDays: 3,
   hourRetentionDays: 90,
+  tailRows: 200,
 };
 
 /** The settings are unusable; `problems` names each offending variable. */
@@ -75,6 +81,7 @@ export function parseIngestConfig(env: Env): IngestConfig {
       [1, 3650],
       problems,
     ),
+    tailRows: integer(env, 'G2_ANALYTICS_TAIL_ROWS', INGEST_DEFAULTS.tailRows, [0, 1000], problems),
   };
   if (problems.length > 0) throw new IngestConfigError(problems);
   return config;

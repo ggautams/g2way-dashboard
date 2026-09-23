@@ -167,7 +167,8 @@ export function rollupBatch(
   return [...deltas.values()];
 }
 
-function truncatePath(path: string): string {
+/** Cuts a path to `MAX_PATH_LENGTH` characters, as the rollups and the tail store it. */
+export function truncatePath(path: string): string {
   return path.length > MAX_PATH_LENGTH ? path.slice(0, MAX_PATH_LENGTH) : path;
 }
 

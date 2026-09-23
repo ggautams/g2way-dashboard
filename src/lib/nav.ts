@@ -112,6 +112,15 @@ export const NAV: readonly NavGroup[] = [
         ready: true,
         permission: 'gateway:read',
       },
+      {
+        href: '/analytics/live',
+        label: 'Live requests',
+        description: 'Tail of recent requests',
+        keywords: ['inspector', 'tail', 'requests', 'log'],
+        milestone: 'M6',
+        ready: true,
+        permission: 'analytics:inspect',
+      },
     ],
   },
   {

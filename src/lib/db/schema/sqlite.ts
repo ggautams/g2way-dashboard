@@ -254,3 +254,34 @@ export const analyticsIngestState = sqliteTable(
   },
   (t) => [uniqueIndex('analytics_ingest_state_env_unique').on(t.orgId, t.environment)],
 );
+
+/**
+ * The live request inspector's tail (ADR-0014): the newest requests the ingest
+ * worker popped, per org and environment, written in the same transaction as
+ * the batch's rollups and pruned to `G2_ANALYTICS_TAIL_ROWS` rows and 15
+ * minutes. A projection of the gateway's record, not a copy: client IP and
+ * User-Agent are never stored (ADR-0012 §6). `path` is the raw path as the
+ * client sent it (g2way records no query string), `path_template` the value
+ * the rollups filed it under (ADR-0012 §5). `at` is the gateway's timestamp.
+ */
+export const analyticsTail = sqliteTable(
+  'analytics_tail',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    at: integer('at', { mode: 'timestamp_ms' }).notNull(),
+    apiId: text('api_id').notNull(),
+    method: text('method').notNull(),
+    path: text('path').notNull(),
+    pathTemplate: text('path_template').notNull(),
+    status: integer('status').notNull(),
+    latencyMs: integer('latency_ms').notNull(),
+    upstreamLatencyMs: integer('upstream_latency_ms'),
+    keyHash: text('key_hash'),
+    keyAlias: text('key_alias'),
+    requestBytes: integer('request_bytes'),
+    responseBytes: integer('response_bytes'),
+  },
+  (t) => [index('analytics_tail_env_at_idx').on(t.orgId, t.environment, t.at)],
+);

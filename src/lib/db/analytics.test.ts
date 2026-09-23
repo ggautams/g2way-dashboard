@@ -4,11 +4,14 @@ import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rollupBatch } from '@/lib/analytics/rollup';
+import { TAIL_MAX_AGE_MS, tailEntries, type TailFilter } from '@/lib/analytics/tail';
 import type { AnalyticsRecord } from '@/lib/analytics/record';
 import { migrateDatabase, migrationsFolder, openDatabase } from '.';
 import {
   getIngestState,
   pruneRollups,
+  pruneTail,
+  queryTail,
   queryBreakdown,
   queryBreakdownBuckets,
   queryTrafficBuckets,
@@ -449,5 +452,131 @@ describe.each([
     const rows = await rollups(handle);
     expect(apiRow(rows, 60).reduce((total, r) => total + r.requests, 0)).toBe(600);
     expect(rows.filter((r) => r.dimension === 'key' && r.bucketSeconds === 3600)).toHaveLength(600);
+  });
+});
+
+/** A batch whose tail holds `records` and keeps at most `keep` rows. */
+function tailBatch(
+  records: AnalyticsRecord[],
+  keep: number,
+  overrides: Partial<IngestBatch> = {},
+): IngestBatch {
+  const drainedAt = overrides.drainedAt ?? new Date(T0 + 1000);
+  return batch(records, {
+    tail: {
+      entries: tailEntries(records, (r) => r.path, keep, drainedAt.getTime()),
+      keep,
+    },
+    ...overrides,
+  });
+}
+
+describe.each([
+  ['SQLite (in memory)', sqliteMemory],
+  ['Postgres (PGlite)', pglite],
+])('the live inspector tail on %s', (_name, open) => {
+  const read = (handle: DataHandle, filter: TailFilter = {}, org = ORG_A, environment = 'prod') =>
+    queryTail(handle, org, {
+      environment,
+      since: new Date(T0 - TAIL_MAX_AGE_MS),
+      filter,
+      limit: 100,
+    });
+
+  it('keeps the newest rows up to the cap across batches, newest first', async () => {
+    const handle = await open();
+    const at = (i: number) => T0 - 10_000 + i * 100;
+    await writeIngestBatch(
+      handle,
+      ORG_A,
+      tailBatch(
+        [0, 1, 2].map((i) => record(ORG_A, { timestamp_unix_ms: at(i), path: `/p${i}` })),
+        4,
+      ),
+    );
+    await writeIngestBatch(
+      handle,
+      ORG_A,
+      tailBatch(
+        [3, 4].map((i) => record(ORG_A, { timestamp_unix_ms: at(i), path: `/p${i}` })),
+        4,
+      ),
+    );
+    expect((await read(handle)).map((row) => row.path)).toEqual(['/p4', '/p3', '/p2', '/p1']);
+  });
+
+  it('prunes rows past the tail age on the next batch, and by pruneTail', async () => {
+    const handle = await open();
+    await writeIngestBatch(handle, ORG_A, tailBatch([record(ORG_A, { path: '/old' })], 10));
+    await writeIngestBatch(handle, ORG_B, tailBatch([record(ORG_B, { path: '/old-b' })], 10));
+    const later = new Date(T0 + TAIL_MAX_AGE_MS + 5000);
+    await writeIngestBatch(
+      handle,
+      ORG_A,
+      tailBatch([record(ORG_A, { timestamp_unix_ms: later.getTime(), path: '/new' })], 10, {
+        drainedAt: later,
+      }),
+    );
+    const since = { since: new Date(0), filter: {}, limit: 100, environment: 'prod' };
+    expect((await queryTail(handle, ORG_A, since)).map((row) => row.path)).toEqual(['/new']);
+    // Another org's tail is left to its own batches, and to pruneTail for that org.
+    expect(await queryTail(handle, ORG_B, since)).toHaveLength(1);
+    await pruneTail(handle, ORG_A, later);
+    expect(await queryTail(handle, ORG_B, since)).toHaveLength(1);
+    await pruneTail(handle, ORG_B, later);
+    expect(await queryTail(handle, ORG_B, since)).toHaveLength(0);
+  });
+
+  it('leaves the tail alone when a batch carries none', async () => {
+    const handle = await open();
+    await writeIngestBatch(handle, ORG_A, tailBatch([record(ORG_A)], 10));
+    await writeIngestBatch(handle, ORG_A, batch([record(ORG_A)]));
+    await writeIngestBatch(handle, ORG_A, tailBatch([record(ORG_A)], 0));
+    expect(await read(handle)).toHaveLength(1);
+  });
+
+  it('filters by API, key (or none), status, status class, method and template', async () => {
+    const handle = await open();
+    await writeIngestBatch(
+      handle,
+      ORG_A,
+      tailBatch(
+        [
+          record(ORG_A, { path: '/a', api_id: 'orders', status: 503, key_hash: 'k1' }),
+          record(ORG_A, { path: '/b', status: 404, method: 'POST' }),
+          record(ORG_A, { path: '/c', status: 200, key_hash: 'k1' }),
+        ],
+        10,
+      ),
+    );
+    const paths = async (filter: TailFilter) =>
+      (await read(handle, filter)).map((row) => row.path).sort();
+    expect(await paths({})).toEqual(['/a', '/b', '/c']);
+    expect(await paths({ apiId: 'orders' })).toEqual(['/a']);
+    expect(await paths({ keyHash: 'k1' })).toEqual(['/a', '/c']);
+    expect(await paths({ keyHash: null })).toEqual(['/b']);
+    expect(await paths({ status: 404 })).toEqual(['/b']);
+    expect(await paths({ statusClass: 5 })).toEqual(['/a']);
+    expect(await paths({ statusClass: 2 })).toEqual(['/c']);
+    expect(await paths({ method: 'POST' })).toEqual(['/b']);
+    expect(await paths({ pathTemplate: '/c' })).toEqual(['/c']);
+  });
+
+  it('keeps environments and orgs apart, and honours since and limit', async () => {
+    const handle = await open();
+    await writeIngestBatch(handle, ORG_A, tailBatch([record(ORG_A, { path: '/prod' })], 10));
+    await writeIngestBatch(
+      handle,
+      ORG_A,
+      tailBatch([record(ORG_A, { path: '/staging' })], 10, { environment: 'staging' }),
+    );
+    await writeIngestBatch(handle, ORG_B, tailBatch([record(ORG_B, { path: '/b' })], 10));
+    expect((await read(handle)).map((row) => row.path)).toEqual(['/prod']);
+    expect((await read(handle, {}, ORG_A, 'staging')).map((row) => row.path)).toEqual(['/staging']);
+    expect((await read(handle, {}, ORG_B)).map((row) => row.path)).toEqual(['/b']);
+    const future = { environment: 'prod', since: new Date(T0 + 1), filter: {}, limit: 100 };
+    expect(await queryTail(handle, ORG_A, future)).toEqual([]);
+    const none = { environment: 'prod', since: new Date(0), filter: {}, limit: 0 };
+    expect(await queryTail(handle, ORG_A, none)).toEqual([]);
   });
 });

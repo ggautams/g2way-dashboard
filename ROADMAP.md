@@ -221,7 +221,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 - [x] Path templating for the `path` dimension (`/users/42` → `/users/{id}`, from
       the definition's rules or a heuristic) before rollup, so the per-batch cap
       of 200 paths per API and bucket (`(other)` past it) rarely bites
-- [ ] Live request inspector (tail of recent requests). Feed it from the ingest
+- [x] Live request inspector (tail of recent requests). Feed it from the ingest
       worker's batch in hand, never from a second reader of the Redis list,
       which would steal records from the rollups (ADR-0012 §6)
 - [ ] Optional Prometheus datasource for long-range aggregates
@@ -335,6 +335,10 @@ an in-cluster dashboard cannot reach it. See `UPSTREAM.md`.
       APIs, which `GET /g2/apis` does not list, and for rules without named
       groups), with a "files as" preview in the path-rule editor
       (ADR-0012 §5, amended 2026-09-23)
+- [ ] Live inspector privacy options (ADR-0014 §3): mask token-shaped raw path
+      segments (the templater's `{token}`/`{hex}` classes) for editors, and
+      decide whether an opt-in client IP / User-Agent column is ever allowed
+      (it would reverse ADR-0012 §6 and needs its own ADR)
 
 ---
 
@@ -1731,3 +1735,29 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     `traffic-middleware`.
   - Next: M6 live request inspector. Feed it from `drainOnce`'s `records`
     (raw, pre-template) before `rollupBatch`.
+- feat(M6): **live request inspector** at `/analytics/live`
+  (ADR-0014; ADR-0012 §6 and ADR-0005 amended).
+  - Where the tail lives: `analytics_tail` in the dashboard database
+    (migration `0008_analytics_tail`), so it works the same whether the
+    worker runs in the server, as `npm run ingest`, or as several drainers.
+    `drainOnce` keeps the newest `G2_ANALYTICS_TAIL_ROWS` (default 200, 0 is
+    off) records of the batch in hand, via `tailEntries`. They are written
+    in the batch's own transaction, which also cuts the environment's tail to
+    that many rows and 15 minutes. `runIngest` prunes by age every minute.
+  - What is kept: raw path plus its rollup template, method, status,
+    latencies, sizes, key hash and alias. Never the IP or User-Agent.
+  - Who sees it: a new `analytics:inspect` permission, editor and up. Keys
+    are shown only with `keys:read`, as on `/keys`.
+  - Live updates: `GET /api/analytics/live` (withUser + permission check,
+    database only) polled every 2 s by a small `LiveTail` client, with
+    Pause/Resume, skipped while the tab is hidden. It takes the drill-down's
+    URL parameters (`parseDrill` → `tailFilter`; `?path=` matches the
+    template), and `/analytics` links to it with the selection kept.
+    `loadIngestHealth` moved to `src/lib/analytics/load-health.ts` for both
+    pages. `check:bundle` now renders `/analytics` and `/analytics/live` and
+    checks a viewer's 403s.
+  - Surprise: `/analytics` had never been in `check:bundle`'s page list;
+    added. No visual pass (extension not connected); the visual-pass box
+    lists the inspector. Follow-up in M12 (inspector privacy options).
+  - Next: M6 Prometheus datasource. The tail is a sample under load, not a
+    log; later M6 tasks should not build exports on it.

@@ -1,10 +1,26 @@
 import 'server-only';
 
-import { and, asc, desc, eq, gte, inArray, like, lt, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  like,
+  lt,
+  lte,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { BreakdownGroup, StatusClass } from '@/lib/analytics/drill';
 import { ROLLUP_COUNTERS, type RollupDelta } from '@/lib/analytics/rollup';
+import { TAIL_MAX_AGE_MS, type TailEntry, type TailFilter } from '@/lib/analytics/tail';
 import { TRAFFIC_COUNTERS, type TrafficBucket } from '@/lib/analytics/traffic';
 import type { RollupBucketSeconds, RollupDimension } from './schema/shared';
 import type * as sqliteSchema from './schema/sqlite';
@@ -22,6 +38,7 @@ import type { DataHandle } from './users';
 
 export type AnalyticsRollup = typeof sqliteSchema.analyticsRollups.$inferSelect;
 export type AnalyticsIngestState = typeof sqliteSchema.analyticsIngestState.$inferSelect;
+export type AnalyticsTailRow = typeof sqliteSchema.analyticsTail.$inferSelect;
 
 /** What one drained batch adds to the ingest state. */
 export type IngestBatch = {
@@ -38,6 +55,11 @@ export type IngestBatch = {
   /** The list's length right after the pop. */
   backlog: number;
   drainedAt: Date;
+  /**
+   * The batch's requests for the live inspector (ADR-0014), and how many rows
+   * the environment's tail keeps. Absent, or `keep` 0, the tail is untouched.
+   */
+  tail?: { entries: readonly TailEntry[]; keep: number };
 };
 
 /** Rows per multi-row insert: 36 columns × 200 stays far below every driver's parameter limit. */
@@ -119,6 +141,16 @@ export async function writeIngestBatch(
     lastRejection: batch.lastRejection,
     updatedAt: batch.drainedAt,
   };
+  // The tail is replaced in the same transaction, so a retried batch never
+  // leaves its requests in twice, and a lost one leaves none (ADR-0014 §2).
+  const tail =
+    batch.tail === undefined || batch.tail.keep <= 0
+      ? null
+      : {
+          rows: batch.tail.entries.map((entry) => ({ ...entry, orgId, environment })),
+          keep: batch.tail.keep,
+          before: new Date(batch.drainedAt.getTime() - TAIL_MAX_AGE_MS),
+        };
 
   if (handle.dialect === 'sqlite') {
     const { db, schema } = handle;
@@ -145,6 +177,29 @@ export async function writeIngestBatch(
           .values(state)
           .onConflictDoUpdate({ target: [s.orgId, s.environment], set: stateSet('sqlite', s) })
           .run();
+        if (tail !== null) {
+          const q = schema.analyticsTail;
+          for (let i = 0; i < tail.rows.length; i += CHUNK) {
+            tx.insert(q)
+              .values(tail.rows.slice(i, i + CHUNK))
+              .run();
+          }
+          const newest = tx
+            .select({ id: q.id })
+            .from(q)
+            .where(and(eq(q.orgId, orgId), eq(q.environment, environment)))
+            .orderBy(desc(q.at), desc(q.id))
+            .limit(tail.keep);
+          tx.delete(q)
+            .where(
+              and(
+                eq(q.orgId, orgId),
+                eq(q.environment, environment),
+                or(lt(q.at, tail.before), notInArray(q.id, newest)),
+              ),
+            )
+            .run();
+        }
       },
       { behavior: 'immediate' },
     );
@@ -173,6 +228,27 @@ export async function writeIngestBatch(
       .insert(s)
       .values(state)
       .onConflictDoUpdate({ target: [s.orgId, s.environment], set: stateSet('postgres', s) });
+    if (tail !== null) {
+      const q = schema.analyticsTail;
+      for (let i = 0; i < tail.rows.length; i += CHUNK) {
+        await tx.insert(q).values(tail.rows.slice(i, i + CHUNK));
+      }
+      const newest = tx
+        .select({ id: q.id })
+        .from(q)
+        .where(and(eq(q.orgId, orgId), eq(q.environment, environment)))
+        .orderBy(desc(q.at), desc(q.id))
+        .limit(tail.keep);
+      await tx
+        .delete(q)
+        .where(
+          and(
+            eq(q.orgId, orgId),
+            eq(q.environment, environment),
+            or(lt(q.at, tail.before), notInArray(q.id, newest)),
+          ),
+        );
+    }
   });
 }
 
@@ -500,4 +576,78 @@ export async function queryBreakdownBuckets(
     out.set(key, list);
   }
   return out;
+}
+
+/**
+ * Deletes the org's tail rows older than `before`, in every environment
+ * (ADR-0014 §2). Each batch prunes its own environment; this catches an
+ * environment gone quiet.
+ */
+export async function pruneTail(handle: DataHandle, orgId: string, before: Date): Promise<void> {
+  if (handle.dialect === 'sqlite') {
+    const q = handle.schema.analyticsTail;
+    handle.db
+      .delete(q)
+      .where(and(eq(q.orgId, orgId), lt(q.at, before)))
+      .run();
+    return;
+  }
+  const q = handle.schema.analyticsTail;
+  await handle.db.delete(q).where(and(eq(q.orgId, orgId), lt(q.at, before)));
+}
+
+export type TailQuery = {
+  environment: string;
+  /** Only requests at or after this instant. */
+  since: Date;
+  filter: TailFilter;
+  limit: number;
+};
+
+type TailTable = typeof sqliteSchema.analyticsTail | PgHandle['schema']['analyticsTail'];
+
+function tailWhere(q: TailTable, orgId: string, query: TailQuery): SQL | undefined {
+  const { filter } = query;
+  return and(
+    eq(q.orgId, orgId),
+    eq(q.environment, query.environment),
+    gte(q.at, query.since),
+    filter.apiId === undefined ? undefined : eq(q.apiId, filter.apiId),
+    filter.keyHash === undefined
+      ? undefined
+      : filter.keyHash === null
+        ? isNull(q.keyHash)
+        : eq(q.keyHash, filter.keyHash),
+    filter.status === undefined ? undefined : eq(q.status, filter.status),
+    filter.statusClass === undefined
+      ? undefined
+      : and(gte(q.status, filter.statusClass * 100), lte(q.status, filter.statusClass * 100 + 99)),
+    filter.method === undefined ? undefined : eq(q.method, filter.method),
+    filter.pathTemplate === undefined ? undefined : eq(q.pathTemplate, filter.pathTemplate),
+  );
+}
+
+/** The environment's newest tail rows matching the filter, newest first. */
+export async function queryTail(
+  handle: DataHandle,
+  orgId: string,
+  query: TailQuery,
+): Promise<AnalyticsTailRow[]> {
+  if (handle.dialect === 'sqlite') {
+    const q = handle.schema.analyticsTail;
+    return handle.db
+      .select()
+      .from(q)
+      .where(tailWhere(q, orgId, query))
+      .orderBy(desc(q.at), desc(q.id))
+      .limit(query.limit)
+      .all();
+  }
+  const q = handle.schema.analyticsTail;
+  return handle.db
+    .select()
+    .from(q)
+    .where(tailWhere(q, orgId, query))
+    .orderBy(desc(q.at), desc(q.id))
+    .limit(query.limit);
 }

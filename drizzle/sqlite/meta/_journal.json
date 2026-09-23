@@ -57,6 +57,13 @@
       "when": 1790216389757,
       "tag": "0007_ingest_heartbeat",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790217954389,
+      "tag": "0008_analytics_tail",
+      "breakpoints": true
     }
   ]
 }

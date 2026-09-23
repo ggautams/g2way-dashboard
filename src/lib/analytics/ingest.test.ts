@@ -2,10 +2,19 @@ import { asc } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { migrateDatabase, openDatabase, type DashboardDatabase } from '@/lib/db';
 import * as analyticsDb from '@/lib/db/analytics';
-import { getIngestState } from '@/lib/db/analytics';
+import { getIngestState, queryTail } from '@/lib/db/analytics';
 import { ingestHealth } from './health';
 import { templateRuleCache } from './path-template';
-import { BACKOFF_MS, HEARTBEAT_MS, IDLE_MS, drainOnce, runIngest, type IngestDeps } from './ingest';
+import {
+  BACKOFF_MS,
+  HEARTBEAT_MS,
+  IDLE_MS,
+  TAIL_PRUNE_EVERY_MS,
+  drainOnce,
+  runIngest,
+  type IngestDeps,
+} from './ingest';
+import { TAIL_MAX_AGE_MS } from './tail';
 import type { RecordQueue } from './queue';
 import type { AnalyticsRecord } from './record';
 
@@ -181,6 +190,45 @@ describe('drainOnce', () => {
       .filter((r) => r.dimension === 'path')
       .map((r) => r.value);
     expect(new Set(values)).toEqual(new Set(['/users/{id}']));
+  });
+
+  it('feeds the live tail from the batch in hand: raw path, its template, no client IP', async () => {
+    const queue = new MemoryQueue();
+    queue.items = [
+      record({ path: '/users/42', client_ip: '203.0.113.7', user_agent: 'curl/8.0' }),
+      record({ path: '/users/43', timestamp_unix_ms: T0 + 1 }),
+    ];
+    await drainOnce({ environment: 'prod', queue, redisUrl: REDIS_URL }, deps());
+    const rows = await queryTail(handle, ORG, {
+      environment: 'prod',
+      since: new Date(0),
+      filter: {},
+      limit: 10,
+    });
+    expect(rows.map((row) => [row.path, row.pathTemplate])).toEqual([
+      ['/users/43', '/users/{id}'],
+      ['/users/42', '/users/{id}'],
+    ]);
+    expect(JSON.stringify(rows)).not.toMatch(/203\.0\.113\.7|curl/);
+  });
+
+  it('keeps no tail when G2_ANALYTICS_TAIL_ROWS is 0, and at most that many otherwise', async () => {
+    const queue = new MemoryQueue();
+    queue.items = [record(), record(), record()];
+    const config = { batchSize: 3, minuteRetentionDays: 3, hourRetentionDays: 90 };
+    await drainOnce(
+      { environment: 'prod', queue, redisUrl: REDIS_URL },
+      deps({ config: { ...config, tailRows: 0 } }),
+    );
+    const read = () =>
+      queryTail(handle, ORG, { environment: 'prod', since: new Date(0), filter: {}, limit: 10 });
+    expect(await read()).toHaveLength(0);
+    queue.items = [record(), record(), record()];
+    await drainOnce(
+      { environment: 'prod', queue, redisUrl: REDIS_URL },
+      deps({ config: { ...config, tailRows: 2 } }),
+    );
+    expect(await read()).toHaveLength(2);
   });
 
   it('writes nothing for an empty list', async () => {
@@ -370,5 +418,37 @@ describe('runIngest', () => {
     const controller = new AbortController();
     await runIngest([], deps({ signal: controller.signal, sleep: async () => controller.abort() }));
     expect(await apiRequests()).toBe(0);
+  });
+
+  it('prunes the tail by age every TAIL_PRUNE_EVERY_MS', async () => {
+    const queue = new MemoryQueue();
+    queue.items = [record()];
+    await drainOnce({ environment: 'prod', queue, redisUrl: REDIS_URL }, deps());
+    const read = () =>
+      queryTail(handle, ORG, { environment: 'prod', since: new Date(0), filter: {}, limit: 10 });
+    expect(await read()).toHaveLength(1);
+    let clock = T0 + 1000;
+    let passes = 0;
+    let remaining = -1;
+    const controller = new AbortController();
+    await runIngest(
+      [],
+      deps({
+        signal: controller.signal,
+        now: () => clock,
+        sleep: async () => {
+          passes += 1;
+          if (passes === 1) {
+            // The first pass pruned at start, while the row was young; the next
+            // prune is due after TAIL_PRUNE_EVERY_MS, by which time it is old.
+            clock = T0 + Math.max(TAIL_MAX_AGE_MS, TAIL_PRUNE_EVERY_MS) + 1;
+            remaining = (await read()).length;
+          } else controller.abort();
+        },
+      }),
+    );
+    expect(passes).toBe(2);
+    expect(remaining).toBe(1);
+    expect(await read()).toHaveLength(0);
   });
 });

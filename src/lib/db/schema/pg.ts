@@ -204,3 +204,25 @@ export const analyticsIngestState = pgTable(
   },
   (t) => [uniqueIndex('analytics_ingest_state_env_unique').on(t.orgId, t.environment)],
 );
+
+export const analyticsTail = pgTable(
+  'analytics_tail',
+  {
+    id: id(),
+    orgId: text('org_id').notNull(),
+    environment: text('environment').notNull(),
+    at: pgTimestamp('at', { withTimezone: true, mode: 'date' }).notNull(),
+    apiId: text('api_id').notNull(),
+    method: text('method').notNull(),
+    path: text('path').notNull(),
+    pathTemplate: text('path_template').notNull(),
+    status: integer('status').notNull(),
+    latencyMs: bigint('latency_ms', { mode: 'number' }).notNull(),
+    upstreamLatencyMs: bigint('upstream_latency_ms', { mode: 'number' }),
+    keyHash: text('key_hash'),
+    keyAlias: text('key_alias'),
+    requestBytes: bigint('request_bytes', { mode: 'number' }),
+    responseBytes: bigint('response_bytes', { mode: 'number' }),
+  },
+  (t) => [index('analytics_tail_env_at_idx').on(t.orgId, t.environment, t.at)],
+);

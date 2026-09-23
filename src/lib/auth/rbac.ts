@@ -32,6 +32,12 @@ export const PERMISSIONS = [
   'gateway:reload',
   /** `POST /g2/graphql/sync`: re-fetch upstream GraphQL schemas. */
   'graphql:sync',
+  /**
+   * The live request inspector (ADR-0014): individual recent requests, with
+   * their raw paths and keys, not aggregates. Raw paths can carry personal data
+   * (`/users/alice@example.com`), so not a viewer's.
+   */
+  'analytics:inspect',
   /** The users page. Who may change whom is decided by {@link userChangeDenial}. */
   'users:manage',
   /** The audit log (ADR-0006). */
@@ -47,6 +53,7 @@ const EDITOR: readonly Permission[] = [
   'policies:write',
   'gateway:reload',
   'graphql:sync',
+  'analytics:inspect',
 ];
 const ADMIN: readonly Permission[] = [...EDITOR, 'keys:write', 'users:manage', 'audit:read'];
 

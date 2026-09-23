@@ -2,16 +2,18 @@ import 'server-only';
 
 import {
   pruneRollups,
+  pruneTail,
   recordIngestError,
   recordIngestHeartbeat,
   writeIngestBatch,
 } from '@/lib/db/analytics';
 import type { DataHandle } from '@/lib/db/users';
-import type { IngestConfig } from './config';
+import { INGEST_DEFAULTS, type IngestConfig } from './config';
 import { redisErrorMessage, type RecordQueue } from './queue';
 import { parseAnalyticsRecord, type AnalyticsRecord } from './record';
 import { templatePath, type TemplateRule, type TemplateRuleCache } from './path-template';
 import { rollupBatch } from './rollup';
+import { TAIL_MAX_AGE_MS, tailEntries } from './tail';
 
 /**
  * The analytics ingest loop (ADR-0012): drain each environment's record list,
@@ -42,7 +44,8 @@ export type IngestLogger = Pick<Console, 'info' | 'warn'>;
 export type IngestDeps = {
   handle: DataHandle;
   orgId: string;
-  config: Pick<IngestConfig, 'batchSize' | 'minuteRetentionDays' | 'hourRetentionDays'>;
+  config: Pick<IngestConfig, 'batchSize' | 'minuteRetentionDays' | 'hourRetentionDays'> &
+    Partial<Pick<IngestConfig, 'tailRows'>>;
   signal: AbortSignal;
   now?: () => number;
   /** Resolves after `ms`, or early when `signal` aborts. */
@@ -55,6 +58,12 @@ export const IDLE_MS = 2000;
 /** Retry backoff for a failing source or database: doubles from the first to the last. */
 export const BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000] as const;
 export const PRUNE_EVERY_MS = 3_600_000;
+/**
+ * How often the live inspector's tail is pruned by age across environments
+ * (ADR-0014 §2). Each batch prunes its own environment; this catches one gone
+ * quiet, so no request outlives `TAIL_MAX_AGE_MS` by more than a minute.
+ */
+export const TAIL_PRUNE_EVERY_MS = 60_000;
 /**
  * The idle heartbeat's throttle (ADR-0012 §8): an empty pop writes
  * `last_polled_at` at most this often per source, so an idle worker costs
@@ -160,6 +169,9 @@ export async function drainOnce(source: IngestSource, deps: IngestDeps): Promise
     return path;
   };
   const newest = records.reduce((max, r) => Math.max(max, r.timestamp_unix_ms), -1);
+  // The live inspector's tail (ADR-0014): from this batch in hand, never from
+  // a second reader of the list (ADR-0012 §6).
+  const tailRows = config.tailRows ?? INGEST_DEFAULTS.tailRows;
   const batch = {
     environment,
     deltas: rollupBatch(records, pathOf),
@@ -169,6 +181,7 @@ export async function drainOnce(source: IngestSource, deps: IngestDeps): Promise
     lastRecordAt: newest < 0 ? null : new Date(newest),
     backlog,
     drainedAt: new Date(now()),
+    tail: { entries: tailEntries(records, pathOf, tailRows, now()), keep: tailRows },
   };
 
   for (let attempt = 0; ; attempt += 1) {
@@ -207,6 +220,16 @@ export async function pruneOnce(deps: IngestDeps): Promise<void> {
   }
 }
 
+/** Deletes tail rows past `TAIL_MAX_AGE_MS`. Failures are logged: the next pass tries again. */
+export async function pruneTailOnce(deps: IngestDeps): Promise<void> {
+  const now = (deps.now ?? Date.now)();
+  try {
+    await pruneTail(deps.handle, deps.orgId, new Date(now - TAIL_MAX_AGE_MS));
+  } catch (error) {
+    (deps.log ?? console).warn(`${PREFIX} tail prune failed: ${databaseErrorMessage(error)}`);
+  }
+}
+
 /**
  * Writes the source's heartbeat after an empty pop, unless one was written
  * within `HEARTBEAT_MS`. A failed write is logged and retried on the next pass.
@@ -233,8 +256,8 @@ async function heartbeat(
  * Runs until `deps.signal` aborts. Each pass drains every source once; a
  * source that just had a full batch is drained again without pausing, one
  * whose Redis failed is skipped until its backoff has passed. An empty pop
- * writes the heartbeat, throttled by `HEARTBEAT_MS`. Prunes at start and then
- * hourly. Never throws.
+ * writes the heartbeat, throttled by `HEARTBEAT_MS`. Prunes rollups at start
+ * and then hourly, and the inspector's tail every minute. Never throws.
  */
 export async function runIngest(sources: readonly IngestSource[], deps: IngestDeps): Promise<void> {
   const now = deps.now ?? Date.now;
@@ -244,11 +267,16 @@ export async function runIngest(sources: readonly IngestSource[], deps: IngestDe
   // on the next successful pop" (at start, and after a Redis failure).
   const beats = new Map<string, number>();
   let prunedAt = -Infinity;
+  let tailPrunedAt = -Infinity;
 
   while (!deps.signal.aborted) {
     if (now() - prunedAt >= PRUNE_EVERY_MS) {
       prunedAt = now();
       await pruneOnce(deps);
+    }
+    if (now() - tailPrunedAt >= TAIL_PRUNE_EVERY_MS) {
+      tailPrunedAt = now();
+      await pruneTailOnce(deps);
     }
     let busy = false;
     for (const source of sources) {
