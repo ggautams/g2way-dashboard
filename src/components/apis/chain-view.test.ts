@@ -17,16 +17,22 @@ describe('ChainView', () => {
 
   it('shows the versioned split: shared slots, the dispatcher, then one chain per version', () => {
     expect(source).toContain('chain.outer.map(');
-    expect(source).toContain("chainAnchor('dispatcher')");
+    expect(source).toContain('chainAnchor(DISPATCHER_ID)');
+    expect(source).toContain('<EditLink slotId={DISPATCHER_ID} />');
     expect(source).toContain('chain.versions.map(');
   });
 
   it('links slots with an editor to their form section, only through editorAnchor', () => {
     expect(source).toContain('EDITOR_SLOTS.includes(slotId)');
-    expect(source).toContain('href={`#${editorAnchor(slotId)}`}');
-    expect(source).toContain('<EditLink slotId={slot.id} />');
-    expect(source).toContain('<EditLink slotId={FORWARDER_ID} />');
+    expect(source).toContain('href={`#${editorAnchor(slotId, own ? version : undefined)}`}');
+    expect(source).toContain('<EditLink slotId={slot.id} version={version} />');
+    expect(source).toContain('<EditLink slotId={FORWARDER_ID} version={version} />');
     expect(source).not.toMatch(/href=\{?[`'"]#edit-/);
+  });
+
+  it('links a version’s overridable slots, and its heading, to that version’s editor', () => {
+    expect(source).toContain('VERSION_EDITOR_SLOTS.includes(slotId)');
+    expect(source).toContain('href={`#${editorAnchor(DISPATCHER_ID, v.name)}`}');
   });
 
   it('says the chain is not live until saved and reloaded', () => {

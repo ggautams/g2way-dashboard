@@ -2,7 +2,7 @@
  * The API designer's model: a draft is a whole `ApiDefinition`, and the form
  * edits it field by field through the pure helpers here. The form never
  * rebuilds a definition from its own fields, so everything it does not show
- * (plugins, caching, versioning, …) survives an edit byte for byte. Universal:
+ * (plugins, caching, a version's upstream overrides, …) survives an edit byte for byte. Universal:
  * the client designer and the tests share it.
  */
 
@@ -23,6 +23,7 @@ import {
   type HeaderProblemKey,
   type TransformHelp,
 } from './transforms';
+import { versioningProblems, type VersioningHelp, type VersioningProblemKey } from './versioning';
 
 /** The fields the structured form edits; the raw editor covers the rest. */
 export const FORM_FIELDS = [
@@ -50,6 +51,7 @@ export const FORM_FIELDS = [
   'cors',
   'transform_headers',
   'transform_body',
+  'versioning',
 ] as const satisfies readonly (keyof ApiDefinition)[];
 
 export type FormField = (typeof FORM_FIELDS)[number];
@@ -58,7 +60,9 @@ export type FormField = (typeof FORM_FIELDS)[number];
  * A problem's key: a form field, one auth setting as `auth.<setting>`, one
  * rule's setting as `<list>.<index>.<setting>` (`RuleProblemKey`), or a
  * transform or CORS setting (transforms.ts): `transform_headers.request.add`,
- * `transform_body.response.0.template`, `cors.allowed_origins`, ….
+ * `transform_body.response.0.template`, `cors.allowed_origins`, …, or a
+ * versioning one (versioning.ts): `versioning.key`, or a version's override
+ * under `versionPrefix(name)`, keyed as on the base (`….allow_paths.0.pattern`).
  */
 export type ProblemKey =
   | FormField
@@ -66,7 +70,8 @@ export type ProblemKey =
   | RuleProblemKey
   | `transform_headers.${HeaderProblemKey}`
   | `transform_body${BodyProblemKey}`
-  | `cors.${CorsField}`;
+  | `cors.${CorsField}`
+  | VersioningProblemKey;
 export type DraftProblems = Partial<Record<ProblemKey, string>>;
 
 /**
@@ -78,6 +83,7 @@ export type ApiHelp = {
   auth: AuthHelp;
   rules: RuleHelp;
   transforms: TransformHelp;
+  versioning: VersioningHelp;
 };
 
 /** A new API: the four required fields, empty, and active as g2way defaults it. */
@@ -193,7 +199,8 @@ function isHttpUrl(text: string): boolean {
  * absolute http(s) URLs, `ApiDefinition::validate` and `AuthConfig::validate`
  * in `api_definition.rs`, the path rules' `validate` in `endpoints.rs` and
  * `transform.rs`, the transform and CORS checks in `transform.rs`,
- * `body_transform.rs` and `security.rs`). The gateway's own validation is the authority; its
+ * `body_transform.rs` and `security.rs`, and `VersioningConfig::validate` in
+ * `versioning.rs`). The gateway's own validation is the authority; its
  * 400 message is shown verbatim on save.
  */
 export function draftProblems(draft: ApiDefinition): DraftProblems {
@@ -223,6 +230,6 @@ export function draftProblems(draft: ApiDefinition): DraftProblems {
     problems[`auth.${field as AuthField}`] = problem;
   }
   for (const list of RULE_LISTS) Object.assign(problems, listProblems(list, draft[list]));
-  Object.assign(problems, transformProblems(draft));
+  Object.assign(problems, transformProblems(draft), versioningProblems(draft));
   return problems;
 }

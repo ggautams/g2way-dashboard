@@ -182,7 +182,8 @@ export function formatPolicyMap(map: Record<string, string> | undefined): string
 /** An RFC 9110 token: what `http::HeaderName::from_bytes` accepts. */
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
-function isHttpUrl(text: string): boolean {
+/** An absolute http(s) URL with a host. */
+export function isHttpUrl(text: string): boolean {
   try {
     const url = new URL(text);
     return (url.protocol === 'http:' || url.protocol === 'https:') && url.host !== '';

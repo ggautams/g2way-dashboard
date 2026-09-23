@@ -78,7 +78,12 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       editors (CORS on/off, origins, the default-methods label; header
       transforms per direction, a `request.add` value hidden to a viewer and
       its Remove; body rules with a template and Content-Type; focus kept
-      while typing a template) (M1 and M2
+      while typing a template), and the 2d versioning editor (on/off restoring
+      the loaded config; add, rename on blur, remove; default picker incl.
+      "none"; key and location; the UTC expiry input; each override starting
+      as inherited and switching back; deferred overrides listed and kept;
+      the Chain tab's per-version "Edit v2" links landing on that version's
+      sections) (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23, twice. `make serve-scratch` is the one-step way to run the
       pass: a production build on :3100 against a fresh temp-dir SQLite
@@ -152,7 +157,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 - [x] Visual middleware chain reflecting g2way's real slot order
       (`crates/g2-middleware/src/chain.rs`), including how versioned APIs split it
-- [ ] Editors (ticked when all four below are)
+- [x] Editors (ticked when all four below are)
   - [x] 2a. Auth mode settings (the full `AuthConfig` per mode: `auth_token`,
         `jwt`, `oidc`, `hmac`, `basic_auth`, `mtls`, `keyless`), method
         transform, request size limit, IP allow/deny
@@ -166,7 +171,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
         endpoint (`UPSTREAM.md`)
   - [x] 2c. Header transforms, body transforms (minijinja rules +
         `max_response_body_bytes`), CORS
-  - [ ] 2d. Versioning (`VersioningConfig`; each version's overrides reuse the
+  - [x] 2d. Versioning (`VersioningConfig`; each version's overrides reuse the
         2b/2c editors; non-overridable fields shown as inherited)
 - [ ] Explain panel per slot rendered from `contracts/g2way-docs/`
 - [ ] Request console: send a test request through the gateway, show the
@@ -193,6 +198,14 @@ the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
 - [ ] Response cache config per API
 - [ ] Cache flush action — **blocked**: no gateway endpoint yet (`UPSTREAM.md`)
 - [ ] TLS / mTLS surface (cert modes, client-cert mapping)
+- [ ] Per-version upstream and resilience overrides in M5's versioning editor
+      (`src/components/apis/versioning-editor.tsx`): `target_list`,
+      `upstream_timeout_ms`, `upstream_retries`, `upstream_http2`,
+      `enable_upgrades`, `circuit_breaker`, `health_check`,
+      `service_discovery`, `cache`. Each needs `inherited={base…}` and a
+      move from `DEFERRED_OVERRIDES` to `FORM_OVERRIDES` in
+      `src/lib/apis/versioning.ts`; the `target_url`-under-a-target-list check
+      there already reads a `target_list` override
 
 ## M8 — GraphQL studio
 
@@ -206,12 +219,18 @@ the k8s manifests currently use `otlp_logs`. See `UPSTREAM.md`.
 - [ ] Universal Data Graph data-source designer
 - [ ] Federation view: subgraphs, composition status, supergraph SDL
 - [ ] Playground deep-link per API
+- [ ] Per-version `graphql` override in M5's versioning editor (today listed
+      as "edit in JSON/YAML"; move it from `DEFERRED_OVERRIDES` to
+      `FORM_OVERRIDES` in `src/lib/apis/versioning.ts`)
 
 ## M9 — Plugins
 
 - [ ] WASM plugin inventory and upload
 - [ ] Per-API attachment with pre/post hook slots
 - [ ] Plugin ABI documentation rendered from `contracts/g2way-docs/plugins.md`
+- [ ] Per-version `plugins` override in M5's versioning editor (today listed
+      as "edit in JSON/YAML"; move it from `DEFERRED_OVERRIDES` to
+      `FORM_OVERRIDES` in `src/lib/apis/versioning.ts`)
 
 ## M10 — Developer portal
 
@@ -1360,3 +1379,51 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     still shows as on. It changes nothing either way.
   - Not run in a browser; added to the open M2 browser-pass box.
   - Next: 2d, versioning.
+- feat(M5): editors 2d: versioning. With 2a–2d all done, the
+  parent Editors box is ticked.
+  - `src/lib/apis/versioning.ts` is the pure model. `versioningProblems`
+    mirrors `VersioningConfig::validate` (versioning.rs). It checks that the key
+    is a header token (or, for `query_param`, not blank), that there is at
+    least one version, that names are non-empty with no surrounding spaces,
+    and that `default_version` names an existing version. Each version's
+    form-edited overrides get the base's own checks (rules, header/body
+    transforms, method, `target_url`), plus g2way's guard against a
+    `target_url` override under an effective `target_list`. Keys go under
+    `versionPrefix(name)` = `versioning.versions.<encoded name>`, with dots
+    encoded too. `DEFAULT_VERSION_KEY` (`x-api-version`) is hard-coded,
+    since the spec omits serde defaults; chain.ts now uses it.
+  - `FORM_OVERRIDES` and `DEFERRED_OVERRIDES` (each with its owning
+    milestone) cover every `VersionOverrides` field once. A test checks this
+    against the OpenAPI schema, so a new upstream override fails the tests.
+    Deferred overrides are never touched and are listed per version as
+    "edit in JSON/YAML". New open boxes: M7 (upstream/resilience/cache
+    overrides), M8 (`graphql`), M9 (`plugins`).
+  - `versioning` joined `FORM_FIELDS`. `ApiHelp` gains `versioning`, read
+    from the VersioningConfig and VersionOverrides rustdoc.
+  - `versioning-editor.tsx`: an on/off toggle (turning it back on restores
+    the loaded config; a new config starts as `v1`, which is also the
+    default, so clients see no change). Also: location, key, a default
+    picker with "none" (a version is then required, or the request gets 403),
+    and one card per version. Renames are applied on blur or Enter, and only
+    when valid, so version keys never collide. The last version cannot be
+    removed; turn versioning off instead. Expiry is a UTC `datetime-local`
+    input, and a version whose time has passed says it is expired. Overrides
+    reuse `RuleList` and the header/body editors with
+    `inherited={draft.X ?? null}`, a per-version id and a prefix. `null`,
+    not `undefined`, marks override mode even when the base has no value.
+    The target URL is a blank-inherits text field. `transform_method` offers
+    "Inherited: …" but no "client's method", because it cannot be cleared.
+    Auth, the size limit, CORS and the IP lists are listed as "inherited
+    from base, shared by all versions", with links to their editors.
+  - Chain links: new `DISPATCHER_ID` (in `EDITOR_SLOTS`) is the form's
+    Versioning section. `editorAnchor(slotId, version?)` gives
+    `edit-v-<version>-<id>`. `VERSION_EDITOR_SLOTS` (path-policy, rate-limit,
+    transform-headers, transform-body, mock, forwarder) link from a version's
+    chain to that version's sections ("Edit v2"). Auth and the size limit
+    still link to the base editor, and each version heading links to its
+    card.
+  - The Versioning section comes last in the form, although the dispatcher
+    sits after CORS in the chain, because versions override the sections
+    above it.
+  - Not run in a browser; added to the open M2 browser-pass box.
+  - Next: the explain panel per slot.

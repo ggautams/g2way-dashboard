@@ -4,8 +4,10 @@ import {
   CHAIN_SLOTS,
   chainAnchor,
   chainFor,
+  DISPATCHER_ID,
   EDITOR_SLOTS,
   editorAnchor,
+  VERSION_EDITOR_SLOTS,
   FORWARDER_ID,
   type SlotStatus,
 } from './chain';
@@ -229,9 +231,23 @@ describe('chainFor, versioned', () => {
 });
 
 describe('editor links', () => {
-  it('names only real slots (or the forwarder), anchored as edit-<id>', () => {
-    const ids = new Set([...CHAIN_SLOTS.map((slot) => slot.id), FORWARDER_ID]);
+  it('names only real slots (or the forwarder or dispatcher), anchored as edit-<id>', () => {
+    const ids = new Set([...CHAIN_SLOTS.map((slot) => slot.id), FORWARDER_ID, DISPATCHER_ID]);
     for (const id of EDITOR_SLOTS) expect(ids.has(id), id).toBe(true);
     expect(editorAnchor('auth')).toBe('edit-auth');
+  });
+
+  it('gives per-version editors only to per-version slots a VersionOverrides field reaches', () => {
+    const perVersion = new Set([
+      ...CHAIN_SLOTS.filter((slot) => slot.scope === 'per-version').map((slot) => slot.id),
+      FORWARDER_ID,
+    ]);
+    for (const id of VERSION_EDITOR_SLOTS) {
+      expect(perVersion.has(id), id).toBe(true);
+      expect(EDITOR_SLOTS, id).toContain(id);
+    }
+    expect(VERSION_EDITOR_SLOTS).not.toContain('auth');
+    expect(VERSION_EDITOR_SLOTS).not.toContain('size-limit');
+    expect(editorAnchor('mock', 'v 2')).toBe('edit-v-v%202-mock');
   });
 });

@@ -14,6 +14,7 @@
 
 import type { components } from '../../../contracts/g2way.d.ts';
 import type { ApiDefinition } from './list';
+import { DEFAULT_VERSION_KEY } from './versioning';
 
 type VersionOverrides = components['schemas']['VersionOverrides'];
 type VersioningConfig = components['schemas']['VersioningConfig'];
@@ -259,6 +260,9 @@ export const CHAIN_SLOTS: readonly ChainSlot[] = [
 /** The id of the node after slot 19: the forwarder, which is not a slot. */
 export const FORWARDER_ID = 'forwarder';
 
+/** The id of a versioned API's version dispatcher, between slots 7 and 8: not a slot either. */
+export const DISPATCHER_ID = 'dispatcher';
+
 /**
  * The DOM id for a slot (or the forwarder) in the Chain tab. A versioned API
  * has one inner chain per version, so per-version slots take the version name.
@@ -280,6 +284,7 @@ export function chainAnchor(slotId: string, version?: string): string {
 export const EDITOR_SLOTS: readonly string[] = [
   'ip-filter',
   'cors',
+  DISPATCHER_ID,
   'path-policy',
   'size-limit',
   'auth',
@@ -290,9 +295,30 @@ export const EDITOR_SLOTS: readonly string[] = [
   FORWARDER_ID,
 ];
 
-/** The DOM id of the form section editing a slot (see {@link EDITOR_SLOTS}). */
-export function editorAnchor(slotId: string): string {
-  return `edit-${slotId}`;
+/**
+ * The per-version slots (and the forwarder) a version's own editor covers:
+ * those a `VersionOverrides` field reaches. In a versioned API's Chain tab
+ * these link to `editorAnchor(id, version)`; per-version slots whose fields
+ * come from the base only (auth, the size limit) link to the base editor.
+ */
+export const VERSION_EDITOR_SLOTS: readonly string[] = [
+  'path-policy',
+  'rate-limit',
+  'transform-headers',
+  'transform-body',
+  'mock',
+  FORWARDER_ID,
+];
+
+/**
+ * The DOM id of the form section editing a slot (see {@link EDITOR_SLOTS}),
+ * or, given a version, of that version's override section for it (see
+ * {@link VERSION_EDITOR_SLOTS}).
+ */
+export function editorAnchor(slotId: string, version?: string): string {
+  return version === undefined
+    ? `edit-${slotId}`
+    : `edit-v-${encodeURIComponent(version)}-${slotId}`;
 }
 
 /**
@@ -478,7 +504,7 @@ export function chainFor(def: ApiDefinition): Chain {
     outer: statuses(def, OUTER),
     selector: {
       location: versioning.location ?? 'header',
-      key: versioning.key ?? 'x-api-version',
+      key: versioning.key ?? DEFAULT_VERSION_KEY,
       defaultVersion,
     },
     versions: Object.entries(versioning.versions).map(([name, overrides]) => {

@@ -2,21 +2,39 @@ import { Badge } from '@/components/ui/badge';
 import {
   chainAnchor,
   chainFor,
+  DISPATCHER_ID,
   EDITOR_SLOTS,
   editorAnchor,
   FORWARDER_ID,
   type ForwarderStatus,
   type SlotState,
   type SlotStatus,
+  VERSION_EDITOR_SLOTS,
 } from '@/lib/apis/chain';
 import type { ApiDefinition } from '@/lib/apis/list';
 
-/** A link to the form section editing `slotId`, when there is one (`EDITOR_SLOTS`). */
-function EditLink({ slotId }: { slotId: string }) {
+/**
+ * A link to the form section editing `slotId`, when there is one
+ * (`EDITOR_SLOTS`). In a version's chain, a slot a version can override
+ * (`VERSION_EDITOR_SLOTS`) links to that version's override section; the
+ * rest come from the base definition, so they link to its editor.
+ */
+function EditLink({ slotId, version }: { slotId: string; version?: string }) {
   if (!EDITOR_SLOTS.includes(slotId)) return null;
+  const own = version !== undefined && VERSION_EDITOR_SLOTS.includes(slotId);
   return (
-    <a href={`#${editorAnchor(slotId)}`} className="ml-auto text-xs text-accent hover:underline">
-      Edit
+    <a
+      href={`#${editorAnchor(slotId, own ? version : undefined)}`}
+      className="ml-auto text-xs text-accent hover:underline"
+      title={
+        own
+          ? `This version's settings`
+          : version !== undefined
+            ? 'Shared by every version'
+            : undefined
+      }
+    >
+      {own ? `Edit ${version}` : 'Edit'}
     </a>
   );
 }
@@ -45,7 +63,7 @@ function Slot({ status, version }: { status: SlotStatus; version?: string }) {
           {STATE_LABEL[state]}
         </Badge>
         <span className="font-mono text-xs text-muted">{slot.layer}</span>
-        <EditLink slotId={slot.id} />
+        <EditLink slotId={slot.id} version={version} />
       </div>
       <p className="mt-1 pl-8 text-xs text-muted">
         {reason} {slot.summary}
@@ -67,7 +85,7 @@ function Forwarder({ forwarder, version }: { forwarder: ForwarderStatus; version
             (not a slot: proxies to the upstream once every slot above has passed)
           </span>
         </p>
-        <EditLink slotId={FORWARDER_ID} />
+        <EditLink slotId={FORWARDER_ID} version={version} />
       </div>
       <p className="mt-1 text-xs text-muted">
         {forwarder.target === null ? 'Forwards nothing.' : `Upstream: ${forwarder.target}.`}{' '}
@@ -106,16 +124,19 @@ export function ChainView({ draft }: { draft: ApiDefinition }) {
                 <Slot key={s.slot.id} status={s} />
               ))}
               <li
-                id={chainAnchor('dispatcher')}
-                className="rounded-md border border-dashed border-border px-3 py-2 text-sm"
+                id={chainAnchor(DISPATCHER_ID)}
+                className="flex flex-wrap items-baseline gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm"
               >
-                Version dispatcher: reads the version from the{' '}
-                {chain.selector.location === 'query_param' ? 'query parameter' : 'header'}{' '}
-                <span className="font-mono">{chain.selector.key}</span>.{' '}
-                {chain.selector.defaultVersion === null
-                  ? 'No default version: requests naming none get 403.'
-                  : `Requests naming none use ${chain.selector.defaultVersion}.`}{' '}
-                Unknown or expired versions get 403.
+                <span className="flex-1">
+                  Version dispatcher: reads the version from the{' '}
+                  {chain.selector.location === 'query_param' ? 'query parameter' : 'header'}{' '}
+                  <span className="font-mono">{chain.selector.key}</span>.{' '}
+                  {chain.selector.defaultVersion === null
+                    ? 'No default version: requests naming none get 403.'
+                    : `Requests naming none use ${chain.selector.defaultVersion}.`}{' '}
+                  Unknown or expired versions get 403.
+                </span>
+                <EditLink slotId={DISPATCHER_ID} />
               </li>
             </ol>
           </section>
@@ -126,10 +147,18 @@ export function ChainView({ draft }: { draft: ApiDefinition }) {
                 aria-label={`Version ${v.name}`}
                 className="flex flex-col gap-2 rounded-lg border border-border p-3"
               >
-                <h3 className="text-sm font-medium">
-                  Version <span className="font-mono">{v.name}</span>
-                  {v.isDefault && <span className="ml-1 text-xs text-muted">(default)</span>}
-                </h3>
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <h3 className="text-sm font-medium">
+                    Version <span className="font-mono">{v.name}</span>
+                    {v.isDefault && <span className="ml-1 text-xs text-muted">(default)</span>}
+                  </h3>
+                  <a
+                    href={`#${editorAnchor(DISPATCHER_ID, v.name)}`}
+                    className="ml-auto text-xs text-accent hover:underline"
+                  >
+                    Edit {v.name}
+                  </a>
+                </div>
                 <p className="text-xs text-muted">
                   {v.overrides.length === 0
                     ? 'Overrides nothing: every field comes from the base definition.'

@@ -6,6 +6,7 @@ import { FORM_FIELDS, type ApiHelp, type FormField } from './draft';
 import { AUTH_MODES } from './list';
 import { RULE_HELP_KEYS, type RuleHelp } from './rules';
 import { TRANSFORM_HELP_KEYS, type TransformHelp } from './transforms';
+import { VERSIONING_HELP_KEYS, type VersioningHelp } from './versioning';
 
 /** The API designer's help text for each form field (g2way's rustdoc, first paragraph). */
 export function fieldHelp(): Record<FormField, string> {
@@ -87,7 +88,35 @@ export function transformHelp(): TransformHelp {
   return help;
 }
 
+/** Where each versioning help text lives: a schema's introduction, or one property. */
+const VERSIONING_HELP_SOURCE: Record<keyof VersioningHelp, readonly [string, string?]> = {
+  key: ['VersioningConfig', 'key'],
+  location: ['VersioningConfig', 'location'],
+  default_version: ['VersioningConfig', 'default_version'],
+  versions: ['VersioningConfig', 'versions'],
+  overrides: ['VersionOverrides'],
+  expires_at: ['VersionOverrides', 'expires_at'],
+  target_url: ['VersionOverrides', 'target_url'],
+  transform_method: ['VersionOverrides', 'transform_method'],
+};
+
+/** The versioning editor's help. */
+export function versioningHelp(): VersioningHelp {
+  return Object.fromEntries(
+    VERSIONING_HELP_KEYS.map((key) => {
+      const [schema, property] = VERSIONING_HELP_SOURCE[key];
+      return [key, property === undefined ? schemaIntro(schema) : propertyHelp(schema, property)];
+    }),
+  ) as VersioningHelp;
+}
+
 /** Everything the API form's help text reads, gathered on the server. */
 export function apiHelp(): ApiHelp {
-  return { fields: fieldHelp(), auth: authHelp(), rules: ruleHelp(), transforms: transformHelp() };
+  return {
+    fields: fieldHelp(),
+    auth: authHelp(),
+    rules: ruleHelp(),
+    transforms: transformHelp(),
+    versioning: versioningHelp(),
+  };
 }

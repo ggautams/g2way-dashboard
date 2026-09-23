@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { EDITOR_SLOTS, FORWARDER_ID } from '@/lib/apis/chain';
+import { DISPATCHER_ID, EDITOR_SLOTS, FORWARDER_ID, VERSION_EDITOR_SLOTS } from '@/lib/apis/chain';
 
 // No component renderer in this repo, so these guard the form at the source.
 const read = (path: string) => readFileSync(resolve(import.meta.dirname, path), 'utf8');
@@ -11,7 +11,12 @@ describe('ApiForm', () => {
 
   it('gives every EDITOR_SLOTS slot a section anchored with editorAnchor', () => {
     for (const slot of EDITOR_SLOTS) {
-      const arg = slot === FORWARDER_ID ? 'FORWARDER_ID' : `'${slot}'`;
+      const arg =
+        slot === FORWARDER_ID
+          ? 'FORWARDER_ID'
+          : slot === DISPATCHER_ID
+            ? 'DISPATCHER_ID'
+            : `'${slot}'`;
       expect(source, slot).toContain(`<Section id={editorAnchor(${arg})}`);
     }
     expect(source).not.toMatch(/id=\{?[`'"]edit-/);
@@ -58,6 +63,69 @@ describe('ApiForm', () => {
   });
 
   it('imports nothing server-only (it is a client component)', () => {
+    expect(source.startsWith("'use client';")).toBe(true);
+    expect(source).not.toMatch(/field-help|designer\/help|server-client|lib\/g2\//);
+  });
+});
+
+describe('VersioningEditor', () => {
+  const source = read('versioning-editor.tsx');
+
+  it('sits in the form’s Versioning section, the dispatcher’s editor', () => {
+    const form = read('api-form.tsx');
+    expect(form).toContain('<Section id={editorAnchor(DISPATCHER_ID)} title="Versioning">');
+    expect(form).toContain('<VersioningEditor');
+  });
+
+  it('anchors each version card and each overridable slot per version', () => {
+    expect(source).toContain('id={editorAnchor(DISPATCHER_ID, name)}');
+    for (const slot of VERSION_EDITOR_SLOTS) {
+      const arg = slot === FORWARDER_ID ? 'FORWARDER_ID' : `'${slot}'`;
+      expect(source, slot).toContain(`<Part id={editorAnchor(${arg}, name)}`);
+    }
+  });
+
+  it('reuses the base editors with the base’s value as inherited', () => {
+    for (const list of [
+      'block_paths',
+      'allow_paths',
+      'ignore_auth_paths',
+      'endpoint_rate_limits',
+      'mock_responses',
+      'url_rewrites',
+    ]) {
+      expect(source, list).toContain(`{...rules('${list}')}`);
+    }
+    expect(source).toContain('inherited: (draft[list] ?? null)');
+    expect(source).toContain('inherited={draft.transform_headers ?? null}');
+    expect(source).toContain('inherited={draft.transform_body ?? null}');
+    expect(source).toContain('problemsOf(problems, `${prefix}.${list}`)');
+    expect(source).toContain('prefix={`${prefix}.transform_headers`}');
+    expect(source).toContain('prefix={`${prefix}.transform_body`}');
+  });
+
+  it('edits only through the pure helpers, leaving deferred overrides untouched', () => {
+    for (const helper of [
+      'withVersioning(',
+      'withSetting(',
+      'addVersion(',
+      'removeVersion(',
+      'renameVersion(',
+      'withOverride(',
+      'deferredOverrides(',
+    ]) {
+      expect(source, helper).toContain(helper);
+    }
+    expect(source).toMatch(/edit in JSON\/YAML/);
+  });
+
+  it('says what every version shares, and what no default means', () => {
+    expect(source).toContain('Inherited from base, shared by all versions');
+    expect(source).toContain('SHARED_FIELDS.map(');
+    expect(source).toMatch(/a version is required \(403 otherwise\)/);
+  });
+
+  it('imports nothing server-only', () => {
     expect(source.startsWith("'use client';")).toBe(true);
     expect(source).not.toMatch(/field-help|designer\/help|server-client|lib\/g2\//);
   });

@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { effectiveAuth, TRANSFORM_METHODS, type AuthField } from '@/lib/apis/auth';
-import { editorAnchor, FORWARDER_ID } from '@/lib/apis/chain';
+import { DISPATCHER_ID, editorAnchor, FORWARDER_ID } from '@/lib/apis/chain';
 import {
   slugify,
   withAuthMode,
@@ -34,6 +34,7 @@ import { LinesField, NumberField } from './form-inputs';
 import { MockExtra, RateExtra, RewriteExtra } from './rule-fields';
 import { RuleList } from './rule-list';
 import { BodyTransformsEditor, CorsEditor, HeaderTransformsEditor } from './transform-editors';
+import { VersioningEditor } from './versioning-editor';
 
 /** The Select's value for "no override": Radix items cannot have an empty value. */
 const CLIENT_METHOD = 'client';
@@ -368,6 +369,18 @@ export function ApiForm({ draft, onChange, original, help: allHelp, problems, re
           empty="The listen path is stripped (or not) and the rest joined onto the target."
           methods={false}
           extra={RewriteExtra}
+        />
+      </Section>
+
+      {/* Last, though the dispatcher sits after CORS: versions override the sections above. */}
+      <Section id={editorAnchor(DISPATCHER_ID)} title="Versioning">
+        <VersioningEditor
+          draft={draft}
+          onChange={onChange}
+          original={original?.versioning}
+          help={allHelp}
+          problems={problems}
+          readOnly={readOnly}
         />
       </Section>
     </fieldset>
