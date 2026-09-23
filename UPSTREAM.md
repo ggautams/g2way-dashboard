@@ -225,3 +225,7 @@ Watched areas changed: **admin-api**
 ## 2026-09-23 — g2way 61a4975 → 61a4975
 
 Newly watched: **file-loader** — first fingerprint recorded; nothing to catch up on.
+
+## 2026-09-24 — g2way 61a4975 → 61a4975
+
+Newly watched: **metrics** — first fingerprint recorded; nothing to catch up on.
