@@ -8,6 +8,11 @@ import 'server-only';
  * module is server-only: the only shape allowed to reach a client component is
  * {@link PublicEnvironment}, which carries neither the URL nor the secret.
  *
+ * An environment may also name its **proxy** (data-plane) base URL, which only
+ * the request console uses (ADR-0011). It has no default: the console sends
+ * real traffic to real upstreams, so it stays off until someone points it at
+ * the right listener.
+ *
  * Configuration comes from the process environment — see `.env.example`.
  */
 
@@ -34,6 +39,11 @@ export class GatewayTarget {
     readonly baseUrl: string,
     secret: string,
     readonly orgId: string,
+    /**
+     * The proxy listener's base URL (g2way's `G2_LISTEN`), without a trailing
+     * slash; `null` when not configured. Only the request console sends to it.
+     */
+    readonly proxyUrl: string | null = null,
   ) {
     this.#secret = secret;
   }
@@ -44,7 +54,13 @@ export class GatewayTarget {
   }
 
   toJSON(): Omit<GatewayTarget, 'secret' | 'toJSON'> {
-    return { id: this.id, label: this.label, baseUrl: this.baseUrl, orgId: this.orgId };
+    return {
+      id: this.id,
+      label: this.label,
+      baseUrl: this.baseUrl,
+      orgId: this.orgId,
+      proxyUrl: this.proxyUrl,
+    };
   }
 }
 
@@ -98,6 +114,12 @@ function normaliseUrl(raw: string, variable: string, problems: string[]): string
   return url.toString().replace(/\/+$/, '');
 }
 
+/** An optional URL variable: `null` when unset, `''` (with a problem) when invalid. */
+function optionalUrl(env: Env, variable: string, problems: string[]): string | null {
+  const raw = read(env, variable);
+  return raw === undefined ? null : normaliseUrl(raw, variable, problems);
+}
+
 /** Prefix of the per-environment variables for `id`: `staging-eu` → `G2_ENV_STAGING_EU`. */
 export function envPrefix(id: string): string {
   return `G2_ENV_${id.toUpperCase().replace(/-/g, '_')}`;
@@ -121,7 +143,10 @@ export function parseEnvironments(env: Env): Registry {
     );
     const secret = read(env, 'G2_ADMIN_SECRET');
     if (secret === undefined) problems.push('G2_ADMIN_SECRET is not set');
-    environments.push(new GatewayTarget(SINGLE_ID, SINGLE_LABEL, baseUrl, secret ?? '', orgId));
+    const proxyUrl = optionalUrl(env, 'G2_PROXY_URL', problems);
+    environments.push(
+      new GatewayTarget(SINGLE_ID, SINGLE_LABEL, baseUrl, secret ?? '', orgId, proxyUrl),
+    );
   } else {
     const ids = list
       .split(',')
@@ -146,7 +171,8 @@ export function parseEnvironments(env: Env): Registry {
       if (secret === undefined) problems.push(`${prefix}_SECRET is not set`);
       const baseUrl = rawUrl === undefined ? '' : normaliseUrl(rawUrl, `${prefix}_URL`, problems);
       const label = read(env, `${prefix}_LABEL`) ?? id;
-      environments.push(new GatewayTarget(id, label, baseUrl, secret ?? '', orgId));
+      const proxyUrl = optionalUrl(env, `${prefix}_PROXY_URL`, problems);
+      environments.push(new GatewayTarget(id, label, baseUrl, secret ?? '', orgId, proxyUrl));
     }
   }
 

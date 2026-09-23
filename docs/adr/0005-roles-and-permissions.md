@@ -23,12 +23,18 @@ dashboard is the only place a role can be enforced.
    | `policies:read`  |   ✓    |   ✓    |   ✓   |   ✓   |            |
    | `keys:read`      |   ✓    |   ✓    |   ✓   |   ✓   |            |
    | `apis:write`     |        |   ✓    |   ✓   |   ✓   |            |
+   | `apis:test`      |        |   ✓    |   ✓   |   ✓   |            |
    | `policies:write` |        |   ✓    |   ✓   |   ✓   |            |
    | `gateway:reload` |        |   ✓    |   ✓   |   ✓   |            |
    | `graphql:sync`   |        |   ✓    |   ✓   |   ✓   |            |
    | `keys:write`     |        |        |   ✓   |   ✓   |            |
    | `users:manage`   |        |        |   ✓   |   ✓   |            |
    | `audit:read`     |        |        |   ✓   |   ✓   |            |
+
+   `apis:test` (_added 2026-09-23, ADR-0011_) sends test requests through the
+   gateway's proxy listener from the request console. It is not a read: the
+   request reaches a real upstream and consumes rate limits and quota, so it
+   sits with the roles that may change the API.
 
    Key writes sit with admin, not editor: minting or revoking a credential is an
    access decision, not a configuration edit. `portal-dev` is a developer-portal

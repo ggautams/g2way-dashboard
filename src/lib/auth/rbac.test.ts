@@ -23,6 +23,7 @@ describe('ROLE_PERMISSIONS', () => {
         'gateway:read',
         'apis:read',
         'apis:write',
+        'apis:test',
         'policies:read',
         'policies:write',
         'keys:read',

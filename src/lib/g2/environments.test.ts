@@ -156,3 +156,45 @@ describe('parseOrgId', () => {
     expect(parseOrgId({ G2_ORG_ID: 'acme' })).toBe('acme');
   });
 });
+
+describe('proxy URL (ADR-0011)', () => {
+  it('has no default: the request console stays off until one is set', () => {
+    const target = resolveEnvironment(undefined, parseEnvironments({ G2_ADMIN_SECRET: SECRET }));
+    expect(target.proxyUrl).toBeNull();
+  });
+
+  it('reads G2_PROXY_URL in the single form and G2_ENV_<ID>_PROXY_URL per environment', () => {
+    const single = parseEnvironments({
+      G2_ADMIN_SECRET: SECRET,
+      G2_PROXY_URL: 'http://127.0.0.1:8080/',
+    });
+    expect(resolveEnvironment(undefined, single).proxyUrl).toBe('http://127.0.0.1:8080');
+
+    const multi = parseEnvironments({
+      G2_ENVIRONMENTS: 'dev,prod',
+      G2_ENV_DEV_URL: 'http://localhost:9696',
+      G2_ENV_DEV_SECRET: 'dev',
+      G2_ENV_DEV_PROXY_URL: 'http://localhost:8080',
+      G2_ENV_PROD_URL: 'https://admin.example.com',
+      G2_ENV_PROD_SECRET: 'prod',
+      // The single-form variable is ignored in the multi form.
+      G2_PROXY_URL: 'http://unused:8080',
+    });
+    expect(resolveEnvironment('dev', multi).proxyUrl).toBe('http://localhost:8080');
+    expect(resolveEnvironment('prod', multi).proxyUrl).toBeNull();
+  });
+
+  it('rejects a non-http proxy URL by name', () => {
+    expect(problemsOf({ G2_ADMIN_SECRET: SECRET, G2_PROXY_URL: 'gopher://gw' })).toEqual([
+      'G2_PROXY_URL must be an http:// or https:// URL',
+    ]);
+  });
+
+  it('never reaches the browser', () => {
+    const registry = parseEnvironments({
+      G2_ADMIN_SECRET: SECRET,
+      G2_PROXY_URL: 'http://proxy.internal:8080',
+    });
+    expect(JSON.stringify(listEnvironments(registry))).not.toContain('proxy.internal');
+  });
+});

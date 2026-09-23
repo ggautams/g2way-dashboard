@@ -17,6 +17,11 @@ export const PERMISSIONS = [
   'apis:read',
   /** Create, replace and delete API definitions. */
   'apis:write',
+  /**
+   * Send test requests through the gateway's proxy listener from the request
+   * console (ADR-0011): real traffic to real upstreams, so not a viewer's.
+   */
+  'apis:test',
   'policies:read',
   'policies:write',
   /** Read key sessions (the gateway lists hashes only). */
@@ -38,6 +43,7 @@ const VIEWER: readonly Permission[] = ['gateway:read', 'apis:read', 'policies:re
 const EDITOR: readonly Permission[] = [
   ...VIEWER,
   'apis:write',
+  'apis:test',
   'policies:write',
   'gateway:reload',
   'graphql:sync',
