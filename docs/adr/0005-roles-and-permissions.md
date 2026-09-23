@@ -28,6 +28,7 @@ dashboard is the only place a role can be enforced.
    | `gateway:reload`    |        |   ✓    |   ✓   |   ✓   |            |
    | `graphql:sync`      |        |   ✓    |   ✓   |   ✓   |            |
    | `analytics:inspect` |        |   ✓    |   ✓   |   ✓   |            |
+   | `analytics:share`   |        |   ✓    |   ✓   |   ✓   |            |
    | `keys:write`        |        |        |   ✓   |   ✓   |            |
    | `users:manage`      |        |        |   ✓   |   ✓   |            |
    | `audit:read`        |        |        |   ✓   |   ✓   |            |
@@ -42,6 +43,12 @@ dashboard is the only place a role can be enforced.
    aggregates. Raw paths can carry personal data, so it sits with the roles
    that operate the gateway, like `apis:test`. `/analytics` stays on
    `gateway:read`.
+
+   `analytics:share` (_added 2026-09-23, ADR-0016_) creates a saved
+   `/analytics` view that the whole team sees, and deletes any shared view.
+   Personal views need only `gateway:read`. Sharing changes only what
+   colleagues see in a list, but a viewer is read-only everywhere else, so it
+   sits with the editors.
 
    Key writes sit with admin, not editor: minting or revoking a credential is an
    access decision, not a configuration edit. `portal-dev` is a developer-portal
