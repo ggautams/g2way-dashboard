@@ -279,10 +279,13 @@ export function chainAnchor(slotId: string, version?: string): string {
  */
 export const EDITOR_SLOTS: readonly string[] = [
   'ip-filter',
+  'cors',
   'path-policy',
   'size-limit',
   'auth',
   'rate-limit',
+  'transform-headers',
+  'transform-body',
   'mock',
   FORWARDER_ID,
 ];

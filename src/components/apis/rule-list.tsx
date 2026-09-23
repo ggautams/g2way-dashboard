@@ -258,29 +258,35 @@ function RuleRow<R extends AnyRule>({
 }
 
 /**
- * The methods a rule applies to, as toggles; none on means every method.
- * A method g2way would refuse stays visible (and removable) until fixed.
+ * The methods a rule applies to, as toggles; none on means every method (or
+ * what `none` says, e.g. CORS's default set). A method g2way would refuse
+ * stays visible (and removable) until fixed.
  */
 export function MethodPicker({
   id,
+  label = 'Methods',
   value,
   help,
   problem,
+  none,
   onChange,
 }: {
   id: string;
+  label?: string;
   value: readonly string[] | undefined;
   help: string;
   problem?: string;
+  /** What no method switched on means, in words; "every method" by default. */
+  none?: string;
   onChange: (value: string[] | undefined) => void;
 }) {
   const unknown = (value ?? []).filter((method) => !isTransformMethod(method));
   return (
     <div id={id} className="flex flex-col gap-1.5">
       <span className="text-sm font-medium">
-        Methods <span className="font-normal text-muted">({describeMethods(value)})</span>
+        {label} <span className="font-normal text-muted">({describeMethods(value, none)})</span>
       </span>
-      <div role="group" aria-label="Methods" className="flex flex-wrap gap-1">
+      <div role="group" aria-label={label} className="flex flex-wrap gap-1">
         {[...TRANSFORM_METHODS, ...unknown].map((method) => {
           const on = hasMethod(value, method);
           return (

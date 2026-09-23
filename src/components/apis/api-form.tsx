@@ -33,6 +33,7 @@ import { AuthSettings } from './auth-settings';
 import { LinesField, NumberField } from './form-inputs';
 import { MockExtra, RateExtra, RewriteExtra } from './rule-fields';
 import { RuleList } from './rule-list';
+import { BodyTransformsEditor, CorsEditor, HeaderTransformsEditor } from './transform-editors';
 
 /** The Select's value for "no override": Radix items cannot have an empty value. */
 const CLIENT_METHOD = 'client';
@@ -213,6 +214,15 @@ export function ApiForm({ draft, onChange, original, help: allHelp, problems, re
         />
       </Section>
 
+      <Section id={editorAnchor('cors')} title="CORS">
+        <CorsEditor
+          value={draft.cors}
+          onChange={(value) => set('cors', value)}
+          help={allHelp.transforms}
+          problems={problems}
+        />
+      </Section>
+
       <Section id={editorAnchor('path-policy')} title="Path rules">
         <p className="text-xs text-muted md:col-span-2">
           Each pattern is a regex searched against the full client path, listen path included
@@ -255,6 +265,40 @@ export function ApiForm({ draft, onChange, original, help: allHelp, problems, re
           label="Limits for all clients combined"
           empty="Only each key's own rate and quota apply (set on keys and policies)."
           extra={RateExtra}
+        />
+      </Section>
+
+      <Section id={editorAnchor('transform-headers')} title="Header transforms">
+        <p className="text-xs text-muted md:col-span-2">
+          {allHelp.transforms.headers} Values set on requests may be credentials for the upstream,
+          so they are hidden from roles that cannot edit APIs.
+        </p>
+        <HeaderTransformsEditor
+          id="transform_headers"
+          value={draft.transform_headers}
+          onChange={(value) => set('transform_headers', value)}
+          help={allHelp.transforms}
+          problems={problems}
+          prefix="transform_headers"
+          readOnly={readOnly}
+        />
+      </Section>
+
+      <Section id={editorAnchor('transform-body')} title="Body transforms">
+        <p className="text-xs text-muted md:col-span-2">
+          {allHelp.transforms.body} On requests a rule&apos;s Content-Type wins over a header
+          transform that sets it; on responses the header transform wins.
+        </p>
+        <BodyTransformsEditor
+          id="transform_body"
+          value={draft.transform_body}
+          onChange={(value) => set('transform_body', value)}
+          help={allHelp.transforms}
+          ruleHelp={allHelp.rules}
+          problems={problems}
+          prefix="transform_body"
+          listenPath={draft.listen_path}
+          readOnly={readOnly}
         />
       </Section>
 

@@ -2,7 +2,7 @@
  * The API designer's model: a draft is a whole `ApiDefinition`, and the form
  * edits it field by field through the pure helpers here. The form never
  * rebuilds a definition from its own fields, so everything it does not show
- * (CORS, transforms, plugins, …) survives an edit byte for byte. Universal:
+ * (plugins, caching, versioning, …) survives an edit byte for byte. Universal:
  * the client designer and the tests share it.
  */
 
@@ -16,6 +16,13 @@ import {
 } from './auth';
 import type { ApiDefinition, AuthMode } from './list';
 import { listProblems, RULE_LISTS, type RuleHelp, type RuleProblemKey } from './rules';
+import {
+  transformProblems,
+  type BodyProblemKey,
+  type CorsField,
+  type HeaderProblemKey,
+  type TransformHelp,
+} from './transforms';
 
 /** The fields the structured form edits; the raw editor covers the rest. */
 export const FORM_FIELDS = [
@@ -40,19 +47,38 @@ export const FORM_FIELDS = [
   'endpoint_rate_limits',
   'mock_responses',
   'url_rewrites',
+  'cors',
+  'transform_headers',
+  'transform_body',
 ] as const satisfies readonly (keyof ApiDefinition)[];
 
 export type FormField = (typeof FORM_FIELDS)[number];
 
 /**
- * A problem's key: a form field, one auth setting as `auth.<setting>`, or one
- * rule's setting as `<list>.<index>.<setting>` (`RuleProblemKey`).
+ * A problem's key: a form field, one auth setting as `auth.<setting>`, one
+ * rule's setting as `<list>.<index>.<setting>` (`RuleProblemKey`), or a
+ * transform or CORS setting (transforms.ts): `transform_headers.request.add`,
+ * `transform_body.response.0.template`, `cors.allowed_origins`, ….
  */
-export type ProblemKey = FormField | `auth.${AuthField}` | RuleProblemKey;
+export type ProblemKey =
+  | FormField
+  | `auth.${AuthField}`
+  | RuleProblemKey
+  | `transform_headers.${HeaderProblemKey}`
+  | `transform_body${BodyProblemKey}`
+  | `cors.${CorsField}`;
 export type DraftProblems = Partial<Record<ProblemKey, string>>;
 
-/** The form's help text: g2way's rustdoc per field, per auth mode and setting, and per rule setting. */
-export type ApiHelp = { fields: Record<FormField, string>; auth: AuthHelp; rules: RuleHelp };
+/**
+ * The form's help text: g2way's rustdoc per field, per auth mode and setting,
+ * per rule setting, and per transform and CORS setting.
+ */
+export type ApiHelp = {
+  fields: Record<FormField, string>;
+  auth: AuthHelp;
+  rules: RuleHelp;
+  transforms: TransformHelp;
+};
 
 /** A new API: the four required fields, empty, and active as g2way defaults it. */
 export function newDraft(): ApiDefinition {
@@ -166,7 +192,8 @@ function isHttpUrl(text: string): boolean {
  * rules the contract states (`listen_path` starts with `/`, targets are
  * absolute http(s) URLs, `ApiDefinition::validate` and `AuthConfig::validate`
  * in `api_definition.rs`, the path rules' `validate` in `endpoints.rs` and
- * `transform.rs`). The gateway's own validation is the authority; its
+ * `transform.rs`, the transform and CORS checks in `transform.rs`,
+ * `body_transform.rs` and `security.rs`). The gateway's own validation is the authority; its
  * 400 message is shown verbatim on save.
  */
 export function draftProblems(draft: ApiDefinition): DraftProblems {
@@ -196,5 +223,6 @@ export function draftProblems(draft: ApiDefinition): DraftProblems {
     problems[`auth.${field as AuthField}`] = problem;
   }
   for (const list of RULE_LISTS) Object.assign(problems, listProblems(list, draft[list]));
+  Object.assign(problems, transformProblems(draft));
   return problems;
 }

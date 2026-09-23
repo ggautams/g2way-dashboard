@@ -74,7 +74,11 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       Radix selects disabled read-only, IP lists, size limit, method), and the
       2b rule lists (add, reorder, remove; method toggles; a mock's headers and
       status; an endpoint limit's rate; URL rewrites in Upstream; focus kept
-      while typing in a rule's settings; locked for a viewer) (M1 and M2
+      while typing in a rule's settings; locked for a viewer), and the 2c
+      editors (CORS on/off, origins, the default-methods label; header
+      transforms per direction, a `request.add` value hidden to a viewer and
+      its Remove; body rules with a template and Content-Type; focus kept
+      while typing a template) (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23, twice. `make serve-scratch` is the one-step way to run the
       pass: a production build on :3100 against a fresh temp-dir SQLite
@@ -156,9 +160,11 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
         allow/block/ignore paths, URL rewrites, mock responses, endpoint rate
         limits
   - [ ] 2b-follow-up. Check rule patterns with g2way's own regex engine
-        instead of the browser's best-effort translation — **blocked**: no
-        validate-only endpoint (`UPSTREAM.md`)
-  - [ ] 2c. Header transforms, body transforms (minijinja rules +
+        instead of the browser's best-effort translation, and body-transform
+        templates with its minijinja (2c's `templateProblem` only checks
+        delimiters and block pairing) — **blocked**: no validate-only
+        endpoint (`UPSTREAM.md`)
+  - [x] 2c. Header transforms, body transforms (minijinja rules +
         `max_response_body_bytes`), CORS
   - [ ] 2d. Versioning (`VersioningConfig`; each version's overrides reuse the
         2b/2c editors; non-overridable fields shown as inherited)
@@ -1305,3 +1311,52 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     traffic-middleware area names rules.ts.
   - Not run in a browser; added to the open M2 browser-pass box.
   - Next: 2c, header/body transforms and CORS.
+- feat(M5): editors 2c: header transforms, body transforms,
+  CORS.
+  - `src/lib/apis/transforms.ts` is the pure model. `headerTransformProblems`,
+    `bodyTransformProblems` and `corsProblems` mirror `HeaderTransforms`
+    (transform.rs), `BodyTransforms`/`BodyTransformRule` (body_transform.rs)
+    and `CorsConfig::validate` (security.rs). Header and body checks take a
+    key prefix, so 2d can key them per version. Keys:
+    `transform_headers.<direction>.<add|remove>`, `transform_body` (a present
+    block with no rules, which g2way refuses), `transform_body.max_response_body_bytes`,
+    `transform_body.<direction>.<index>.<setting>`, `cors.<field>`.
+  - g2way details now mirrored: removing a hop-by-hop header is allowed,
+    adding one is not. `allowed_methods: []` is refused, and absent means
+    `CORS_DEFAULT_METHODS` (GET, HEAD, POST), so CORS's `MethodPicker`
+    (new `none`/`label` props) says that instead of "every method". Origins
+    must be lower-case `http(s)://host[:port]` with no trailing slash.
+    Serde defaults are hard-coded: `BODY_DEFAULT_CONTENT_TYPE`,
+    `BODY_DEFAULT_MAX_RESPONSE_BYTES`.
+  - Templates: `templateProblem` is a best effort like `regexProblem`. It
+    checks delimiters, strings in tags, block pairing and `raw`, but not
+    expressions. Exact checking joins the 2b follow-up box (validate-only
+    endpoint).
+  - Components (`src/components/apis/transform-editors.tsx`):
+    `HeaderTransformsEditor`, `BodyTransformsEditor` (two
+    `RuleList<BodyTransformRule>` with the module-level `BodyExtra` from
+    rule-fields.tsx, plus the cap), `CorsEditor`, `HeaderAddField` and
+    `InheritedBlock`. `problemsOf` now takes any key prefix, and `AnyRule`
+    includes body rules.
+  - **For 2d:** pass `inherited={base.transform_headers}` (or
+    `transform_body`), a per-version `id` and `prefix`. Absent or `null`
+    shows "Inherited from base" through `InheritedBlock`. An emptied
+    override stays `{}` (`keepEmpty`), because versioning.rs says
+    `transform_headers` can be overridden but not cleared. CORS is shared
+    by every version, so it has no inherited state.
+  - ADR-0010: masked `add` values (the `request.add.*` secret path, or the
+    name fallback on responses) are left out of the text and listed as
+    hidden, with a Remove button. Typing the header again replaces the
+    value. `headerTransformProblems` refuses a save while the mask remains.
+  - Help: `apiHelp()` gains `transforms`, read from each schema's
+    introduction (the new `schemaIntro`, which stops at `# Example`) and its
+    properties. `watch.json`'s traffic-middleware area names transforms.ts.
+  - Chain: `cors`, `transform-headers` and `transform-body` joined
+    `EDITOR_SLOTS`. The empty-block question is partly answered.
+    `BodyTransforms::validate` refuses a present `transform_body` with no
+    rules, so that case cannot be stored. transform.rs gives
+    `HeaderTransforms` an `is_empty()` but doesn't say whether the route
+    builder uses it. So chain.ts is unchanged, and `transform_headers: {}`
+    still shows as on. It changes nothing either way.
+  - Not run in a browser; added to the open M2 browser-pass box.
+  - Next: 2d, versioning.

@@ -49,6 +49,21 @@ export function schemaHelp(schema: string): string {
     .join(' ');
 }
 
+/**
+ * A schema's introduction: its paragraphs up to the first rustdoc heading
+ * (`# Example`), each unwrapped like {@link firstParagraph}, joined into one.
+ */
+export function schemaIntro(schema: string): string {
+  const schemas = spec.components.schemas as Record<string, { description?: string }>;
+  const paragraphs = (schemas[schema]?.description ?? '').split(/\n\s*\n/);
+  const heading = paragraphs.findIndex((paragraph) => paragraph.trimStart().startsWith('#'));
+  return paragraphs
+    .slice(0, heading === -1 ? undefined : heading)
+    .map(firstParagraph)
+    .filter((paragraph) => paragraph !== '')
+    .join(' ');
+}
+
 type VariantSchema = {
   description?: string;
   properties?: Record<string, PropertySchema & { enum?: string[] }>;

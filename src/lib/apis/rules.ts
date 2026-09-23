@@ -44,11 +44,12 @@ export const PATH_RULE_LISTS = [
 
 export type RuleOf<L extends RuleList> = NonNullable<ApiDefinition[L]>[number];
 
-/** Any rule: all of them carry a pattern. */
-export type AnyRule = RuleOf<RuleList>;
+/** Any rule, including a body-transform rule (transforms.ts): all of them carry a pattern. */
+export type AnyRule = RuleOf<RuleList> | Schemas['BodyTransformRule'];
 
 /** The rule settings a problem can sit on. */
-export type RuleProp = 'pattern' | 'methods' | 'rewrite' | 'status' | 'headers' | 'rate';
+export type RuleProp =
+  'pattern' | 'methods' | 'rewrite' | 'status' | 'headers' | 'rate' | 'template' | 'content_type';
 export type RuleProblems = Partial<Record<RuleProp, string>>;
 
 /** Help text for a rule's settings (g2way's rustdoc), read on the server by `apiHelp()`. */
@@ -61,6 +62,8 @@ export const RULE_HELP_KEYS = [
   'body',
   'requests',
   'per_seconds',
+  'template',
+  'content_type',
 ] as const;
 export type RuleHelp = Record<(typeof RULE_HELP_KEYS)[number], string>;
 
@@ -161,9 +164,12 @@ export function hasMethod(methods: readonly string[] | undefined, method: string
   return (methods ?? []).some((m) => m.toUpperCase() === method.toUpperCase());
 }
 
-/** A rule's methods in words: "every method" when empty. */
-export function describeMethods(methods: readonly string[] | undefined): string {
-  return methods && methods.length > 0 ? methods.join(', ') : 'every method';
+/** A rule's methods in words; `none` (by default "every method") when empty. */
+export function describeMethods(
+  methods: readonly string[] | undefined,
+  none = 'every method',
+): string {
+  return methods && methods.length > 0 ? methods.join(', ') : none;
 }
 
 /**
@@ -196,6 +202,16 @@ export function formatHeaders(headers: Record<string, string> | undefined): stri
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 /** What `http::HeaderValue::from_str` refuses: control bytes other than tab, and DEL. */
 const BAD_HEADER_VALUE = /[\x00-\x08\x0a-\x1f\x7f]/;
+
+/** Whether `http::HeaderName::from_bytes` accepts `name`. */
+export function isHeaderName(name: string): boolean {
+  return HEADER_NAME.test(name);
+}
+
+/** Whether `http::HeaderValue::from_str` accepts `value`. */
+export function isHeaderValue(value: string): boolean {
+  return !BAD_HEADER_VALUE.test(value);
+}
 
 /**
  * Why g2way's regex engine would refuse `pattern`, or `undefined` when the
@@ -277,7 +293,8 @@ export function regexProblem(pattern: string): string | undefined {
   }
 }
 
-function methodsProblem(methods: readonly string[] | undefined): string | undefined {
+/** `validate_methods`: every entry a standard method, case-insensitively. */
+export function methodsProblem(methods: readonly string[] | undefined): string | undefined {
   const bad = (methods ?? []).find((method) => !isTransformMethod(method));
   return bad === undefined
     ? undefined
@@ -345,10 +362,14 @@ export function listProblems(
   return problems;
 }
 
-/** The per-rule problems of one list, back out of a flat problem map (by index). */
+/**
+ * The per-rule problems of one list, back out of a flat problem map (by
+ * index). `list` is the keys' prefix: a rule list's name, or e.g.
+ * `transform_body.request` for body rules.
+ */
 export function problemsOf(
   problems: Readonly<Record<string, string | undefined>>,
-  list: RuleList,
+  list: string,
 ): RuleProblems[] {
   const out: RuleProblems[] = [];
   const prefix = `${list}.`;

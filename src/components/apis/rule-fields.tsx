@@ -13,6 +13,7 @@ import {
   type RateLimit,
   type UrlRewriteRule,
 } from '@/lib/apis/rules';
+import { BODY_DEFAULT_CONTENT_TYPE, type BodyTransformRule } from '@/lib/apis/transforms';
 import { NumberField, TextField } from './form-inputs';
 import { useParsedText, type RuleExtra } from './rule-list';
 
@@ -131,3 +132,30 @@ export const RateExtra: RuleExtra<EndpointRateLimit> = ({ rule, onChange, id, pr
     </div>
   );
 };
+
+/** A body-transform rule's minijinja template and the Content-Type it sets. */
+export const BodyExtra: RuleExtra<BodyTransformRule> = ({ rule, onChange, id, problems, help }) => (
+  <>
+    <Field id={`${id}.template`} label="Template" help={help.template} problem={problems.template}>
+      <Textarea
+        id={`${id}.template`}
+        rows={4}
+        spellCheck={false}
+        className="font-mono text-xs"
+        placeholder="{{ body | tojson }}"
+        value={rule.template}
+        onChange={(event) => onChange({ ...rule, template: event.target.value })}
+      />
+    </Field>
+    <TextField
+      id={`${id}.content_type`}
+      label="Content-Type"
+      help={help.content_type}
+      problem={problems.content_type}
+      value={rule.content_type}
+      placeholder={BODY_DEFAULT_CONTENT_TYPE}
+      blank="unset"
+      onChange={(contentType) => onChange(withProp(rule, 'content_type', contentType))}
+    />
+  </>
+);

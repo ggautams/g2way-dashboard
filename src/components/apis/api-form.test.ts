@@ -47,6 +47,16 @@ describe('ApiForm', () => {
     expect(source).toContain('problemsOf(problems, list)');
   });
 
+  it('edits CORS, header and body transforms through their editors', () => {
+    expect(source).toContain('<CorsEditor');
+    expect(source).toContain('<HeaderTransformsEditor');
+    expect(source).toContain('<BodyTransformsEditor');
+    for (const field of ['cors', 'transform_headers', 'transform_body']) {
+      expect(source, field).toContain(`set('${field}'`);
+    }
+    expect(source).toMatch(/Content-Type wins over a header\s+transform/);
+  });
+
   it('imports nothing server-only (it is a client component)', () => {
     expect(source.startsWith("'use client';")).toBe(true);
     expect(source).not.toMatch(/field-help|designer\/help|server-client|lib\/g2\//);
@@ -59,7 +69,7 @@ describe('RuleList', () => {
 
   it('keeps order (first match wins) and shows empty methods as every method', () => {
     expect(source).toContain('moveBy(rules, index, by)');
-    expect(source).toContain('describeMethods(value)');
+    expect(source).toContain('describeMethods(value, none)');
     expect(source).toContain('TRANSFORM_METHODS');
   });
 
@@ -113,6 +123,45 @@ describe('AuthSettings', () => {
 
   it('keeps HMAC’s disabled Date check (null) distinct from the default (absent)', () => {
     expect(source).toContain("withProp(auth, 'allowed_clock_skew_secs', on ? undefined : null)");
+  });
+
+  it('imports nothing server-only', () => {
+    expect(source.startsWith("'use client';")).toBe(true);
+    expect(source).not.toMatch(/field-help|designer\/help|server-client|lib\/g2\//);
+  });
+});
+
+describe('transform editors', () => {
+  const source = read('transform-editors.tsx');
+  const fields = read('rule-fields.tsx');
+
+  it('never renders a masked header value as text, and can drop it (ADR-0010)', () => {
+    expect(source).toContain('useMemo(() => splitMasked(value), [value])');
+    expect(source).toContain('mergeMasked(parsed.value, value, hidden)');
+    expect(source).toMatch(/Hidden: your role cannot see this value/);
+    expect(source).toContain('withoutHeader(value, name)');
+  });
+
+  it('has an inherited-from-base state for 2d’s block overrides', () => {
+    expect(source).toContain('export function InheritedBlock(');
+    for (const editor of ['HeaderTransformsEditor', 'BodyTransformsEditor']) {
+      expect(source, editor).toMatch(
+        new RegExp(`export function ${editor}\\([\\s\\S]*?inherited\\?:`),
+      );
+    }
+    expect(source).toContain('withHeaderTransform(value, direction, next, override)');
+    expect(source).toContain('withBodyRules(value, direction, rules, override)');
+  });
+
+  it('edits body rules through the shared RuleList with a module-level extra', () => {
+    expect(source).toContain('<RuleList<BodyTransformRule>');
+    expect(source).toContain('extra={BodyExtra}');
+    expect(source).toContain('problemsOf(problems, `${prefix}.${direction}`)');
+    expect(fields).toContain('export const BodyExtra: RuleExtra<BodyTransformRule>');
+  });
+
+  it('shows CORS’s absent method list as g2way’s default, not every method', () => {
+    expect(source).toContain('none={`${CORS_DEFAULT_METHODS.join');
   });
 
   it('imports nothing server-only', () => {

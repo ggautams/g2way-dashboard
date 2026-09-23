@@ -38,7 +38,8 @@ describe('withField', () => {
 
 describe('otherFields', () => {
   it('names what the form does not edit, not org_id', () => {
-    expect(otherFields(stored)).toEqual(['cors']);
+    expect(otherFields(stored)).toEqual([]);
+    expect(otherFields({ ...stored, cache: { ttl_secs: 60 } } as ApiDefinition)).toEqual(['cache']);
     expect(otherFields(newDraft())).toEqual([]);
   });
 });
@@ -150,6 +151,23 @@ describe('draftProblems: path rules', () => {
       'endpoint_rate_limits.0.rate',
       'mock_responses.0.status',
       'url_rewrites.0.rewrite',
+    ]);
+  });
+});
+
+describe('draftProblems: transforms and CORS', () => {
+  it('reports header, body and CORS problems under their setting', () => {
+    const problems = draftProblems({
+      ...stored,
+      auth: undefined,
+      transform_headers: { response: { add: { Connection: 'close' } } },
+      transform_body: { response: [{ pattern: '^/', template: '{% if x %}' }] },
+      cors: { allowed_origins: ['*'], allow_credentials: true },
+    });
+    expect(Object.keys(problems).sort()).toEqual([
+      'cors.allow_credentials',
+      'transform_body.response.0.template',
+      'transform_headers.response.add',
     ]);
   });
 });
