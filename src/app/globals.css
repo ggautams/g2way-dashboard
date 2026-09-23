@@ -15,6 +15,11 @@
   --danger: #dc2626;
   --success: #16a34a;
   --warning: #d97706;
+  /* Chart series, categorical slots 1–3 in fixed order (ADR-0013). Validated
+     for colour-vision deficiency against --surface in each theme. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
 }
 
 .dark {
@@ -29,6 +34,9 @@
   --danger: #f87171;
   --success: #4ade80;
   --warning: #fbbf24;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
 }
 
 @theme inline {

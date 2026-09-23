@@ -91,7 +91,11 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       the inferred trace's badges, mismatches and "In chain" links landing
       on the Chain tab's slot, per version too), and M6's `/analytics`
       ingest health panel in each state (no Redis, no records, failing,
-      backlog near cap) in both themes (M1 and M2
+      backlog near cap), and its traffic charts (each range; hover and
+      arrow-key readout; tooltip flipping near the right edge; the gaps and
+      dots of sparse traffic; the table view; phone width) in both themes,
+      with rollups seeded by `make ingest` against Docker Redis or by hand
+      (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23, twice. `make serve-scratch` is the one-step way to run the
       pass: a production build on :3100 against a fresh temp-dir SQLite
@@ -202,7 +206,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       "no `G2_REDIS_URL`", "gateway not sending" (no `last_drained_at`),
       "worker failing" (`last_error_at` after `last_drained_at`) and "backlog
       near g2way's 100 000 cap" (the gateway is dropping records) apart
-- [ ] Traffic dashboards: RPS, error rate, latency p50/p95/p99
+- [x] Traffic dashboards: RPS, error rate, latency p50/p95/p99
 - [ ] Worker heartbeat in `analytics_ingest_state` (a `last_polled_at` set on
       every pass, empty pops included; needs a migration and an ADR-0012
       amendment). Without it the health panel cannot tell "no worker runs"
@@ -217,6 +221,9 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       which would steal records from the rollups (ADR-0012 §6)
 - [ ] Optional Prometheus datasource for long-range aggregates
 - [ ] Saved views, date-range picker, CSV export
+- [ ] Tie the fixed traffic ranges to retention: `24h` reads minute rows, so a
+      `G2_ANALYTICS_MINUTE_RETENTION_DAYS` below 1 silently truncates it. Read
+      hour rows (or say so) when a range outruns minute retention (ADR-0013 §5)
 
 **Requires from g2way**: the gateway must run with `--analytics-sink redis`
 (`G2_ANALYTICS_SINK=redis`; not `redis_list`, which g2way rejects), and the
@@ -1622,3 +1629,23 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     heartbeat column is filed as a new M6 box.
   - Next: M6 traffic dashboards (RPS, error rate, latency percentiles) into
     the `/analytics` "Traffic" section.
+- feat(M6): **traffic dashboards** in `/analytics`'s "Traffic"
+  section: RPS, error rate (5xx, with 4xx beside it) and latency p50/p95/p99.
+  - `queryTrafficBuckets` (`src/lib/db/analytics.ts`) sums the `api` / `''`
+    rows per bucket for one org, environment and granularity (optionally one
+    API), on both dialects. `trafficSeries` (`src/lib/analytics/traffic.ts`,
+    pure) re-buckets to the range's step, gap-fills, and derives rates and
+    percentiles. `estimatePercentile` interpolates inside the histogram, with
+    the exact max capping the top bucket and bounding `latency_over`.
+  - Fixed ranges `1h`/`6h`/`24h` (minute rows; 1, 5, 15-minute steps) and
+    `7d`/`30d` (hour rows; 1 and 6-hour steps) via `?range=`, default `1h`.
+    The last step is still filling, so its rate divides by the time elapsed.
+  - ADR-0013: charts are hand-rolled inline SVG (no library).
+    `TimeSeriesChart` is the only client component. It has a crosshair
+    tooltip, arrow-key readout and a live region. `--series-1..3` are
+    CVD-validated in both themes. Every chart has a table view. Times are UTC.
+  - Surprise: none upstream. The Chrome extension was still not connected,
+    so no visual pass; the pending visual-pass box now lists the charts.
+  - Follow-up: new M6 box tying the fixed ranges to minute retention.
+  - Next: M6 worker heartbeat, then drill-down, which reuses
+    `queryTrafficBuckets({ apiId })`, `trafficSeries` and `TimeSeriesChart`.

@@ -9,6 +9,7 @@ import { migrateDatabase, migrationsFolder, openDatabase } from '.';
 import {
   getIngestState,
   pruneRollups,
+  queryTrafficBuckets,
   recordIngestError,
   writeIngestBatch,
   type AnalyticsRollup,
@@ -123,6 +124,60 @@ describe.each([
     // The alias survives a batch that did not carry one.
     expect(key.find((r) => r.value === 'k1')).toMatchObject({ requests: 2, label: 'first' });
     expect(key.find((r) => r.value === '')).toMatchObject({ requests: 1, label: null });
+  });
+
+  it('sums the API totals per bucket, scoped to org, environment, granularity and window', async () => {
+    const handle = await open();
+    const minute = Date.UTC(2026, 8, 23, 10, 15);
+    await writeIngestBatch(
+      handle,
+      ORG_A,
+      batch([
+        record(ORG_A, { latency_ms: 30 }),
+        record(ORG_A, { api_id: 'orders', latency_ms: 700, status: 502 }),
+        record(ORG_A, { timestamp_unix_ms: T0 + 60_000, status: 404 }),
+        // Outside the window queried below.
+        record(ORG_A, { timestamp_unix_ms: T0 + 120_000 }),
+      ]),
+    );
+    await writeIngestBatch(handle, ORG_A, batch([record(ORG_A)], { environment: 'staging' }));
+    await writeIngestBatch(handle, ORG_B, batch([record(ORG_B)]));
+
+    const window = { environment: 'prod', from: minute, to: minute + 120_000 } as const;
+    const buckets = await queryTrafficBuckets(handle, ORG_A, { ...window, bucketSeconds: 60 });
+    expect(buckets.map((b) => [b.start, b.requests])).toEqual([
+      [minute, 2],
+      [minute + 60_000, 1],
+    ]);
+    expect(buckets[0]).toMatchObject({
+      status2xx: 1,
+      status5xx: 1,
+      latencySumMs: 730,
+      latencyMaxMs: 700,
+      latencyLe50: 1,
+      latencyLe1000: 1,
+      latencyOver: 0,
+    });
+    expect(buckets[1]).toMatchObject({ status4xx: 1 });
+    expect(typeof buckets[0].requests).toBe('number');
+
+    const orders = await queryTrafficBuckets(handle, ORG_A, {
+      ...window,
+      bucketSeconds: 60,
+      apiId: 'orders',
+    });
+    expect(orders.map((b) => b.requests)).toEqual([1]);
+
+    const hour = await queryTrafficBuckets(handle, ORG_A, {
+      environment: 'prod',
+      bucketSeconds: 3600,
+      from: Date.UTC(2026, 8, 23, 10),
+      to: Date.UTC(2026, 8, 23, 11),
+    });
+    expect(hour.map((b) => b.requests)).toEqual([4]);
+    expect(await queryTrafficBuckets(handle, ORG_B, { ...window, bucketSeconds: 60 })).toHaveLength(
+      1,
+    );
   });
 
   it('keeps environments and orgs apart', async () => {

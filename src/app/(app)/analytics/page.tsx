@@ -1,10 +1,17 @@
 import type { Metadata } from 'next';
 import { IngestHealthPanel } from '@/components/analytics/ingest-health';
+import { TrafficPanel } from '@/components/analytics/traffic-panel';
 import { IngestConfigError, parseIngestConfig } from '@/lib/analytics/config';
 import { ingestHealth } from '@/lib/analytics/health';
+import {
+  parseTrafficRange,
+  trafficSeries,
+  trafficWindow,
+  type TrafficRange,
+} from '@/lib/analytics/traffic';
 import { requirePermission } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
-import { getIngestState } from '@/lib/db/analytics';
+import { getIngestState, queryTrafficBuckets } from '@/lib/db/analytics';
 import {
   RegistryConfigError,
   UnknownEnvironmentError,
@@ -19,10 +26,11 @@ export const metadata: Metadata = { title: 'Analytics' };
 /**
  * Traffic for the selected environment, from the ingest worker's rollups
  * (ADR-0012). The ingest health panel comes first, so an empty chart always
- * says why. The traffic charts themselves are the next M6 task.
+ * says why; the traffic charts follow, over a fixed range (`?range=`).
  */
-export default async function AnalyticsPage() {
+export default async function AnalyticsPage({ searchParams }: PageProps<'/analytics'>) {
   await requirePermission('gateway:read');
+  const range = parseTrafficRange((await searchParams).range);
 
   let target: GatewayTarget;
   try {
@@ -45,18 +53,12 @@ export default async function AnalyticsPage() {
   }
 
   const { health, configProblems, now } = await loadIngestHealth(target);
+  const traffic = await loadTraffic(target, range, now);
 
   return (
     <Page environment={target.label}>
       <IngestHealthPanel health={health} configProblems={configProblems} now={now} />
-      <section aria-labelledby="traffic-heading" className="flex flex-col gap-3">
-        <h2 id="traffic-heading" className="text-lg font-semibold">
-          Traffic
-        </h2>
-        <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-          Requests per second, error rate and latency percentiles land here next (M6).
-        </p>
-      </section>
+      <TrafficPanel traffic={traffic} />
     </Page>
   );
 }
@@ -77,6 +79,18 @@ async function loadIngestHealth(target: GatewayTarget) {
     : undefined;
   const health = ingestHealth({ redisConfigured, workerInServer, state });
   return { health, configProblems, now: Date.now() };
+}
+
+/** The range's chart series: every API's totals, summed per step. */
+async function loadTraffic(target: GatewayTarget, range: TrafficRange, now: number) {
+  const { from, to } = trafficWindow(range, now);
+  const buckets = await queryTrafficBuckets(getDatabase(), getOrgId(), {
+    environment: target.id,
+    bucketSeconds: range.sourceSeconds,
+    from,
+    to,
+  });
+  return trafficSeries(range, buckets, now);
 }
 
 function Page({ children, environment }: { children: React.ReactNode; environment?: string }) {

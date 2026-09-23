@@ -1,9 +1,11 @@
 import 'server-only';
 
-import { and, eq, lt, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gte, lt, sql, type SQL } from 'drizzle-orm';
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { ROLLUP_COUNTERS, type RollupDelta } from '@/lib/analytics/rollup';
+import { TRAFFIC_COUNTERS, type TrafficBucket } from '@/lib/analytics/traffic';
+import type { RollupBucketSeconds } from './schema/shared';
 import type * as sqliteSchema from './schema/sqlite';
 import type { DataHandle } from './users';
 
@@ -255,4 +257,77 @@ export async function pruneRollups(
       .delete(t)
       .where(and(eq(t.orgId, orgId), eq(t.bucketSeconds, seconds), lt(t.bucketStart, before)));
   }
+}
+
+/** Which rollups `queryTrafficBuckets` sums. */
+export type TrafficQuery = {
+  environment: string;
+  bucketSeconds: RollupBucketSeconds;
+  /** Inclusive lower bound on `bucket_start` (Unix ms). */
+  from: number;
+  /** Exclusive upper bound on `bucket_start` (Unix ms). */
+  to: number;
+  /** One API's traffic; every API's when omitted. */
+  apiId?: string;
+};
+
+/**
+ * Per-bucket traffic totals from the `api` dimension rows (value `''`, each
+ * API's total), summed across APIs unless `apiId` narrows it, oldest first.
+ * Buckets without traffic have no row and are absent: `resample` gap-fills.
+ */
+export async function queryTrafficBuckets(
+  handle: DataHandle,
+  orgId: string,
+  query: TrafficQuery,
+): Promise<TrafficBucket[]> {
+  const aggregates = (t: RollupTable | PgRollupTable) => {
+    const columns = t as unknown as Record<string, Column>;
+    const sums = Object.fromEntries(
+      TRAFFIC_COUNTERS.map((name) => [
+        name,
+        // Postgres sums bigint to numeric, which its driver returns as a string.
+        sql<number>`coalesce(sum(${columns[name]}), 0)`.mapWith(Number),
+      ]),
+    ) as Record<(typeof TRAFFIC_COUNTERS)[number], SQL<number>>;
+    return {
+      latencyMaxMs: sql<number>`coalesce(max(${t.latencyMaxMs}), 0)`.mapWith(Number),
+      ...sums,
+    };
+  };
+  const where = (t: RollupTable | PgRollupTable) =>
+    and(
+      eq(t.orgId, orgId),
+      eq(t.environment, query.environment),
+      eq(t.bucketSeconds, query.bucketSeconds),
+      eq(t.dimension, 'api'),
+      eq(t.value, ''),
+      gte(t.bucketStart, new Date(query.from)),
+      lt(t.bucketStart, new Date(query.to)),
+      query.apiId === undefined ? undefined : eq(t.apiId, query.apiId),
+    );
+
+  let rows: ({ bucketStart: Date } & Omit<TrafficBucket, 'start'>)[];
+  if (handle.dialect === 'sqlite') {
+    const t = handle.schema.analyticsRollups;
+    rows = handle.db
+      .select({ bucketStart: t.bucketStart, ...aggregates(t) })
+      .from(t)
+      .where(where(t))
+      .groupBy(t.bucketStart)
+      .orderBy(asc(t.bucketStart))
+      .all();
+  } else {
+    const t = handle.schema.analyticsRollups;
+    rows = await handle.db
+      .select({ bucketStart: t.bucketStart, ...aggregates(t) })
+      .from(t)
+      .where(where(t))
+      .groupBy(t.bucketStart)
+      .orderBy(asc(t.bucketStart));
+  }
+  return rows.map(({ bucketStart, ...counters }) => ({
+    ...counters,
+    start: bucketStart.getTime(),
+  }));
 }
