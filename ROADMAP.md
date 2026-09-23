@@ -108,7 +108,14 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       spreadsheet, `#` rows included) and its saved views (save personal and
       shared; the share box hidden for a viewer; the name-clash and cap
       errors; delete; the current view marked; a view opening with its
-      source and range) in both themes,
+      source and range) and its retention handling (`90d` under Rollups at
+      the default hour retention; the pruned-rows note on `30d` with
+      `G2_ANALYTICS_HOUR_RETENTION_DAYS=7`; a `?range=1y` falling back with
+      its note), and the live inspector at `/analytics/live` (rows arriving
+      every 2 s; Pause/Resume; polling stopped in a hidden tab; the
+      selection's filters and the link from `/analytics`; raw path beside its
+      template; key columns hidden without `keys:read`; a viewer's 403) in
+      both themes,
       with rollups seeded by `make ingest` against Docker Redis or by hand
       (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
@@ -248,8 +255,13 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 **Requires from g2way**: the gateway must run with `--analytics-sink redis`
 (`G2_ANALYTICS_SINK=redis`; not `redis_list`, which g2way rejects), and the
-dashboard needs that Redis as `G2_REDIS_URL`. The k8s manifests currently use
-`otlp_logs`. See `UPSTREAM.md` and ADR-0012.
+dashboard needs that Redis as `G2_REDIS_URL`. g2way's k8s manifests still use
+`otlp_logs`, so M6 works locally but not in-cluster until that changes
+(`UPSTREAM.md`, ADR-0012). The optional Prometheus source (ADR-0015) needs a
+Prometheus scraping the gateway's `http_server_request_duration_seconds`;
+method drill-down there waits on `http.request.method`. Not blockers:
+`AnalyticsRecord` is hand-typed until g2way publishes its schema, and draining
+stays at-most-once until records carry an id. Each has an `UPSTREAM.md` TODO.
 
 ## M7 — Resilience & upstreams
 
@@ -321,7 +333,9 @@ dashboard needs that Redis as `G2_REDIS_URL`. The k8s manifests currently use
       It needs `G2_REDIS_URL` for the analytics ingest worker, which runs in the
       server by default. Optionally a separate `npm run ingest` Deployment,
       with `G2_ANALYTICS_INGEST=off` on the web tier (ADR-0012 §2), and
-      `scripts/` plus `tsx` shipped for it
+      `scripts/` plus `tsx` shipped for it. Both tiers need the same
+      `G2_ANALYTICS_{MINUTE,HOUR}_RETENTION_DAYS`: the worker prunes by them,
+      and `/analytics` picks rows and ranges by them (ADR-0013 §5, §7)
 - [ ] Liveness probe for a standalone `npm run ingest` Deployment: it serves no
       HTTP, so the probe must read the worker's heartbeat (`last_polled_at`,
       ADR-0012 §8 amendment; stale after `WORKER_STALE_MS`) or a file it touches
@@ -331,7 +345,9 @@ dashboard needs that Redis as `G2_REDIS_URL`. The k8s manifests currently use
       ago")
 - [ ] Audit log retention/pruning and export (CSV/JSON). Pruning must keep every
       `api.*`/`policy.*` row newer than its environment's last reload: pending
-      changes are derived from them (ADR-0006)
+      changes are derived from them (ADR-0006). Decide there too whether
+      analytics CSV exports of key-level traffic need a trail; they are reads
+      and unaudited today (ADR-0013 §8)
 - [ ] Force a password change at next sign-in after an admin reset, and a
       "sign out my other sessions" button (ADR-0004 §9 has the mechanism)
 - [ ] Prometheus datasource status per environment (ADR-0015), on `/gateway`
@@ -363,6 +379,10 @@ an in-cluster dashboard cannot reach it. See `UPSTREAM.md`.
 - [ ] Method drill-down from Prometheus, once g2way's request-duration
       histogram carries `http.request.method` (`UPSTREAM.md`; ADR-0015 §4):
       add it to `PROMETHEUS_DIMENSIONS` and `promql.ts`
+- [ ] Analytics breakdowns by API show ids, not names, and a key's alias is
+      the greatest seen in the window rather than the newest (M6 drill-down).
+      Names could come from the path templater's cached `loadApis`
+      (`src/lib/analytics/path-template.ts`) without a gateway call per render
 - [ ] Saved views, the parts ADR-0016 left out: rename or edit in place, views
       on `/analytics/live`, carrying a view to another environment, and an
       admin cleanup of a disabled account's personal views
@@ -1934,3 +1954,31 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     environment, so a standalone `npm run ingest` with different settings
     would disagree (as custom windows already could).
   - Not browser-tested. Next: M6 closeout, then M7.
+- docs(M6): **M6 complete**.
+  - Landed: the ingest worker draining the gateway's record list into minute
+    and hour rollups (ADR-0012; 73508bc), the ingest health panel on a new
+    `/analytics` (5aa81c8) and its worker heartbeat (abf0d2c). Traffic charts
+    for RPS, error rate and latency p50/p95/p99 (ADR-0013; b9bc493).
+    Drill-down by API, key, status, method and path (f688353), with paths
+    templated at ingest (3cab2a4). The live request inspector at
+    `/analytics/live` (ADR-0014; dfb2e11). The optional Prometheus source
+    (ADR-0015; 1445202). The date-range picker (735010d), CSV export
+    (a508ede) and saved views (ADR-0016; ad54186). Fixed ranges tied to
+    retention, with `90d`/`1y` from the rollups where hour retention holds
+    them (36173cc).
+  - Blocked upstream: no M6 box. In-cluster analytics waits on g2way's k8s
+    sink (`otlp_logs`, not `redis`); the M6 "Requires from g2way" note and an
+    `UPSTREAM.md` TODO carry it, with the non-blocking ones (record schema,
+    record id, `http.request.method`).
+  - Follow-ups already filed during M6: M11 gets the ingest worker in the
+    deploy box, a liveness probe for a standalone worker, ingest-health
+    alerts and Prometheus status per environment. M12 gets dashboard-side
+    path templates, inspector privacy options, method drill-down from
+    Prometheus (blocked upstream) and the rest of saved views.
+  - Filed at closeout: the M2 browser-pass box now lists the live inspector
+    (the inspector's log line said it did; it did not) and the retention
+    notes. M11's deploy box says both tiers need the same retention settings,
+    and its audit box decides whether key-level CSV exports need a trail.
+    M12 gets API names (not ids) and the newest key alias in breakdowns.
+    None of M6 has run in a browser.
+  - Next: M7 (resilience and upstreams).
