@@ -97,7 +97,8 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       drill-down (the selection chips and their ×; each breakdown tab; the
       three-line and "Everything else" charts; row links, API/key page links,
       a viewer without `keys:read` seeing no key tab; the ignored-parameter
-      notes; the "Traffic for this API/key" links) in both themes,
+      notes; the "Traffic for this API/key" links; the path tab's templating
+      note) in both themes,
       with rollups seeded by `make ingest` against Docker Redis or by hand
       (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
@@ -217,7 +218,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       from "gateway not sending", and a worker that recovered from an error
       stays "failing" until the next record arrives
 - [x] Drill-down by API, key, status class, method, path
-- [ ] Path templating for the `path` dimension (`/users/42` → `/users/{id}`, from
+- [x] Path templating for the `path` dimension (`/users/42` → `/users/{id}`, from
       the definition's rules or a heuristic) before rollup, so the per-batch cap
       of 200 paths per API and bucket (`(other)` past it) rarely bites
 - [ ] Live request inspector (tail of recent requests). Feed it from the ingest
@@ -330,6 +331,10 @@ an in-cluster dashboard cannot reach it. See `UPSTREAM.md`.
 - [ ] Roles scoped per API or per environment (ADR-0005 roles are org-wide)
 - [ ] Tamper-evident audit log (hash chain) and client IP on audit rows
 - [ ] Org-filtered node/stats views once g2way ships multi-org (ADR-0007 §6)
+- [ ] Dashboard-side path templates per API for analytics (for `--apps-dir`
+      APIs, which `GET /g2/apis` does not list, and for rules without named
+      groups), with a "files as" preview in the path-rule editor
+      (ADR-0012 §5, amended 2026-09-23)
 
 ---
 
@@ -1704,3 +1709,25 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     connected); the visual-pass box now lists drill-down.
   - Next: M6 path templating. Later M6 tasks reuse `drillHref`/`DrillState`
     for saved views and CSV export, and `RollupSelection` for a custom range.
+- feat(M6): **path templating** for the rollups' `path`
+  dimension (ADR-0012 §5 amended in place). `/users/42` → `/users/{id}`.
+  - `src/lib/analytics/path-template.ts`: the API definition's **named**
+    capture groups first (every pattern: the six rule lists, body-transform
+    rules, version overrides; first match with a named group wins), then a
+    heuristic per untouched whole segment (`{id}`, `{uuid}`, `{hex}`,
+    `{token}`). Unnamed groups are ignored on purpose: `(v1|v2)` is a literal.
+  - Definitions come from `GET /g2/apis` via `loadApis` (server client, 3 s
+    timeout), cached per environment for 60 s, fetched only when a batch
+    needs it; any failure falls back to the last rules or the heuristic and
+    never fails ingest. `rollupBatch` takes a `pathOf`; the cap counts
+    templates. Raw records in hand are untouched (the inspector sees real
+    paths).
+  - UI: the path breakdown says paths are templated and that rows ingested
+    before this keep raw paths until retention prunes them.
+  - Surprise: `ApiDefinition` has no path templates of its own, only regexes,
+    and `GET /g2/apis` omits `--apps-dir` APIs (already in UPSTREAM.md), which
+    therefore get the heuristic only. Follow-up filed in M12 (dashboard-side
+    templates and an editor preview). `watch.json`: new surface on
+    `traffic-middleware`.
+  - Next: M6 live request inspector. Feed it from `drainOnce`'s `records`
+    (raw, pre-template) before `rollupBatch`.

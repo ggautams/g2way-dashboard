@@ -111,10 +111,15 @@ export function bucketStartOf(timestampMs: number, bucketSeconds: RollupBucketSe
 
 /**
  * Folds `records` into one delta per (granularity, bucket, API, dimension,
- * value). Paths past `MAX_PATHS_PER_BUCKET` per API and bucket (the busiest
- * are kept) fold into `OTHER_PATHS`.
+ * value). `pathOf` gives the `path` value filed for a record: the worker
+ * passes the templated path (`path-template.ts`); the default is the raw path.
+ * Paths past `MAX_PATHS_PER_BUCKET` per API and bucket (the busiest are
+ * kept, counted after templating) fold into `OTHER_PATHS`.
  */
-export function rollupBatch(records: readonly AnalyticsRecord[]): RollupDelta[] {
+export function rollupBatch(
+  records: readonly AnalyticsRecord[],
+  pathOf: (record: AnalyticsRecord) => string = (record) => record.path,
+): RollupDelta[] {
   const deltas = new Map<string, RollupDelta>();
   const row = (
     bucketSeconds: RollupBucketSeconds,
@@ -141,8 +146,9 @@ export function rollupBatch(records: readonly AnalyticsRecord[]): RollupDelta[] 
     return delta;
   };
 
-  const kept = keptPaths(records);
-  for (const record of records) {
+  const paths = records.map((record) => truncatePath(pathOf(record)));
+  const kept = keptPaths(records, paths);
+  for (const [index, record] of records.entries()) {
     for (const bucketSeconds of ROLLUP_BUCKET_SECONDS) {
       const start = bucketStartOf(record.timestamp_unix_ms, bucketSeconds);
       const at = (dimension: RollupDimension, value: string) =>
@@ -153,7 +159,7 @@ export function rollupBatch(records: readonly AnalyticsRecord[]): RollupDelta[] 
       if (record.key_alias !== undefined) key.label = record.key_alias;
       add(at('method', record.method), record);
       add(at('status', String(record.status)), record);
-      const path = truncatePath(record.path);
+      const path = paths[index] as string;
       const pathKey = JSON.stringify([bucketSeconds, start.getTime(), record.api_id]);
       add(at('path', kept.get(pathKey)?.has(path) ? path : OTHER_PATHS), record);
     }
@@ -166,10 +172,13 @@ function truncatePath(path: string): string {
 }
 
 /** Per granularity, bucket and API: the busiest `MAX_PATHS_PER_BUCKET` paths. */
-function keptPaths(records: readonly AnalyticsRecord[]): Map<string, Set<string>> {
+function keptPaths(
+  records: readonly AnalyticsRecord[],
+  pathValues: readonly string[],
+): Map<string, Set<string>> {
   const counts = new Map<string, Map<string, number>>();
-  for (const record of records) {
-    const path = truncatePath(record.path);
+  for (const [index, record] of records.entries()) {
+    const path = pathValues[index] as string;
     for (const bucketSeconds of ROLLUP_BUCKET_SECONDS) {
       const start = bucketStartOf(record.timestamp_unix_ms, bucketSeconds);
       const id = JSON.stringify([bucketSeconds, start.getTime(), record.api_id]);

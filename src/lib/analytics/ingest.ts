@@ -10,6 +10,7 @@ import type { DataHandle } from '@/lib/db/users';
 import type { IngestConfig } from './config';
 import { redisErrorMessage, type RecordQueue } from './queue';
 import { parseAnalyticsRecord, type AnalyticsRecord } from './record';
+import { templatePath, type TemplateRule, type TemplateRuleCache } from './path-template';
 import { rollupBatch } from './rollup';
 
 /**
@@ -29,6 +30,11 @@ export type IngestSource = {
   queue: RecordQueue;
   /** For scrubbing Redis error messages; never logged or stored. */
   redisUrl: string;
+  /**
+   * The environment's API definitions' path-template rules. Absent, paths are
+   * templated by the heuristic alone. Never throws (`templateRuleCache`).
+   */
+  templates?: TemplateRuleCache;
 };
 
 export type IngestLogger = Pick<Console, 'info' | 'warn'>;
@@ -138,10 +144,25 @@ export async function drainOnce(source: IngestSource, deps: IngestDeps): Promise
   if (rejected > 0) {
     log.warn(`${PREFIX} ${environment}: dropped ${rejected} malformed record(s): ${lastRejection}`);
   }
+  // Templating (ADR-0012 §5): the definitions' named groups, then the heuristic.
+  // The rules are fetched here, after the pop, so an idle worker never calls
+  // the gateway; a refresh is bounded by the worker's short gateway timeout.
+  const rules: ReadonlyMap<string, readonly TemplateRule[]> =
+    source.templates === undefined ? new Map() : await source.templates.rules();
+  const templated = new Map<string, string>();
+  const pathOf = (record: AnalyticsRecord): string => {
+    const id = `${record.api_id}\u0000${record.path}`;
+    let path = templated.get(id);
+    if (path === undefined) {
+      path = templatePath(record.path, rules.get(record.api_id));
+      templated.set(id, path);
+    }
+    return path;
+  };
   const newest = records.reduce((max, r) => Math.max(max, r.timestamp_unix_ms), -1);
   const batch = {
     environment,
-    deltas: rollupBatch(records),
+    deltas: rollupBatch(records, pathOf),
     ingested: records.length,
     rejected,
     lastRejection,

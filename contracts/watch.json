@@ -70,9 +70,10 @@
         "Path-rule editors (M5): ruleProblems, HOP_BY_HOP and MOCK_DEFAULT_STATUS in src/lib/apis/rules.ts mirror PathRule/MockResponse/EndpointRateLimit::validate (endpoints.rs) and UrlRewriteRule::validate (transform.rs)",
         "Versioning editor (M5): versioningProblems, DEFAULT_VERSION_KEY and FORM_OVERRIDES/DEFERRED_OVERRIDES in src/lib/apis/versioning.ts mirror VersioningConfig::validate and VersionOverrides (versioning.rs)",
         "Transform and CORS editors (M5): headerTransformProblems, bodyTransformProblems, corsProblems and the BODY_/CORS_ defaults in src/lib/apis/transforms.ts mirror HeaderTransforms::validate (transform.rs), BodyTransforms/BodyTransformRule::validate (body_transform.rs) and CorsConfig::validate (security.rs)",
-        "Request console trace (M5): inferTrace in src/lib/apis/trace.ts mirrors endpoints.rs rule evaluation (block, allow, ignore; first match wins), mock/rewrite/body-rule matching and the version dispatcher's refusals (versioning.rs)"
+        "Request console trace (M5): inferTrace in src/lib/apis/trace.ts mirrors endpoints.rs rule evaluation (block, allow, ignore; first match wins), mock/rewrite/body-rule matching and the version dispatcher's refusals (versioning.rs)",
+        "Analytics path templating (M6, ADR-0012 \u00a75): definitionPatterns in src/lib/analytics/path-template.ts reads every regex pattern an ApiDefinition carries (the rule lists, body-transform rules, VersionOverrides) and relies on patterns being searched against the full client path, listen path included"
       ],
-      "onChange": "New transform or rule kinds need editors; check whether validation rules changed. A new VersionOverrides field, or a change to which fields apply() replaces, must be reflected in applyVersion."
+      "onChange": "New transform or rule kinds need editors; check whether validation rules changed. A new VersionOverrides field, or a change to which fields apply() replaces, must be reflected in applyVersion. A new pattern-bearing rule kind belongs in definitionPatterns (path-template.ts)."
     },
     {
       "id": "graphql",

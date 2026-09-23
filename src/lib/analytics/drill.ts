@@ -95,6 +95,14 @@ function focusProblem(dimension: FocusDimension, value: string): string | null {
   }
 }
 
+/**
+ * Said wherever paths are broken down: the worker files templated paths
+ * (ADR-0012 §5, amended 2026-09-23), and rows written before that stay raw,
+ * so one endpoint can show twice across the change until they age out.
+ */
+export const PATH_TEMPLATE_NOTE =
+  'Paths are templated at ingest: named groups in the API’s path rules first, then ids, UUIDs, hex and long tokens (/users/42 → /users/{id}). Traffic ingested before templating was added keeps its raw paths until retention prunes it.';
+
 /** The value the ingest worker folds paths past its per-batch cap into (ADR-0012 §5). */
 export const OTHER_PATHS_VALUE = '(other)';
 

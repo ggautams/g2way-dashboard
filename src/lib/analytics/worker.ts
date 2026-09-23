@@ -1,9 +1,11 @@
 import 'server-only';
 
 import { getDatabase } from '@/lib/db';
+import { loadApis } from '@/lib/g2/apis';
 import { getOrgId, getRegistry, type Registry } from '@/lib/g2/environments';
 import { parseIngestConfig, type IngestConfig } from './config';
 import { runIngest, type IngestLogger, type IngestSource } from './ingest';
+import { templateRuleCache, type DefinitionsLoad } from './path-template';
 import { redisQueue } from './queue';
 import { analyticsRecordsKey } from './record';
 
@@ -21,8 +23,30 @@ export type IngestWorker = {
   stop(): Promise<void>;
 };
 
+/**
+ * How long the worker waits for `GET /g2/apis` when refreshing path templates.
+ * Short, because the batch in hand waits on it (ADR-0012 §5); on a timeout the
+ * batch is templated with the last rules fetched, or by heuristic.
+ */
+export const DEFINITIONS_TIMEOUT_MS = 3000;
+
+/** The environment's definitions through the server-side gateway client, settled. */
+function definitionsLoader(
+  environment: string,
+  registry: Registry,
+): () => Promise<DefinitionsLoad> {
+  return async () => {
+    const { apis } = await loadApis(environment, { registry, timeoutMs: DEFINITIONS_TIMEOUT_MS });
+    return apis.ok ? apis : { ok: false, error: apis.error };
+  };
+}
+
 /** The sources to drain: every environment with a Redis URL. */
-export function ingestSources(registry: Registry, orgId: string): IngestSource[] {
+export function ingestSources(
+  registry: Registry,
+  orgId: string,
+  log: IngestLogger = console,
+): IngestSource[] {
   const key = analyticsRecordsKey(orgId);
   return registry.environments.flatMap((target) =>
     target.redisUrl === null
@@ -32,6 +56,9 @@ export function ingestSources(registry: Registry, orgId: string): IngestSource[]
             environment: target.id,
             queue: redisQueue(target.redisUrl, key),
             redisUrl: target.redisUrl,
+            templates: templateRuleCache(target.id, definitionsLoader(target.id, registry), {
+              log,
+            }),
           },
         ],
   );
@@ -51,7 +78,7 @@ export function startIngestWorker(
   const orgId = getOrgId();
   try {
     config = options.config ?? parseIngestConfig(process.env);
-    sources = ingestSources(getRegistry(), orgId);
+    sources = ingestSources(getRegistry(), orgId, log);
   } catch (error) {
     log.warn(`[analytics-ingest] not started: ${error instanceof Error ? error.message : error}`);
     return null;

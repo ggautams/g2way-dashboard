@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { formatValue } from '@/lib/analytics/chart';
 import {
   DIMENSION_LABELS,
+  PATH_TEMPLATE_NOTE,
   type BreakdownDimension,
   type BreakdownSeries,
   type GroupDisplay,
@@ -80,6 +81,7 @@ export function BreakdownPanel({ view }: { view: BreakdownView }) {
           </nav>
         )}
       </div>
+      {by === 'path' && <p className="-mt-2 text-xs text-muted">{PATH_TEMPLATE_NOTE}</p>}
 
       {items.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">

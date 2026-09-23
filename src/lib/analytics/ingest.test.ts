@@ -4,6 +4,7 @@ import { migrateDatabase, openDatabase, type DashboardDatabase } from '@/lib/db'
 import * as analyticsDb from '@/lib/db/analytics';
 import { getIngestState } from '@/lib/db/analytics';
 import { ingestHealth } from './health';
+import { templateRuleCache } from './path-template';
 import { BACKOFF_MS, HEARTBEAT_MS, IDLE_MS, drainOnce, runIngest, type IngestDeps } from './ingest';
 import type { RecordQueue } from './queue';
 import type { AnalyticsRecord } from './record';
@@ -115,6 +116,71 @@ describe('drainOnce', () => {
       lastRecordAt: new Date(T0),
       lastRejection: 'org_id is not the configured org',
     });
+  });
+
+  it('files templated paths: definition rules first, then the heuristic', async () => {
+    const queue = new MemoryQueue();
+    queue.items = [
+      record({ path: '/users/alice/posts/7' }),
+      record({ path: '/users/bob/posts/8' }),
+      record({ path: '/users/42' }),
+    ];
+    const templates = templateRuleCache(
+      'prod',
+      async () => ({
+        ok: true,
+        value: [
+          {
+            api_id: 'users',
+            name: 'Users',
+            listen_path: '/users/',
+            target_url: 'http://users.internal',
+            allow_paths: [{ pattern: '^/users/(?P<handle>[a-z]+)/' }],
+          },
+        ],
+      }),
+      { log: silent },
+    );
+    await drainOnce({ environment: 'prod', queue, redisUrl: REDIS_URL, templates }, deps());
+    if (handle.dialect !== 'sqlite') throw new Error('sqlite only');
+    const t = handle.schema.analyticsRollups;
+    const paths = handle.db
+      .select()
+      .from(t)
+      .all()
+      .filter((r) => r.dimension === 'path' && r.bucketSeconds === 60)
+      .map((r) => [r.value, r.requests])
+      .sort();
+    expect(paths).toEqual([
+      ['/users/{handle}/posts/{id}', 2],
+      ['/users/{id}', 1],
+    ]);
+  });
+
+  it('templates by heuristic when the definitions cannot be fetched', async () => {
+    const queue = new MemoryQueue();
+    queue.items = [record({ path: '/users/42' })];
+    const templates = templateRuleCache(
+      'prod',
+      async () => {
+        throw new Error('gateway unreachable');
+      },
+      { log: silent },
+    );
+    const result = await drainOnce(
+      { environment: 'prod', queue, redisUrl: REDIS_URL, templates },
+      deps(),
+    );
+    expect(result).toEqual({ kind: 'written', popped: 1 });
+    if (handle.dialect !== 'sqlite') throw new Error('sqlite only');
+    const t = handle.schema.analyticsRollups;
+    const values = handle.db
+      .select()
+      .from(t)
+      .all()
+      .filter((r) => r.dimension === 'path')
+      .map((r) => r.value);
+    expect(new Set(values)).toEqual(new Set(['/users/{id}']));
   });
 
   it('writes nothing for an empty list', async () => {

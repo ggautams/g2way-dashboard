@@ -158,4 +158,13 @@ describe('rollupBatch', () => {
     // The fold does not lose requests.
     expect(paths.reduce((total, d) => total + d.requests, 0)).toBe(records.length);
   });
+
+  it('files the path pathOf gives, and caps after it', () => {
+    const records = Array.from({ length: MAX_PATHS_PER_BUCKET + 5 }, (_, i) =>
+      record({ path: `/users/${i}` }),
+    );
+    const deltas = rollupBatch(records, (r) => r.path.replace(/\d+$/, '{id}'));
+    const paths = deltas.filter((d) => d.bucketSeconds === 60 && d.dimension === 'path');
+    expect(paths.map((d) => [d.value, d.requests])).toEqual([['/users/{id}', records.length]]);
+  });
 });
