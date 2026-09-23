@@ -67,6 +67,22 @@ latencies, so any percentile the dashboard shows is an estimate.
    least a day of minute retention (`G2_ANALYTICS_MINUTE_RETENTION_DAYS`,
    default 3).
 
+6. **Drill-down folds, never multiplies** (_added 2026-09-23, M6 drill-down_).
+   A breakdown chart draws request rate per group. When the three busiest
+   groups are all the traffic, each gets its own slot. Otherwise the two
+   busiest get slots 1 and 2 and slot 3 is "Everything else": the selection's
+   total minus those two, so the lines always add up to the total. We chose
+   this over small multiples: one chart keeps a shared y-axis and reads as
+   parts of a whole, and the table under it lists the ten busiest groups with
+   exact figures, plus an "Everything else" row. The folding is
+   `breakdownSeries` (`src/lib/analytics/drill.ts`).
+
+   What a drill-down can select follows the rollups (ADR-0012 §5): one API or
+   all of them, and at most one value of one other dimension. A breakdown is
+   offered only where the rows can answer it: any dimension without a focus,
+   only by API under one (the focus's rows grouped by `api_id`), and by code
+   inside a status class. Key × path is never offered.
+
 ## Consequences
 
 - No new dependency. Chart code is ours to maintain, and the pure helpers
