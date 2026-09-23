@@ -229,3 +229,10 @@ Newly watched: **file-loader** — first fingerprint recorded; nothing to catch 
 ## 2026-09-24 — g2way 61a4975 → 61a4975
 
 Newly watched: **metrics** — first fingerprint recorded; nothing to catch up on.
+
+## 2026-09-24 — g2way 61a4975 → f777776
+
+g2way's history was rewritten: every commit has a new sha, but all 11 watched
+areas are unchanged apart from wording: rustdoc, `docs/`, the schema
+descriptions in `docs/api/openapi.json`, and a few test names. Contract types
+and endpoints are identical. Lock advanced; nothing to catch up on.
