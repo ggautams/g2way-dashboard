@@ -5,6 +5,7 @@ import { RawPanel, SchemaProblems, useRawView } from '@/components/designer/raw-
 import { HistoryPanel, RestoredNote } from '@/components/designer/history-panel';
 import { SaveBar, type DesignerEnvironment } from '@/components/designer/save-bar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { SlotExplanations } from '@/lib/apis/chain';
 import { draftProblems, otherFields, type ApiHelp } from '@/lib/apis/draft';
 import type { ApiDefinition } from '@/lib/apis/list';
 import { isDraftShape } from '@/lib/apis/raw';
@@ -20,6 +21,11 @@ type Props = {
   /** Where the draft starts: the stored definition, or a new one. */
   initial: ApiDefinition;
   help: ApiHelp;
+  /**
+   * `slotExplanations()`: each chain slot's explain panel, already rendered on
+   * the server from g2way's vendored docs.
+   */
+  explain: SlotExplanations;
   /** `apiDefinitionSchema()`: g2way's JSON Schema for the definition. */
   schema: { $id: string } & object;
   /** Whether the role holds `apis:write`; otherwise the designer is read-only. */
@@ -42,6 +48,7 @@ export function ApiDesigner({
   original,
   initial,
   help,
+  explain,
   schema,
   canWrite,
   environment,
@@ -143,7 +150,7 @@ export function ApiDesigner({
           </TabsContent>
         ))}
         <TabsContent value="chain" className="mt-4">
-          <ChainView draft={draft} />
+          <ChainView draft={draft} explain={explain} />
         </TabsContent>
         {history !== undefined && (
           <TabsContent value="history" className="mt-4">

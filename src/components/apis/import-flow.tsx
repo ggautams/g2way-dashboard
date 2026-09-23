@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import type { SlotExplanations } from '@/lib/apis/chain';
 import type { ApiHelp } from '@/lib/apis/draft';
 import { importOpenApi } from '@/lib/apis/import';
 import type { ApiDefinition } from '@/lib/apis/list';
@@ -12,6 +13,8 @@ import type { DesignerEnvironment } from '@/components/designer/save-bar';
 
 type Props = {
   help: ApiHelp;
+  /** `slotExplanations()`, for the designer's Chain tab. */
+  explain: SlotExplanations;
   schema: { $id: string } & object;
   environment: DesignerEnvironment;
 };
@@ -21,7 +24,7 @@ type Props = {
  * with the mapped definition as an unsaved draft. Parsing happens in the
  * browser: the document is never uploaded, only the definition saved from it.
  */
-export function ImportFlow({ help, schema, environment }: Props) {
+export function ImportFlow({ help, explain, schema, environment }: Props) {
   const [source, setSource] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [imported, setImported] = useState<{ draft: ApiDefinition; notes: string[] } | null>(null);
@@ -44,6 +47,7 @@ export function ImportFlow({ help, schema, environment }: Props) {
           original={null}
           initial={imported.draft}
           help={help}
+          explain={explain}
           schema={schema}
           canWrite
           environment={environment}

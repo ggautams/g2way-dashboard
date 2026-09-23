@@ -5,13 +5,16 @@ import {
   DISPATCHER_ID,
   EDITOR_SLOTS,
   editorAnchor,
+  explainEntries,
   FORWARDER_ID,
   type ForwarderStatus,
+  type SlotExplanation,
+  type SlotExplanations,
   type SlotState,
   type SlotStatus,
   VERSION_EDITOR_SLOTS,
 } from '@/lib/apis/chain';
-import type { ApiDefinition } from '@/lib/apis/list';
+import type { ApiDefinition, AuthMode } from '@/lib/apis/list';
 
 /**
  * A link to the form section editing `slotId`, when there is one
@@ -46,7 +49,59 @@ const STATE_LABEL: Record<SlotState, string> = {
   unreached: 'not reached',
 };
 
-function Slot({ status, version }: { status: SlotStatus; version?: string }) {
+/**
+ * A slot's explain panel: the vendored g2way doc passages that apply to this
+ * API's auth mode, or g2way's rustdoc when none does (`explainEntries`).
+ * Rendered on the server (`slot-explain.tsx`); a native `<details>`, so it
+ * needs no state.
+ */
+function Explain({
+  explanation,
+  authMode,
+}: {
+  explanation: SlotExplanation | undefined;
+  authMode: AuthMode;
+}) {
+  if (explanation === undefined) return null;
+  const { entries, fromDocs } = explainEntries(explanation, authMode);
+  if (entries.length === 0 && explanation.adrs.length === 0) return null;
+  return (
+    <details className="mt-1 pl-8 text-xs">
+      <summary className="cursor-pointer text-accent">Explain</summary>
+      <div className="mt-2 flex flex-col gap-3 rounded-md border border-border bg-subtle/40 p-3">
+        {!fromDocs && (
+          <p className="text-muted">
+            g2way documents this slot only in its source; from its rustdoc:
+          </p>
+        )}
+        {entries.map((entry) => (
+          <section key={entry.source} className="flex flex-col gap-1">
+            <p className="font-mono text-[11px] text-muted">{entry.source}</p>
+            {entry.body}
+          </section>
+        ))}
+        {explanation.adrs.length > 0 && (
+          <p className="text-muted">
+            Design record{explanation.adrs.length > 1 ? 's' : ''} in g2way:{' '}
+            {explanation.adrs.join('; ')}.
+          </p>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function Slot({
+  status,
+  version,
+  explanation,
+  authMode,
+}: {
+  status: SlotStatus;
+  version?: string;
+  explanation?: SlotExplanation;
+  authMode: AuthMode;
+}) {
   const { slot, state, reason } = status;
   const dim = state === 'off' || state === 'unreached';
   return (
@@ -68,6 +123,7 @@ function Slot({ status, version }: { status: SlotStatus; version?: string }) {
       <p className="mt-1 pl-8 text-xs text-muted">
         {reason} {slot.summary}
       </p>
+      <Explain explanation={explanation} authMode={authMode} />
     </li>
   );
 }
@@ -99,10 +155,20 @@ function Forwarder({ forwarder, version }: { forwarder: ForwarderStatus; version
  * The middleware chain g2way builds for the draft, in its real slot order
  * (`src/lib/apis/chain.ts` mirrors chain.rs). A versioned API shows the shared
  * outer slots once, then each version's inner chain. Every slot carries the
- * `chainAnchor()` id, so editors and the explain panel can link to it.
+ * `chainAnchor()` id, so editors and the explain panel can link to it, and
+ * an "Explain" panel from `explain` (rendered on the server from g2way's
+ * vendored docs; see `slot-explain.tsx`).
  */
-export function ChainView({ draft }: { draft: ApiDefinition }) {
+export function ChainView({
+  draft,
+  explain = {},
+}: {
+  draft: ApiDefinition;
+  explain?: SlotExplanations;
+}) {
   const chain = chainFor(draft);
+  // Auth is never overridden per version, so one mode covers every chain.
+  const authMode: AuthMode = draft.auth?.mode ?? 'auth_token';
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted">
@@ -121,7 +187,12 @@ export function ChainView({ draft }: { draft: ApiDefinition }) {
             <h3 className="text-sm font-medium">Shared by every version</h3>
             <ol className="flex flex-col gap-2">
               {chain.outer.map((s) => (
-                <Slot key={s.slot.id} status={s} />
+                <Slot
+                  key={s.slot.id}
+                  status={s}
+                  explanation={explain[s.slot.id]}
+                  authMode={authMode}
+                />
               ))}
               <li
                 id={chainAnchor(DISPATCHER_ID)}
@@ -168,7 +239,13 @@ export function ChainView({ draft }: { draft: ApiDefinition }) {
                 </p>
                 <ol className="flex flex-col gap-2">
                   {v.inner.map((s) => (
-                    <Slot key={s.slot.id} status={s} version={v.name} />
+                    <Slot
+                      key={s.slot.id}
+                      status={s}
+                      version={v.name}
+                      explanation={explain[s.slot.id]}
+                      authMode={authMode}
+                    />
                   ))}
                   <Forwarder forwarder={v.forwarder} version={v.name} />
                 </ol>
@@ -179,7 +256,7 @@ export function ChainView({ draft }: { draft: ApiDefinition }) {
       ) : (
         <ol className="flex flex-col gap-2">
           {chain.slots.map((s) => (
-            <Slot key={s.slot.id} status={s} />
+            <Slot key={s.slot.id} status={s} explanation={explain[s.slot.id]} authMode={authMode} />
           ))}
           <Forwarder forwarder={chain.forwarder} />
         </ol>

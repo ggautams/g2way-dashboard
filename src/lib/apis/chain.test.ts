@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  explainEntries,
+  type SlotExplanation,
   applyVersion,
   CHAIN_SLOTS,
   chainAnchor,
@@ -249,5 +251,30 @@ describe('editor links', () => {
     expect(VERSION_EDITOR_SLOTS).not.toContain('auth');
     expect(VERSION_EDITOR_SLOTS).not.toContain('size-limit');
     expect(editorAnchor('mock', 'v 2')).toBe('edit-v-v%202-mock');
+  });
+});
+
+describe('explainEntries', () => {
+  const entry = (source: string, authMode?: 'oidc' | 'jwt') => ({ source, authMode, body: source });
+  const explanation: SlotExplanation = {
+    docs: [entry('oidc.md', 'oidc'), entry('shared.md')],
+    rustdoc: [entry('rustdoc: jwt', 'jwt'), entry('rustdoc: oidc', 'oidc'), entry('rustdoc: auth')],
+    adrs: [],
+  };
+
+  it('shows the docs that apply to the API’s auth mode', () => {
+    expect(explainEntries(explanation, 'oidc')).toEqual({
+      entries: [entry('oidc.md', 'oidc'), entry('shared.md')],
+      fromDocs: true,
+    });
+    expect(explainEntries(explanation, 'jwt').entries.map((e) => e.source)).toEqual(['shared.md']);
+  });
+
+  it('falls back to the rustdoc that applies when no doc does', () => {
+    const noShared = { ...explanation, docs: [entry('oidc.md', 'oidc')] };
+    expect(explainEntries(noShared, 'jwt')).toEqual({
+      entries: [entry('rustdoc: jwt', 'jwt'), entry('rustdoc: auth')],
+      fromDocs: false,
+    });
   });
 });

@@ -46,11 +46,48 @@ describe('ChainView', () => {
   });
 });
 
+describe('ChainView explain panels', () => {
+  const source = read('chain-view.tsx');
+
+  it('shows each slot’s panel for the draft’s auth mode, in a native <details>', () => {
+    expect(source).toContain('explainEntries(explanation, authMode)');
+    expect(source).toContain("draft.auth?.mode ?? 'auth_token'");
+    expect(source).toContain('<details');
+    expect(source).toContain('<Explain explanation={explanation} authMode={authMode} />');
+    expect(source.match(/explanation=\{explain\[s\.slot\.id\]\}/g)).toHaveLength(3);
+  });
+});
+
+describe('slotExplanations', () => {
+  const source = read('slot-explain.tsx');
+
+  it('is server-only and renders the markdown there', () => {
+    expect(source).toMatch(/^import 'server-only';/);
+    expect(source).not.toContain("'use client'");
+    expect(source).toContain(
+      '<Markdown remarkPlugins={[remarkGfm]} components={COMPONENTS} skipHtml>',
+    );
+  });
+
+  it('keeps only absolute links, and no images', () => {
+    expect(source).toContain('const target = linkHref(href);');
+    expect(source).toContain('img: ({ alt }) => <span>{alt}</span>');
+  });
+
+  it.each([
+    '../../app/(app)/apis/new/page.tsx',
+    '../../app/(app)/apis/view/[id]/page.tsx',
+    '../../app/(app)/apis/import/page.tsx',
+  ])('is passed to the designer by %s', (page) => {
+    expect(read(page)).toContain('explain={slotExplanations()}');
+  });
+});
+
 describe('ApiDesigner', () => {
   it('has a Chain tab rendering the live draft', () => {
     const source = read('api-designer.tsx');
     expect(source).toContain('<TabsTrigger value="chain">Chain</TabsTrigger>');
-    expect(source).toContain('<ChainView draft={draft} />');
+    expect(source).toContain('<ChainView draft={draft} explain={explain} />');
   });
 
   it('follows #edit- and #chain- links across tabs', () => {

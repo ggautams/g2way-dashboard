@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ApiDesigner } from '@/components/apis/api-designer';
+import { slotExplanations } from '@/components/apis/slot-explain';
 import { newDraft } from '@/lib/apis/draft';
 import { apiHelp } from '@/lib/apis/field-help';
 import { apiDefinitionSchema } from '@/lib/apis/schema';
@@ -29,6 +30,7 @@ export default async function NewApiPage() {
         original={null}
         initial={newDraft()}
         help={apiHelp()}
+        explain={slotExplanations()}
         schema={apiDefinitionSchema()}
         canWrite
         environment={{ id, label }}

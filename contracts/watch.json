@@ -119,8 +119,12 @@
         "docs/body-transforms.md",
         "docs/endpoint-rate-limits.md"
       ],
-      "surfaces": ["contracts/g2way-docs/", "explain panels (M5/M8)"],
-      "onChange": "Re-vendor contracts/g2way-docs/; a new ADR may change a decision this dashboard relies on."
+      "surfaces": [
+        "contracts/g2way-docs/",
+        "Chain explain panels (M5): SLOT_DOCS and SLOT_ADRS in src/lib/apis/slot-docs.ts cut passages by file and heading (slot-docs.test.ts fails on a renamed one)",
+        "explain panels (M8)"
+      ],
+      "onChange": "Re-vendor contracts/g2way-docs/; a new ADR may change a decision this dashboard relies on. A moved or renamed doc section needs its SLOT_DOCS entry updated; a new doc about a chain slot deserves one."
     }
   ]
 }

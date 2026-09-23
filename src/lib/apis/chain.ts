@@ -12,8 +12,9 @@
  * Universal and pure, so the designer and its tests share it.
  */
 
+import type { ReactNode } from 'react';
 import type { components } from '../../../contracts/g2way.d.ts';
-import type { ApiDefinition } from './list';
+import type { ApiDefinition, AuthMode } from './list';
 import { DEFAULT_VERSION_KEY } from './versioning';
 
 type VersionOverrides = components['schemas']['VersionOverrides'];
@@ -523,4 +524,49 @@ export function chainFor(def: ApiDefinition): Chain {
       };
     }),
   };
+}
+
+/**
+ * One rendered passage of a slot's explain panel: an excerpt of a vendored
+ * g2way doc, or a piece of g2way's rustdoc. `authMode` marks a passage that
+ * only concerns one auth mode (the auth slot's oidc, hmac and mtls docs).
+ */
+export type ExplainEntry = {
+  /** Where it came from, e.g. `plugins.md § Semantics` or `rustdoc: ApiDefinition.cors`. */
+  source: string;
+  authMode?: AuthMode;
+  body: ReactNode;
+};
+
+/**
+ * A slot's explain panel, rendered on the server (`slotExplanations()` in
+ * `src/components/apis/slot-explain.tsx`, from `src/lib/apis/slot-docs.ts`)
+ * and passed down as props, so no doc-reading code reaches the browser.
+ */
+export type SlotExplanation = {
+  /** Excerpts of `contracts/g2way-docs/`. */
+  docs: ExplainEntry[];
+  /** g2way's rustdoc for the slot's fields: the fallback when no doc applies. */
+  rustdoc: ExplainEntry[];
+  /** Titles of the g2way ADRs recording the slot's design. */
+  adrs: string[];
+};
+
+/** Explain panels by slot id; slots without one are absent. */
+export type SlotExplanations = Readonly<Record<string, SlotExplanation>>;
+
+/**
+ * What a slot's explain panel shows for an API in `authMode`: the doc
+ * excerpts that apply to it, or, when none does, the rustdoc that applies.
+ */
+export function explainEntries(
+  explanation: SlotExplanation,
+  authMode: AuthMode,
+): { entries: ExplainEntry[]; fromDocs: boolean } {
+  const applies = (entry: ExplainEntry) =>
+    entry.authMode === undefined || entry.authMode === authMode;
+  const docs = explanation.docs.filter(applies);
+  return docs.length > 0
+    ? { entries: docs, fromDocs: true }
+    : { entries: explanation.rustdoc.filter(applies), fromDocs: false };
 }

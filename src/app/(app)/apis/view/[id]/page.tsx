@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ApiDesigner } from '@/components/apis/api-designer';
+import { slotExplanations } from '@/components/apis/slot-explain';
 import { apiHelp } from '@/lib/apis/field-help';
 import { apiDefinitionSchema } from '@/lib/apis/schema';
 import { can } from '@/lib/auth/rbac';
@@ -95,6 +96,7 @@ export default async function ApiPage({ params, searchParams }: PageProps<'/apis
           original={api.value}
           initial={api.value}
           help={apiHelp()}
+          explain={slotExplanations()}
           schema={apiDefinitionSchema()}
           canWrite={canWrite}
         />

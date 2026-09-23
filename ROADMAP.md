@@ -83,7 +83,9 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       "none"; key and location; the UTC expiry input; each override starting
       as inherited and switching back; deferred overrides listed and kept;
       the Chain tab's per-version "Edit v2" links landing on that version's
-      sections) (M1 and M2
+      sections), and the Chain tab's "Explain" panels (auth's panel following
+      the selected mode; tables, code blocks and neutralised relative links
+      in both themes) (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23, twice. `make serve-scratch` is the one-step way to run the
       pass: a production build on :3100 against a fresh temp-dir SQLite
@@ -173,7 +175,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
         `max_response_body_bytes`), CORS
   - [x] 2d. Versioning (`VersioningConfig`; each version's overrides reuse the
         2b/2c editors; non-overridable fields shown as inherited)
-- [ ] Explain panel per slot rendered from `contracts/g2way-docs/`
+- [x] Explain panel per slot rendered from `contracts/g2way-docs/`
 - [ ] Request console: send a test request through the gateway, show the
       response and which middleware acted on it
 
@@ -1427,3 +1429,36 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     above it.
   - Not run in a browser; added to the open M2 browser-pass box.
   - Next: the explain panel per slot.
+- feat(M5): explain panel per slot.
+  - `src/lib/apis/slot-docs.ts` (server-only): `SLOT_DOCS` maps slot ids to
+    passages of `contracts/g2way-docs/` by file and exact heading (no heading
+    = the intro between the title and the first heading); `SLOT_ADRS` lists
+    g2way ADRs, shown as titles only. The heading parser skips fenced code,
+    where shell comments and `#[no_mangle]` look like headings. Slots with
+    no doc (ip-filter, cors, path-policy, size-limit, header transforms,
+    mock, cache, stats, context, api-id header) fall back to rustdoc: each
+    of the slot's `ApiDefinition` fields, plus a schema intro for CORS, header
+    transforms, mocks and the cache. The auth slot's oidc/hmac/mtls docs and
+    its per-mode `AuthConfig` rustdoc are tagged by mode; `explainEntries`
+    in chain.ts picks what applies to the draft's mode.
+  - Rendering: added react-markdown + remark-gfm. No ADR: ADR-0001 records
+    the framework, UI kit and database; a leaf dependency like this (or
+    Monaco, ajv, yaml) does not deviate from it. `slot-explain.tsx`
+    (server-only) renders every panel in the page's Server Component. The
+    rendered nodes reach `ApiDesigner` → `ChainView` as the `explain` prop, and
+    the types live in chain.ts, so the client boundary test stays clean and
+    no markdown code ships (checked in `.next/static`). Only absolute http(s)
+    links survive. Relative doc/ADR/source links and `#…` anchors render as
+    text: an anchor would hit the designer's `#chain-`/`#edit-` handler.
+    Raw HTML is skipped and images show their alt text.
+  - Drift: `slot-docs.test.ts` fails if a mapped file or heading is missing
+    after a sync, if a mapped file is outside the watched `docs` area, or if
+    that area stops naming `slot-docs.ts` among its surfaces (updated in
+    `contracts/watch.json`). Docs are read with `process.cwd()` at request
+    time. If they are missing, the passages are skipped and the rustdoc
+    remains.
+  - The forwarder and dispatcher get no panel (they are not slots).
+    websockets/grpc/service-discovery/tls-termination docs belong to M7's
+    forwarder surfaces.
+  - Not run in a browser; added to the open M2 browser-pass box.
+  - Next: the request console.
