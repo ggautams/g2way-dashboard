@@ -89,7 +89,9 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       API: the not-configured and viewer states; method, path, version,
       headers and body; a real response, its headers and a truncated body;
       the inferred trace's badges, mismatches and "In chain" links landing
-      on the Chain tab's slot, per version too) (M1 and M2
+      on the Chain tab's slot, per version too), and M6's `/analytics`
+      ingest health panel in each state (no Redis, no records, failing,
+      backlog near cap) in both themes (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
       2026-09-23, twice. `make serve-scratch` is the one-step way to run the
       pass: a production build on :3100 against a fresh temp-dir SQLite
@@ -196,11 +198,16 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
 
 - [x] Ingest worker draining `g2:{org}:analytics:records` into rollup tables
       (ADR-0012: `analytics_rollups`, `analytics_ingest_state`)
-- [ ] Ingest health on the traffic pages, from `analytics_ingest_state`: tell
+- [x] Ingest health on the traffic pages, from `analytics_ingest_state`: tell
       "no `G2_REDIS_URL`", "gateway not sending" (no `last_drained_at`),
       "worker failing" (`last_error_at` after `last_drained_at`) and "backlog
       near g2way's 100 000 cap" (the gateway is dropping records) apart
 - [ ] Traffic dashboards: RPS, error rate, latency p50/p95/p99
+- [ ] Worker heartbeat in `analytics_ingest_state` (a `last_polled_at` set on
+      every pass, empty pops included; needs a migration and an ADR-0012
+      amendment). Without it the health panel cannot tell "no worker runs"
+      from "gateway not sending", and a worker that recovered from an error
+      stays "failing" until the next record arrives
 - [ ] Drill-down by API, key, status class, method, path
 - [ ] Path templating for the `path` dimension (`/users/42` → `/users/{id}`, from
       the definition's rules or a heuristic) before rollup, so the per-batch cap
@@ -1597,3 +1604,21 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
     the live inspector from the worker; M11's deploy box now covers the
     worker.
   - Next: M6 ingest health / traffic dashboards.
+- feat(M6): **ingest health** on a new `/analytics` page.
+  - `ingestHealth()` (`src/lib/analytics/health.ts`, pure, tested) classifies
+    an environment as `not-configured` / `failing` / `not-sending` / `ok`,
+    plus a separate `backlog.nearCap` (≥ 80 % of `GATEWAY_RECORD_CAP`,
+    100 000). `IngestHealthPanel` (`src/components/analytics/ingest-health.tsx`,
+    Server Component) renders it with the counters, the last error and last
+    rejection, and why this server's worker did not start
+    (`G2_ANALYTICS_INGEST=off` or an `IngestConfigError`).
+  - `/analytics` is now `ready` in the nav, behind `gateway:read` (the nav had
+    already chosen it; no new permission). The page is a shell: health panel,
+    then a placeholder "Traffic" section for the next box to fill. Its loader
+    reads `Date.now()` outside render (eslint's `react-hooks/purity`).
+  - Surprise: the state row is only written on a non-empty drain or an error,
+    so "no worker" and "gateway not sending" look the same, and a recovered
+    worker reads as failing until traffic resumes. The panel says so; a
+    heartbeat column is filed as a new M6 box.
+  - Next: M6 traffic dashboards (RPS, error rate, latency percentiles) into
+    the `/analytics` "Traffic" section.

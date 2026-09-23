@@ -109,7 +109,7 @@ export const NAV: readonly NavGroup[] = [
         description: 'Traffic, errors and latency',
         keywords: ['metrics', 'traffic'],
         milestone: 'M6',
-        ready: false,
+        ready: true,
         permission: 'gateway:read',
       },
     ],
