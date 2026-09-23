@@ -46,3 +46,6 @@ next-env.d.ts
 
 # dashboard SQLite database (default DATABASE_URL)
 /data/
+
+# Local agent notes
+CLAUDE.md

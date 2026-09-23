@@ -59,4 +59,7 @@ order and the session protocol.
 
 ## Licence
 
-MPL-2.0, matching g2way.
+GPL-3.0-or-later — see [LICENSE](LICENSE).
+
+Files copied from g2way (`contracts/`, including `contracts/g2way-docs/`) remain
+under g2way's MIT licence.
