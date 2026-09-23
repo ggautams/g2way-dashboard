@@ -10,6 +10,7 @@ import { KeyUsage } from '@/components/keys/key-usage';
 import { Badge } from '@/components/ui/badge';
 import { Notice } from '@/components/users/controls';
 import { can } from '@/lib/auth/rbac';
+import { trafficHref } from '@/lib/analytics/drill';
 import { requirePermission } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
 import { getKeyMetadata } from '@/lib/db/key-metadata';
@@ -132,6 +133,13 @@ export default async function KeyPage({ params, searchParams }: PageProps<'/keys
             </p>
           )}
           <p className="mt-1 font-mono text-xs break-all text-muted">{hash}</p>
+          {can(user.role, 'gateway:read') && (
+            <p className="mt-1 text-sm">
+              <Link href={trafficHref({ key: hash })} className="text-accent hover:underline">
+                Traffic for this key
+              </Link>
+            </p>
+          )}
         </div>
         {session.ok && canWrite && (
           <div className="flex flex-wrap gap-2">

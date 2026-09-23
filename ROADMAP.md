@@ -93,7 +93,11 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       ingest health panel in each state (no Redis, no worker, no records,
       failing, backlog near cap), and its traffic charts (each range; hover and
       arrow-key readout; tooltip flipping near the right edge; the gaps and
-      dots of sparse traffic; the table view; phone width) in both themes,
+      dots of sparse traffic; the table view; phone width) and its
+      drill-down (the selection chips and their ×; each breakdown tab; the
+      three-line and "Everything else" charts; row links, API/key page links,
+      a viewer without `keys:read` seeing no key tab; the ignored-parameter
+      notes; the "Traffic for this API/key" links) in both themes,
       with rollups seeded by `make ingest` against Docker Redis or by hand
       (M1 and M2
       were only smoke-tested over HTTP; the extension was not connected on
@@ -212,7 +216,7 @@ Hardening follow-ups found while building M2 (do these before M3's write UIs):
       amendment). Without it the health panel cannot tell "no worker runs"
       from "gateway not sending", and a worker that recovered from an error
       stays "failing" until the next record arrives
-- [ ] Drill-down by API, key, status class, method, path
+- [x] Drill-down by API, key, status class, method, path
 - [ ] Path templating for the `path` dimension (`/users/42` → `/users/{id}`, from
       the definition's rules or a heuristic) before rollup, so the per-batch cap
       of 200 paths per API and bucket (`(other)` past it) rarely bites
@@ -1675,3 +1679,28 @@ import.meta.url)`), which Turbopack emits under `.next/static/media/`.
   - Follow-ups (M11): a liveness probe for a standalone ingest Deployment,
     and alerts on ingest health, including a gateway gone quiet.
   - Next: M6 drill-down by API, key, status class, method, path.
+- feat(M6): **drill-down by API, key, status class, method,
+  path** on `/analytics`, from the rollups (ADR-0013 §6 amended in place).
+  - URL: `?api=` narrows to one API; at most one of `?key=` (hash; `key=` is
+    keyless), `?status=` (`5xx` or `503`), `?method=`, `?path=` narrows
+    further; `?by=` picks the breakdown; `?range=` as before. A second focus,
+    a bad value or an unanswerable `by` is ignored with a note on the page.
+  - Breakdowns follow what rows can answer (`allowedBreakdowns`): every
+    dimension with no focus, by API under a focus, by code inside a status
+    class. Nothing under API + focus: the page says why.
+  - DB: `queryTrafficBuckets` takes a `RollupSelection` (`dimension`, `value`,
+    `statusClass`); new `queryBreakdown` (top N groups by value, API or status
+    class) and `queryBreakdownBuckets` (per-bucket lines for chosen groups).
+  - Pure: `src/lib/analytics/drill.ts` (`parseDrill`, `drillHref`,
+    `rangeHrefs`, `trafficHref`, `breakdownPlan`, `breakdownSeries`,
+    `describeValue`). Chart: top 3 when they are all traffic, else top 2 +
+    "Everything else". Table: 10 busiest + "Everything else".
+  - RBAC: key focus and `by=key` need `keys:read`; API/key page links need
+    `apis:read`/`keys:read`. Keys show dashboard label, else alias, else short
+    hash, as `/keys` does. API and key view pages link to their traffic.
+  - Surprise: none upstream. The key alias in a breakdown is the greatest one
+    seen in the window, not the newest. API rows show ids, not names (that
+    would need a gateway call per render). No visual pass (extension not
+    connected); the visual-pass box now lists drill-down.
+  - Next: M6 path templating. Later M6 tasks reuse `drillHref`/`DrillState`
+    for saved views and CSV export, and `RollupSelection` for a custom range.

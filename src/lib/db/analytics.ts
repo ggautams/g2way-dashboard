@@ -1,11 +1,12 @@
 import 'server-only';
 
-import { and, asc, eq, gte, lt, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, like, lt, sql, type SQL } from 'drizzle-orm';
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
+import type { BreakdownGroup, StatusClass } from '@/lib/analytics/drill';
 import { ROLLUP_COUNTERS, type RollupDelta } from '@/lib/analytics/rollup';
 import { TRAFFIC_COUNTERS, type TrafficBucket } from '@/lib/analytics/traffic';
-import type { RollupBucketSeconds } from './schema/shared';
+import type { RollupBucketSeconds, RollupDimension } from './schema/shared';
 import type * as sqliteSchema from './schema/sqlite';
 import type { DataHandle } from './users';
 
@@ -291,8 +292,15 @@ export async function pruneRollups(
   }
 }
 
-/** Which rollups `queryTrafficBuckets` sums. */
-export type TrafficQuery = {
+/**
+ * Which rollup rows a traffic query sums (ADR-0012 §5). Rows of one
+ * `dimension` only: every dimension's rows sum to the same totals, so the
+ * default, the `api` rows (value `''`), is the plain total. A drill-down
+ * narrows to one value of a dimension, or, for `status`, to one class.
+ * Combinations of two dimensions other than the API (key × path) are not
+ * stored, so a selection names at most one.
+ */
+export type RollupSelection = {
   environment: string;
   bucketSeconds: RollupBucketSeconds;
   /** Inclusive lower bound on `bucket_start` (Unix ms). */
@@ -301,51 +309,85 @@ export type TrafficQuery = {
   to: number;
   /** One API's traffic; every API's when omitted. */
   apiId?: string;
+  /** The rows read; `api` when omitted. */
+  dimension?: RollupDimension;
+  /** Only rows with this exact value (`''` is the keyless `key` row). */
+  value?: string;
+  /** `status` rows of one class only: 5 reads every `5xx` code. */
+  statusClass?: StatusClass;
 };
 
+type Rollups = RollupTable | PgRollupTable;
+
+function aggregates(t: Rollups) {
+  const columns = t as unknown as Record<string, Column>;
+  const sums = Object.fromEntries(
+    TRAFFIC_COUNTERS.map((name) => [
+      name,
+      // Postgres sums bigint to numeric, which its driver returns as a string.
+      sql<number>`coalesce(sum(${columns[name]}), 0)`.mapWith(Number),
+    ]),
+  ) as Record<(typeof TRAFFIC_COUNTERS)[number], SQL<number>>;
+  return {
+    latencyMaxMs: sql<number>`coalesce(max(${t.latencyMaxMs}), 0)`.mapWith(Number),
+    ...sums,
+  };
+}
+
+function selectionWhere(t: Rollups, orgId: string, query: RollupSelection): SQL | undefined {
+  const dimension = query.dimension ?? 'api';
+  if (query.statusClass !== undefined && dimension !== 'status') {
+    throw new Error('statusClass selects status rows only');
+  }
+  return and(
+    eq(t.orgId, orgId),
+    eq(t.environment, query.environment),
+    eq(t.bucketSeconds, query.bucketSeconds),
+    eq(t.dimension, dimension),
+    dimension === 'api' ? eq(t.value, '') : undefined,
+    query.value === undefined ? undefined : eq(t.value, query.value),
+    query.statusClass === undefined ? undefined : like(t.value, `${query.statusClass}%`),
+    gte(t.bucketStart, new Date(query.from)),
+    lt(t.bucketStart, new Date(query.to)),
+    query.apiId === undefined ? undefined : eq(t.apiId, query.apiId),
+  );
+}
+
+/** The grouping expression. Literal text only, so Postgres sees one expression in SELECT and GROUP BY. */
+function groupExpression(t: Rollups, group: BreakdownGroup): SQL<string> {
+  switch (group) {
+    case 'value':
+      return sql<string>`${t.value}`;
+    case 'api':
+      return sql<string>`${t.apiId}`;
+    case 'class':
+      return sql<string>`substr(${t.value}, 1, 1)`;
+  }
+}
+
+type BucketRow = { bucketStart: Date } & Omit<TrafficBucket, 'start'>;
+
+function toBucket({ bucketStart, ...counters }: BucketRow): TrafficBucket {
+  return { ...counters, start: bucketStart.getTime() };
+}
+
 /**
- * Per-bucket traffic totals from the `api` dimension rows (value `''`, each
- * API's total), summed across APIs unless `apiId` narrows it, oldest first.
- * Buckets without traffic have no row and are absent: `resample` gap-fills.
+ * Per-bucket traffic totals of the selected rows, summed across APIs unless
+ * `apiId` narrows it, oldest first. Buckets without traffic have no row and
+ * are absent: `resample` gap-fills.
  */
 export async function queryTrafficBuckets(
   handle: DataHandle,
   orgId: string,
-  query: TrafficQuery,
+  query: RollupSelection,
 ): Promise<TrafficBucket[]> {
-  const aggregates = (t: RollupTable | PgRollupTable) => {
-    const columns = t as unknown as Record<string, Column>;
-    const sums = Object.fromEntries(
-      TRAFFIC_COUNTERS.map((name) => [
-        name,
-        // Postgres sums bigint to numeric, which its driver returns as a string.
-        sql<number>`coalesce(sum(${columns[name]}), 0)`.mapWith(Number),
-      ]),
-    ) as Record<(typeof TRAFFIC_COUNTERS)[number], SQL<number>>;
-    return {
-      latencyMaxMs: sql<number>`coalesce(max(${t.latencyMaxMs}), 0)`.mapWith(Number),
-      ...sums,
-    };
-  };
-  const where = (t: RollupTable | PgRollupTable) =>
-    and(
-      eq(t.orgId, orgId),
-      eq(t.environment, query.environment),
-      eq(t.bucketSeconds, query.bucketSeconds),
-      eq(t.dimension, 'api'),
-      eq(t.value, ''),
-      gte(t.bucketStart, new Date(query.from)),
-      lt(t.bucketStart, new Date(query.to)),
-      query.apiId === undefined ? undefined : eq(t.apiId, query.apiId),
-    );
-
-  let rows: ({ bucketStart: Date } & Omit<TrafficBucket, 'start'>)[];
+  let rows: BucketRow[];
   if (handle.dialect === 'sqlite') {
     const t = handle.schema.analyticsRollups;
     rows = handle.db
       .select({ bucketStart: t.bucketStart, ...aggregates(t) })
       .from(t)
-      .where(where(t))
+      .where(selectionWhere(t, orgId, query))
       .groupBy(t.bucketStart)
       .orderBy(asc(t.bucketStart))
       .all();
@@ -354,12 +396,108 @@ export async function queryTrafficBuckets(
     rows = await handle.db
       .select({ bucketStart: t.bucketStart, ...aggregates(t) })
       .from(t)
-      .where(where(t))
+      .where(selectionWhere(t, orgId, query))
       .groupBy(t.bucketStart)
       .orderBy(asc(t.bucketStart));
   }
-  return rows.map(({ bucketStart, ...counters }) => ({
-    ...counters,
-    start: bucketStart.getTime(),
-  }));
+  return rows.map(toBucket);
+}
+
+/** One group of a breakdown: its totals over the whole window. */
+export type BreakdownRow = Omit<TrafficBucket, 'start'> & {
+  /** The group: a value, an API id, or a status class digit (`'5'`). */
+  group: string;
+  /**
+   * The `key` rows' alias (`key_alias`), when any bucket recorded one. With
+   * several aliases over the window, one of them (the greatest), not
+   * necessarily the latest.
+   */
+  label: string | null;
+};
+
+export type BreakdownQuery = RollupSelection & {
+  group: BreakdownGroup;
+  /** The busiest groups returned, by requests. */
+  limit: number;
+};
+
+/**
+ * The busiest groups of the selected rows over the window, most requests
+ * first (ties by group, so the order is stable). The groups not returned are
+ * the total (`queryTrafficBuckets` over the same selection) minus these.
+ */
+export async function queryBreakdown(
+  handle: DataHandle,
+  orgId: string,
+  query: BreakdownQuery,
+): Promise<BreakdownRow[]> {
+  type Row = Omit<BreakdownRow, 'label'> & { label: string | null };
+  let rows: Row[];
+  if (handle.dialect === 'sqlite') {
+    const t = handle.schema.analyticsRollups;
+    const group = groupExpression(t, query.group);
+    const requests = sql<number>`sum(${t.requests})`;
+    rows = handle.db
+      .select({ group, label: sql<string | null>`max(${t.label})`, ...aggregates(t) })
+      .from(t)
+      .where(selectionWhere(t, orgId, query))
+      .groupBy(group)
+      .orderBy(desc(requests), asc(group))
+      .limit(query.limit)
+      .all();
+  } else {
+    const t = handle.schema.analyticsRollups;
+    const group = groupExpression(t, query.group);
+    const requests = sql<number>`sum(${t.requests})`;
+    rows = await handle.db
+      .select({ group, label: sql<string | null>`max(${t.label})`, ...aggregates(t) })
+      .from(t)
+      .where(selectionWhere(t, orgId, query))
+      .groupBy(group)
+      .orderBy(desc(requests), asc(group))
+      .limit(query.limit);
+  }
+  return rows.map((row) => ({ ...row, group: String(row.group) }));
+}
+
+/**
+ * Per-bucket totals of the selected rows for each of `groups`, oldest first:
+ * the lines of a breakdown chart. Groups without traffic are absent.
+ */
+export async function queryBreakdownBuckets(
+  handle: DataHandle,
+  orgId: string,
+  query: RollupSelection & { group: BreakdownGroup; groups: readonly string[] },
+): Promise<Map<string, TrafficBucket[]>> {
+  const out = new Map<string, TrafficBucket[]>();
+  if (query.groups.length === 0) return out;
+  type Row = BucketRow & { group: string };
+  let rows: Row[];
+  if (handle.dialect === 'sqlite') {
+    const t = handle.schema.analyticsRollups;
+    const group = groupExpression(t, query.group);
+    rows = handle.db
+      .select({ group, bucketStart: t.bucketStart, ...aggregates(t) })
+      .from(t)
+      .where(and(selectionWhere(t, orgId, query), inArray(group, [...query.groups])))
+      .groupBy(group, t.bucketStart)
+      .orderBy(asc(t.bucketStart))
+      .all();
+  } else {
+    const t = handle.schema.analyticsRollups;
+    const group = groupExpression(t, query.group);
+    rows = await handle.db
+      .select({ group, bucketStart: t.bucketStart, ...aggregates(t) })
+      .from(t)
+      .where(and(selectionWhere(t, orgId, query), inArray(group, [...query.groups])))
+      .groupBy(group, t.bucketStart)
+      .orderBy(asc(t.bucketStart));
+  }
+  for (const { group, ...row } of rows) {
+    const key = String(group);
+    const list = out.get(key) ?? [];
+    list.push(toBucket(row));
+    out.set(key, list);
+  }
+  return out;
 }

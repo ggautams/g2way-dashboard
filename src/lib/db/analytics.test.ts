@@ -9,6 +9,8 @@ import { migrateDatabase, migrationsFolder, openDatabase } from '.';
 import {
   getIngestState,
   pruneRollups,
+  queryBreakdown,
+  queryBreakdownBuckets,
   queryTrafficBuckets,
   recordIngestError,
   recordIngestHeartbeat,
@@ -179,6 +181,147 @@ describe.each([
     expect(await queryTrafficBuckets(handle, ORG_B, { ...window, bucketSeconds: 60 })).toHaveLength(
       1,
     );
+  });
+
+  it('drills into one value of one dimension, or one status class', async () => {
+    const handle = await open();
+    const minute = Date.UTC(2026, 8, 23, 10, 15);
+    await writeIngestBatch(
+      handle,
+      ORG_A,
+      batch([
+        record(ORG_A, { key_hash: 'k1', status: 503 }),
+        record(ORG_A, { key_hash: 'k1', status: 500, method: 'POST' }),
+        record(ORG_A, { api_id: 'orders', key_hash: 'k1', status: 200 }),
+        record(ORG_A, { api_id: 'orders', status: 404, path: '/orders' }),
+      ]),
+    );
+    await writeIngestBatch(handle, ORG_B, batch([record(ORG_B, { key_hash: 'k1' })]));
+    const window = {
+      environment: 'prod',
+      bucketSeconds: 60,
+      from: minute,
+      to: minute + 60_000,
+    } as const;
+    const requests = async (query: Partial<Parameters<typeof queryTrafficBuckets>[2]>) =>
+      (await queryTrafficBuckets(handle, ORG_A, { ...window, ...query })).map((b) => b.requests);
+
+    expect(await requests({})).toEqual([4]);
+    expect(await requests({ dimension: 'key', value: 'k1' })).toEqual([3]);
+    expect(await requests({ dimension: 'key', value: 'k1', apiId: 'users' })).toEqual([2]);
+    expect(await requests({ dimension: 'key', value: '' })).toEqual([1]);
+    expect(await requests({ dimension: 'status', statusClass: 5 })).toEqual([2]);
+    expect(await requests({ dimension: 'status', value: '404' })).toEqual([1]);
+    expect(await requests({ dimension: 'method', value: 'POST' })).toEqual([1]);
+    expect(await requests({ dimension: 'path', value: '/orders', apiId: 'orders' })).toEqual([1]);
+    // A whole dimension sums to the total.
+    expect(await requests({ dimension: 'path' })).toEqual([4]);
+    await expect(
+      queryTrafficBuckets(handle, ORG_A, { ...window, dimension: 'key', statusClass: 5 }),
+    ).rejects.toThrow(/status rows only/);
+  });
+
+  it('ranks the busiest groups of a breakdown, and reads their lines', async () => {
+    const handle = await open();
+    const minute = Date.UTC(2026, 8, 23, 10, 15);
+    await writeIngestBatch(
+      handle,
+      ORG_A,
+      batch([
+        record(ORG_A, { key_hash: 'k1', key_alias: 'mobile', status: 503 }),
+        record(ORG_A, { key_hash: 'k1', status: 500, latency_ms: 90 }),
+        record(ORG_A, { key_hash: 'k2', status: 502, timestamp_unix_ms: T0 + 60_000 }),
+        record(ORG_A, { api_id: 'orders', key_hash: 'k1', status: 200 }),
+        record(ORG_A, { api_id: 'orders', status: 404 }),
+      ]),
+    );
+    await writeIngestBatch(handle, ORG_B, batch([record(ORG_B, { key_hash: 'k9' })]));
+    const window = {
+      environment: 'prod',
+      bucketSeconds: 60,
+      from: minute,
+      to: minute + 120_000,
+    } as const;
+
+    const keys = await queryBreakdown(handle, ORG_A, {
+      ...window,
+      dimension: 'key',
+      group: 'value',
+      limit: 10,
+    });
+    expect(keys.map((r) => [r.group, r.label, r.requests])).toEqual([
+      ['k1', 'mobile', 3],
+      ['', null, 1],
+      ['k2', null, 1],
+    ]);
+    expect(keys[0]).toMatchObject({ status5xx: 2, status2xx: 1, latencyMaxMs: 90 });
+    expect(typeof keys[0].requests).toBe('number');
+
+    const limited = await queryBreakdown(handle, ORG_A, {
+      ...window,
+      dimension: 'key',
+      group: 'value',
+      limit: 1,
+    });
+    expect(limited.map((r) => r.group)).toEqual(['k1']);
+
+    const classes = await queryBreakdown(handle, ORG_A, {
+      ...window,
+      dimension: 'status',
+      group: 'class',
+      limit: 10,
+    });
+    expect(classes.map((r) => [r.group, r.requests])).toEqual([
+      ['5', 3],
+      ['2', 1],
+      ['4', 1],
+    ]);
+
+    const codes = await queryBreakdown(handle, ORG_A, {
+      ...window,
+      dimension: 'status',
+      statusClass: 5,
+      group: 'value',
+      limit: 10,
+    });
+    expect(codes.map((r) => [r.group, r.requests])).toEqual([
+      ['500', 1],
+      ['502', 1],
+      ['503', 1],
+    ]);
+
+    // A key's traffic by API: the key rows, grouped by their API.
+    const apis = await queryBreakdown(handle, ORG_A, {
+      ...window,
+      dimension: 'key',
+      value: 'k1',
+      group: 'api',
+      limit: 10,
+    });
+    expect(apis.map((r) => [r.group, r.requests])).toEqual([
+      ['users', 2],
+      ['orders', 1],
+    ]);
+
+    const lines = await queryBreakdownBuckets(handle, ORG_A, {
+      ...window,
+      dimension: 'status',
+      group: 'class',
+      groups: ['5', '4'],
+    });
+    expect([...lines.keys()].sort()).toEqual(['4', '5']);
+    expect(lines.get('5')?.map((b) => [b.start, b.requests])).toEqual([
+      [minute, 2],
+      [minute + 60_000, 1],
+    ]);
+    expect(
+      await queryBreakdownBuckets(handle, ORG_A, {
+        ...window,
+        dimension: 'api',
+        group: 'api',
+        groups: [],
+      }),
+    ).toEqual(new Map());
   });
 
   it('keeps environments and orgs apart', async () => {

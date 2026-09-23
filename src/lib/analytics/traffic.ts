@@ -220,7 +220,7 @@ function derive(bucket: TrafficBucket, seconds: number): Omit<TrafficPoint, 'sta
 }
 
 /** Seconds of `[start, start + stepMs)` before `now`, at least 1 (so RPS stays finite). */
-function elapsedSeconds(start: number, stepMs: number, now: number): number {
+export function elapsedSeconds(start: number, stepMs: number, now: number): number {
   return Math.max(1, Math.min(stepMs, now - start) / 1000);
 }
 
@@ -246,10 +246,15 @@ export function trafficSeries(
   }));
   const total = emptyBucket(window.from);
   for (const step of steps) addBucket(total, step);
-  const summary: TrafficSummary = {
-    ...derive(total, elapsedSeconds(window.from, window.to - window.from, now)),
+  const summary = summarise(total, elapsedSeconds(window.from, window.to - window.from, now));
+  return { range, from: window.from, to: window.to, points, summary };
+}
+
+/** Totals over `seconds` as the headline figures: rates, estimated percentiles, mean and max. */
+export function summarise(total: TrafficBucket, seconds: number): TrafficSummary {
+  return {
+    ...derive(total, seconds),
     latencyAvgMs: total.requests === 0 ? null : total.latencySumMs / total.requests,
     latencyMaxMs: total.requests === 0 ? null : total.latencyMaxMs,
   };
-  return { range, from: window.from, to: window.to, points, summary };
 }

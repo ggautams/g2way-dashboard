@@ -5,6 +5,7 @@ import { ApiDesigner } from '@/components/apis/api-designer';
 import { slotExplanations } from '@/components/apis/slot-explain';
 import { apiHelp } from '@/lib/apis/field-help';
 import { apiDefinitionSchema } from '@/lib/apis/schema';
+import { trafficHref } from '@/lib/analytics/drill';
 import { can } from '@/lib/auth/rbac';
 import { requirePermission } from '@/lib/auth/session';
 import { getDatabase } from '@/lib/db';
@@ -77,6 +78,13 @@ export default async function ApiPage({ params, searchParams }: PageProps<'/apis
             / <span className="font-mono">{id}</span>
           </p>
           <h1 className="text-2xl font-semibold tracking-tight">{api.ok ? api.value.name : id}</h1>
+          {can(user.role, 'gateway:read') && (
+            <p className="mt-1 text-sm">
+              <Link href={trafficHref({ api: id })} className="text-accent hover:underline">
+                Traffic for this API
+              </Link>
+            </p>
+          )}
         </div>
         {api.ok && canWrite && (
           <DeleteButton kind="api" id={id} name={api.value.name} environment={environment} />

@@ -1,15 +1,29 @@
 import Link from 'next/link';
 import { formatTimestamp, formatValue, type ChartUnit } from '@/lib/analytics/chart';
-import { TRAFFIC_RANGES, TRAFFIC_RANGE_IDS, type Traffic } from '@/lib/analytics/traffic';
+import {
+  TRAFFIC_RANGES,
+  TRAFFIC_RANGE_IDS,
+  type Traffic,
+  type TrafficRangeId,
+} from '@/lib/analytics/traffic';
 import { TimeSeriesChart } from './time-series-chart';
 
 /**
  * The traffic section of `/analytics`: a range picker, headline tiles, the
  * RPS, error-rate and latency charts, and a table view of every point. A
  * Server Component; only `TimeSeriesChart` runs in the browser, and it gets
- * plain numbers.
+ * plain numbers. `rangeHrefs` keeps the drill-down when the range changes;
+ * `scoped` says the traffic is narrowed by one.
  */
-export function TrafficPanel({ traffic }: { traffic: Traffic }) {
+export function TrafficPanel({
+  traffic,
+  rangeHrefs,
+  scoped = false,
+}: {
+  traffic: Traffic;
+  rangeHrefs: Record<TrafficRangeId, string>;
+  scoped?: boolean;
+}) {
   const { range, points, summary, from, to } = traffic;
   const starts = points.map((p) => p.start);
   const stepMs = range.stepSeconds * 1000;
@@ -23,7 +37,7 @@ export function TrafficPanel({ traffic }: { traffic: Traffic }) {
         <h2 id="traffic-heading" className="text-lg font-semibold">
           Traffic
         </h2>
-        <RangePicker current={range.id} />
+        <RangePicker current={range.id} hrefs={rangeHrefs} />
       </div>
 
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
@@ -77,15 +91,22 @@ export function TrafficPanel({ traffic }: { traffic: Traffic }) {
         </>
       ) : (
         <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-          No requests recorded in the {range.label.toLowerCase()}. The ingest panel above says
-          whether records are arriving.
+          No requests recorded in the {range.label.toLowerCase()}
+          {scoped ? ' for this selection' : ''}. The ingest panel above says whether records are
+          arriving.
         </p>
       )}
     </section>
   );
 }
 
-function RangePicker({ current }: { current: string }) {
+function RangePicker({
+  current,
+  hrefs,
+}: {
+  current: string;
+  hrefs: Record<TrafficRangeId, string>;
+}) {
   return (
     <nav aria-label="Time range">
       <ul className="flex flex-wrap gap-1 rounded-md border border-border bg-surface p-0.5 text-sm">
@@ -94,7 +115,7 @@ function RangePicker({ current }: { current: string }) {
           return (
             <li key={id}>
               <Link
-                href={`/analytics?range=${id}`}
+                href={hrefs[id]}
                 aria-current={selected ? 'page' : undefined}
                 title={TRAFFIC_RANGES[id].label}
                 className={
@@ -184,7 +205,7 @@ function TrafficTable({ traffic }: { traffic: Traffic }) {
   );
 }
 
-function formatStep(seconds: number): string {
+export function formatStep(seconds: number): string {
   if (seconds % 3600 === 0) return seconds === 3600 ? 'hour' : `${seconds / 3600} hours`;
   return seconds === 60 ? 'minute' : `${seconds / 60} minutes`;
 }
